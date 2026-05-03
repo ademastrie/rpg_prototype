@@ -23,7 +23,6 @@ func _start_server() -> void:
 		return
 
 	multiplayer.multiplayer_peer = peer
-	world_spawner.register_server_player()
 	print("ENet server started on port %s." % server_port)
 
 

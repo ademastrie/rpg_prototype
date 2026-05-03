@@ -1,15 +1,9 @@
 extends Node2D
 
-const SERVER_PEER_ID := 1
-
 @export var player_placeholder_scene: PackedScene
 
 var players: Dictionary = {}
 var _spawned_nodes: Dictionary = {}
-
-
-func register_server_player() -> void:
-	_register_player(SERVER_PEER_ID)
 
 
 func register_peer(peer_id: int) -> void:
