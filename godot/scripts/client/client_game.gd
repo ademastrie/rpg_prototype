@@ -15,6 +15,7 @@ extends Node3D
 var selected_character: Dictionary = {}
 var _local_player: Node3D = null
 var _camera_follow_offset: Vector3 = Vector3.ZERO
+var _fixed_camera_basis: Basis = Basis.IDENTITY
 var _last_sent_input := Vector2.ZERO
 var _last_sent_aim := Vector2.ZERO
 var _input_heartbeat_timer := 0.0
@@ -28,7 +29,8 @@ var _has_sent_join_request := false
 func _ready() -> void:
 	world_spawner.spawned_player_count_changed.connect(_on_spawned_player_count_changed)
 	world_spawner.player_spawned.connect(_on_player_spawned)
-	_camera_follow_offset = active_camera.global_position - Vector3.ZERO
+	_camera_follow_offset = active_camera.global_position
+	_fixed_camera_basis = active_camera.global_transform.basis
 	_on_spawned_player_count_changed(0)
 	set_selected_character(ClientSession.selected_character)
 	_connect_to_server()
@@ -55,6 +57,7 @@ func _process(delta: float) -> void:
 	_input_heartbeat_timer += delta
 	_aim_heartbeat_timer += delta
 	var input_direction := _read_movement_input()
+	world_spawner.set_local_prediction_input(input_direction)
 	if not _has_sent_input or input_direction != _last_sent_input or _input_heartbeat_timer >= input_heartbeat_interval:
 		_send_movement_input(input_direction)
 
@@ -88,12 +91,14 @@ func _on_connected_to_server() -> void:
 
 func _on_connection_failed() -> void:
 	_is_connected_to_server = false
+	world_spawner.set_local_prediction_input(Vector2.ZERO)
 	print("Failed to connect to game server.")
 
 
 func _on_server_disconnected() -> void:
 	_is_connected_to_server = false
 	_has_sent_join_request = false
+	world_spawner.set_local_prediction_input(Vector2.ZERO)
 	print("Disconnected from game server.")
 
 
@@ -107,7 +112,7 @@ func _on_player_spawned(peer_id: int, player: Node3D) -> void:
 		return
 
 	_local_player = player
-	_camera_follow_offset = active_camera.global_position - _local_player.global_position
+	_snap_camera_to_local_player()
 	print("Camera following local player peer %s." % peer_id)
 
 
@@ -201,8 +206,22 @@ func _update_camera_follow(delta: float) -> void:
 
 	var target_position: Vector3 = _local_player.global_position + _camera_follow_offset
 	var weight: float = clamp(camera_follow_speed * delta, 0.0, 1.0)
-	active_camera.global_position = active_camera.global_position.lerp(target_position, weight)
-	active_camera.look_at(_local_player.global_position, Vector3.UP)
+	var camera_transform: Transform3D = active_camera.global_transform
+	camera_transform.origin = active_camera.global_position.lerp(target_position, weight)
+	# Keep the isometric rotation fixed; camera follow only smooths position.
+	camera_transform.basis = _fixed_camera_basis
+	active_camera.global_transform = camera_transform
+
+
+func _snap_camera_to_local_player() -> void:
+	if _local_player == null:
+		return
+
+	var camera_transform: Transform3D = active_camera.global_transform
+	# Camera follows the local visual player only; rotation stays locked for the isometric view.
+	camera_transform.origin = _local_player.global_position + _camera_follow_offset
+	camera_transform.basis = _fixed_camera_basis
+	active_camera.global_transform = camera_transform
 
 
 func _send_join_request() -> void:

@@ -9,6 +9,10 @@ signal join_requested(peer_id: int, character_id: int, character_name: String, a
 @export var simulation_tick_rate: float = 30.0
 @export var snapshot_rate: float = 10.0
 @export var interpolation_speed: float = 12.0
+@export var local_prediction_enabled: bool = true
+@export var local_prediction_correction_deadzone: float = 0.2
+@export var local_prediction_snap_distance: float = 3.0
+@export var local_prediction_correction_speed: float = 4.0
 
 var players: Dictionary = {}
 var _spawned_nodes: Dictionary = {}
@@ -16,6 +20,7 @@ var _target_positions: Dictionary = {}
 var _target_facing_directions: Dictionary = {}
 var _last_input_by_peer: Dictionary = {}
 var _aim_direction_by_peer: Dictionary = {}
+var _local_prediction_input: Vector2 = Vector2.ZERO
 var _simulation_accumulator := 0.0
 var _snapshot_accumulator := 0.0
 var _next_spawn_index := 0
@@ -36,6 +41,13 @@ const SPAWN_POSITIONS: Array[Vector3] = [
 
 func send_join_request(character_id: int, character_name: String, access_token: String) -> void:
 	rpc_id(1, "request_join", character_id, character_name, access_token)
+
+
+func set_local_prediction_input(input_direction: Vector2) -> void:
+	if input_direction.length_squared() > 1.0:
+		input_direction = input_direction.normalized()
+
+	_local_prediction_input = input_direction
 
 
 func register_peer(peer_id: int, character_name: String = "") -> void:
@@ -137,16 +149,37 @@ func _broadcast_position_snapshots() -> void:
 func _smooth_spawned_players(delta: float) -> void:
 	var weight: float = clamp(interpolation_speed * delta, 0.0, 1.0)
 	for peer_id in _spawned_nodes:
-		if not _target_positions.has(peer_id):
-			continue
-
+		var peer_id_int: int = int(peer_id)
 		var player: Node3D = _spawned_nodes[peer_id] as Node3D
-		var target_position: Vector3 = _target_positions[peer_id] as Vector3
-		# Visual smoothing happens here; authoritative state remains on the server.
-		player.position = player.position.lerp(target_position, weight)
+		if _is_local_player_peer(peer_id_int):
+			# Local player uses visual prediction plus reconciliation.
+			_predict_and_reconcile_local_player(player, peer_id_int, delta)
+		elif _target_positions.has(peer_id):
+			var target_position: Vector3 = _target_positions[peer_id] as Vector3
+			# Remote players use interpolation only; server snapshots remain authoritative.
+			player.position = player.position.lerp(target_position, weight)
+
 		if _target_facing_directions.has(peer_id):
 			var facing_direction: Vector2 = _target_facing_directions[peer_id] as Vector2
 			_apply_player_facing(player, facing_direction)
+
+
+func _predict_and_reconcile_local_player(player: Node3D, peer_id: int, delta: float) -> void:
+	if local_prediction_enabled:
+		# Local prediction is visual only. The server still owns authoritative movement.
+		player.position.x += _local_prediction_input.x * movement_speed * delta
+		player.position.z += _local_prediction_input.y * movement_speed * delta
+
+	if not _target_positions.has(peer_id):
+		return
+
+	var authoritative_position: Vector3 = _target_positions[peer_id] as Vector3
+	var error_distance: float = player.position.distance_to(authoritative_position)
+	if error_distance > local_prediction_snap_distance:
+		player.position = authoritative_position
+	elif error_distance > local_prediction_correction_deadzone:
+		var correction_weight: float = clamp(local_prediction_correction_speed * delta, 0.0, 1.0)
+		player.position = player.position.lerp(authoritative_position, correction_weight)
 
 
 func _spawn_position_for_index(spawn_index: int) -> Vector3:
@@ -280,3 +313,7 @@ func _apply_player_facing(player: Node3D, facing_direction: Vector2) -> void:
 
 	var normalized_facing: Vector2 = facing_direction.normalized()
 	player.rotation.y = atan2(-normalized_facing.x, -normalized_facing.y)
+
+
+func _is_local_player_peer(peer_id: int) -> bool:
+	return not multiplayer.is_server() and peer_id == multiplayer.get_unique_id()
