@@ -1,0 +1,39 @@
+# Normalize text files and prefer LF line endings for source files.
+* text=auto
+
+# Godot source/assets
+*.gd text eol=lf
+*.tscn text eol=lf
+*.tres text eol=lf
+*.godot text eol=lf
+*.import text eol=lf
+*.svg text eol=lf
+
+# Python/backend
+*.py text eol=lf
+*.toml text eol=lf
+*.ini text eol=lf
+*.env.example text eol=lf
+
+# Documentation/config
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.gitignore text eol=lf
+
+# Windows scripts can stay CRLF if we add any later.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.pck binary
+*.zip binary
