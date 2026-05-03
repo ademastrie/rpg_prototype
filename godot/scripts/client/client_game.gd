@@ -9,6 +9,7 @@ extends Node3D
 
 @onready var status_label: Label = $StatusLabel
 @onready var spawn_count_label: Label = $SpawnCountLabel
+@onready var health_label: Label = $HealthLabel
 @onready var world_spawner: Node3D = $WorldSpawner
 @onready var active_camera: Camera3D = $Camera3D
 
@@ -30,9 +31,11 @@ var _was_attack_pressed := false
 func _ready() -> void:
 	world_spawner.spawned_player_count_changed.connect(_on_spawned_player_count_changed)
 	world_spawner.player_spawned.connect(_on_player_spawned)
+	world_spawner.player_health_updated.connect(_on_player_health_updated)
 	_camera_follow_offset = active_camera.global_position
 	_fixed_camera_basis = active_camera.global_transform.basis
 	_on_spawned_player_count_changed(0)
+	_on_player_health_updated(multiplayer.get_unique_id(), 100, 100)
 	set_selected_character(ClientSession.selected_character)
 	_connect_to_server()
 
@@ -118,6 +121,15 @@ func _on_player_spawned(peer_id: int, player: Node3D) -> void:
 	_local_player = player
 	_snap_camera_to_local_player()
 	print("Camera following local player peer %s." % peer_id)
+
+
+func _on_player_health_updated(peer_id: int, current_hp: int, max_hp: int) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+
+	health_label.text = "HP: %s/%s" % [current_hp, max_hp]
+	if current_hp <= 0:
+		print("Local player is down.")
 
 
 func _read_movement_input() -> Vector2:

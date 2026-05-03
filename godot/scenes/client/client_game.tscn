@@ -63,6 +63,13 @@ offset_right = 260.0
 offset_bottom = 68.0
 text = "Network Players: 0"
 
+[node name="HealthLabel" type="Label" parent="."]
+offset_left = 16.0
+offset_top = 72.0
+offset_right = 180.0
+offset_bottom = 96.0
+text = "HP: 100/100"
+
 [node name="WorldSpawner" type="Node3D" parent="."]
 script = ExtResource("3_world_spawner")
 player_placeholder_scene = ExtResource("2_player_placeholder_3d")

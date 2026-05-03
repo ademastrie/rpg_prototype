@@ -51,6 +51,10 @@ func sync_peer(peer_id: int) -> void:
 		rpc_id(peer_id, "spawn_enemy", enemy_id_int, spawn_position, current_hp, max_hp)
 
 
+func get_active_enemy_positions() -> Dictionary:
+	return enemies.duplicate()
+
+
 func _process(delta: float) -> void:
 	if not multiplayer.is_server():
 		_smooth_spawned_enemies(delta)
