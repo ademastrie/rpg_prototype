@@ -10,13 +10,16 @@ class_name EnemySpawner
 @export var basic_attack_damage: int = 10
 @export var basic_attack_range: float = 4.0
 @export var basic_attack_cone_dot: float = 0.65
+@export var respawn_delay_seconds: float = 5.0
 
 var enemies: Dictionary = {}
 var _spawned_enemy_nodes: Dictionary = {}
 var _enemy_origin_positions: Dictionary = {}
+var _enemy_spawn_points: Dictionary = {}
 var _target_positions: Dictionary = {}
 var _enemy_max_hp_by_id: Dictionary = {}
 var _enemy_current_hp_by_id: Dictionary = {}
+var _dead_enemy_ids: Dictionary = {}
 var _next_enemy_id: int = 1
 var _idle_time: float = 0.0
 var _snapshot_accumulator: float = 0.0
@@ -72,6 +75,7 @@ func _spawn_enemy(spawn_position: Vector3) -> void:
 	_next_enemy_id += 1
 	enemies[enemy_id] = spawn_position
 	_enemy_origin_positions[enemy_id] = spawn_position
+	_enemy_spawn_points[enemy_id] = spawn_position
 	_enemy_max_hp_by_id[enemy_id] = enemy_max_hp
 	_enemy_current_hp_by_id[enemy_id] = enemy_max_hp
 	rpc("spawn_enemy", enemy_id, spawn_position, enemy_max_hp, enemy_max_hp)
@@ -117,9 +121,41 @@ func _despawn_enemy(enemy_id: int) -> void:
 	enemies.erase(enemy_id)
 	_enemy_origin_positions.erase(enemy_id)
 	_target_positions.erase(enemy_id)
-	_enemy_current_hp_by_id.erase(enemy_id)
-	_enemy_max_hp_by_id.erase(enemy_id)
+	_dead_enemy_ids[enemy_id] = true
 	rpc("despawn_enemy", enemy_id)
+	_schedule_enemy_respawn(enemy_id)
+
+
+func _schedule_enemy_respawn(enemy_id: int) -> void:
+	if not multiplayer.is_server() or not _enemy_spawn_points.has(enemy_id):
+		return
+
+	var respawn_timer: Timer = Timer.new()
+	respawn_timer.one_shot = true
+	respawn_timer.wait_time = respawn_delay_seconds
+	add_child(respawn_timer)
+	respawn_timer.timeout.connect(_on_enemy_respawn_timer_timeout.bind(enemy_id, respawn_timer))
+	respawn_timer.start()
+
+
+func _on_enemy_respawn_timer_timeout(enemy_id: int, respawn_timer: Timer) -> void:
+	respawn_timer.queue_free()
+	if not multiplayer.is_server() or not _dead_enemy_ids.has(enemy_id):
+		return
+
+	var spawn_position: Vector3 = _enemy_spawn_points[enemy_id] as Vector3
+	_respawn_enemy(enemy_id, spawn_position)
+
+
+func _respawn_enemy(enemy_id: int, spawn_position: Vector3) -> void:
+	# Respawns keep stable enemy ids; the server owns timing and state.
+	enemies[enemy_id] = spawn_position
+	_enemy_origin_positions[enemy_id] = spawn_position
+	_enemy_max_hp_by_id[enemy_id] = enemy_max_hp
+	_enemy_current_hp_by_id[enemy_id] = enemy_max_hp
+	_dead_enemy_ids.erase(enemy_id)
+	rpc("spawn_enemy", enemy_id, spawn_position, enemy_max_hp, enemy_max_hp)
+	print("Respawned enemy %s at %s." % [enemy_id, spawn_position])
 
 
 func _update_enemy_idle_positions() -> void:
