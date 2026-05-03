@@ -27,7 +27,7 @@ Check the PostgreSQL connection:
 python .\scripts\check_db.py
 ```
 
-Run database migrations:
+Create, apply, and inspect database migrations:
 
 ```powershell
 alembic revision --autogenerate -m "message"
