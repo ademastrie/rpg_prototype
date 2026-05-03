@@ -70,6 +70,13 @@ offset_right = 180.0
 offset_bottom = 96.0
 text = "HP: 100/100"
 
+[node name="CombatLabel" type="Label" parent="."]
+offset_left = 16.0
+offset_top = 100.0
+offset_right = 360.0
+offset_bottom = 124.0
+text = "Combat: OFF | Loadout: Slash, HP Regen"
+
 [node name="WorldSpawner" type="Node3D" parent="."]
 script = ExtResource("3_world_spawner")
 player_placeholder_scene = ExtResource("2_player_placeholder_3d")

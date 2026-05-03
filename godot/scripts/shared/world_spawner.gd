@@ -4,6 +4,7 @@ signal spawned_player_count_changed(count: int)
 signal player_spawned(peer_id: int, player: Node3D)
 signal player_health_updated(peer_id: int, current_hp: int, max_hp: int)
 signal player_down_state_updated(peer_id: int, is_down: bool)
+signal combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_text: String)
 signal join_requested(peer_id: int, character_id: int, character_name: String, access_token: String)
 
 @export var player_placeholder_scene: PackedScene
@@ -34,6 +35,9 @@ var _player_current_hp_by_peer: Dictionary = {}
 var _player_is_down_by_peer: Dictionary = {}
 var _player_respawn_positions: Dictionary = {}
 var _last_contact_damage_time_by_peer: Dictionary = {}
+var _combat_enabled_by_peer: Dictionary = {}
+var _loadout_by_peer: Dictionary = {}
+var _last_ability_time_by_peer: Dictionary = {}
 var _local_prediction_input: Vector2 = Vector2.ZERO
 var _simulation_accumulator := 0.0
 var _snapshot_accumulator := 0.0
@@ -51,6 +55,17 @@ const SPAWN_POSITIONS: Array[Vector3] = [
 	Vector3(3, 0, -3),
 	Vector3(-3, 0, -3),
 ]
+
+const DEFAULT_LOADOUT: Array[String] = ["Slash", "HP Regen"]
+const ABILITY_DEFINITIONS: Dictionary = {
+	"Slash": {
+		"cooldown": 1.25,
+	},
+	"HP Regen": {
+		"cooldown": 2.0,
+		"heal": 8,
+	},
+}
 
 
 func send_join_request(character_id: int, character_name: String, access_token: String) -> void:
@@ -98,6 +113,9 @@ func unregister_peer(peer_id: int) -> void:
 	_player_is_down_by_peer.erase(peer_id)
 	_player_respawn_positions.erase(peer_id)
 	_last_contact_damage_time_by_peer.erase(peer_id)
+	_combat_enabled_by_peer.erase(peer_id)
+	_loadout_by_peer.erase(peer_id)
+	_last_ability_time_by_peer.erase(peer_id)
 	_character_names_by_peer.erase(peer_id)
 	rpc("despawn_player", peer_id)
 
@@ -128,8 +146,12 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_player_current_hp_by_peer[peer_id] = player_max_hp
 	_player_is_down_by_peer[peer_id] = false
 	_player_respawn_positions[peer_id] = players[peer_id]
+	_combat_enabled_by_peer[peer_id] = false
+	_loadout_by_peer[peer_id] = DEFAULT_LOADOUT.duplicate()
+	_last_ability_time_by_peer[peer_id] = {}
 	rpc("apply_player_health_update", peer_id, player_max_hp, player_max_hp)
 	rpc("apply_player_down_state", peer_id, false)
+	rpc("apply_combat_mode_update", peer_id, false, _loadout_text(peer_id))
 	_next_spawn_index += 1
 
 
@@ -145,6 +167,7 @@ func _process(delta: float) -> void:
 	while _simulation_accumulator >= tick_delta:
 		_simulate(tick_delta)
 		_apply_enemy_contact_damage(tick_delta)
+		_process_combat_abilities()
 		_simulation_accumulator -= tick_delta
 
 	var snapshot_delta := 1.0 / snapshot_rate
@@ -246,6 +269,66 @@ func _is_enemy_in_contact_range(player_position: Vector3, enemy_positions: Dicti
 			return true
 
 	return false
+
+
+func _process_combat_abilities() -> void:
+	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
+	for peer_id in players:
+		var peer_id_int: int = int(peer_id)
+		if not bool(_combat_enabled_by_peer.get(peer_id, false)):
+			continue
+		if bool(_player_is_down_by_peer.get(peer_id, false)):
+			continue
+
+		var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
+		if loadout.has("Slash") and _is_ability_ready(peer_id_int, "Slash", now_seconds):
+			_set_ability_used(peer_id_int, "Slash", now_seconds)
+			_perform_slash(peer_id_int)
+		if loadout.has("HP Regen") and _is_ability_ready(peer_id_int, "HP Regen", now_seconds):
+			_set_ability_used(peer_id_int, "HP Regen", now_seconds)
+			_apply_hp_regen(peer_id_int)
+
+
+func _is_ability_ready(peer_id: int, ability_name: String, now_seconds: float) -> bool:
+	var ability_state: Dictionary = _last_ability_time_by_peer.get(peer_id, {}) as Dictionary
+	var last_used: float = float(ability_state.get(ability_name, -_ability_cooldown(ability_name)))
+	return now_seconds - last_used >= _ability_cooldown(ability_name)
+
+
+func _set_ability_used(peer_id: int, ability_name: String, now_seconds: float) -> void:
+	var ability_state: Dictionary = _last_ability_time_by_peer.get(peer_id, {}) as Dictionary
+	ability_state[ability_name] = now_seconds
+	_last_ability_time_by_peer[peer_id] = ability_state
+
+
+func _ability_cooldown(ability_name: String) -> float:
+	var ability_definition: Dictionary = ABILITY_DEFINITIONS.get(ability_name, {}) as Dictionary
+	return float(ability_definition.get("cooldown", 1.0))
+
+
+func _ability_heal_amount(ability_name: String) -> int:
+	var ability_definition: Dictionary = ABILITY_DEFINITIONS.get(ability_name, {}) as Dictionary
+	return int(ability_definition.get("heal", 0))
+
+
+func _apply_hp_regen(peer_id: int) -> void:
+	var current_hp: int = int(_player_current_hp_by_peer.get(peer_id, player_max_hp))
+	var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
+	if current_hp <= 0 or current_hp >= max_hp:
+		return
+
+	current_hp = int(min(current_hp + _ability_heal_amount("HP Regen"), max_hp))
+	_player_current_hp_by_peer[peer_id] = current_hp
+	rpc("apply_player_health_update", peer_id, current_hp, max_hp)
+
+
+func _loadout_text(peer_id: int) -> String:
+	var loadout: Array = _loadout_by_peer.get(peer_id, DEFAULT_LOADOUT) as Array
+	var names: PackedStringArray = PackedStringArray()
+	for ability_name in loadout:
+		names.append(str(ability_name))
+
+	return ", ".join(names)
 
 
 func _broadcast_position_snapshots() -> void:
@@ -362,6 +445,11 @@ func apply_player_down_state(peer_id: int, is_down: bool) -> void:
 	player_down_state_updated.emit(peer_id, is_down)
 
 
+@rpc("authority", "call_remote", "reliable")
+func apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_text: String) -> void:
+	combat_mode_updated.emit(peer_id, combat_enabled, loadout_text)
+
+
 @rpc("any_peer", "call_remote", "reliable")
 func request_join(character_id: int, character_name: String, access_token: String) -> void:
 	if not multiplayer.is_server():
@@ -407,6 +495,21 @@ func submit_aim_input(aim_direction: Vector2) -> void:
 
 
 @rpc("any_peer", "call_remote", "reliable")
+func request_toggle_combat_mode() -> void:
+	if not multiplayer.is_server():
+		return
+
+	var peer_id: int = int(multiplayer.get_remote_sender_id())
+	if not players.has(peer_id):
+		return
+
+	var combat_enabled: bool = not bool(_combat_enabled_by_peer.get(peer_id, false))
+	_combat_enabled_by_peer[peer_id] = combat_enabled
+	# Server owns combat mode and the temporary prototype loadout.
+	rpc("apply_combat_mode_update", peer_id, combat_enabled, _loadout_text(peer_id))
+
+
+@rpc("any_peer", "call_remote", "reliable")
 func submit_basic_attack() -> void:
 	if not multiplayer.is_server():
 		return
@@ -423,12 +526,16 @@ func submit_basic_attack() -> void:
 		return
 
 	_last_attack_time_by_peer[peer_id] = now_seconds
+	_perform_slash(peer_id)
+
+
+func _perform_slash(peer_id: int) -> void:
 	var attack_position: Vector3 = players[peer_id] as Vector3
 	var facing_direction: Vector2 = _aim_direction_by_peer.get(peer_id, Vector2(0.0, -1.0)) as Vector2
 	if facing_direction.length_squared() <= 0.0001:
 		facing_direction = Vector2(0.0, -1.0)
 
-	# Server accepts attack intent only for joined players and uses authoritative facing.
+	# Slash/basic attack uses server-owned position and facing; clients never decide hits.
 	var normalized_facing: Vector2 = facing_direction.normalized()
 	rpc("show_basic_attack", peer_id, attack_position, normalized_facing)
 	var enemy_spawner: Node = get_node_or_null("../EnemySpawner")

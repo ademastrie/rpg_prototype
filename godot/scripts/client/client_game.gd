@@ -10,6 +10,7 @@ extends Node3D
 @onready var status_label: Label = $StatusLabel
 @onready var spawn_count_label: Label = $SpawnCountLabel
 @onready var health_label: Label = $HealthLabel
+@onready var combat_label: Label = $CombatLabel
 @onready var world_spawner: Node3D = $WorldSpawner
 @onready var active_camera: Camera3D = $Camera3D
 
@@ -27,6 +28,7 @@ var _has_sent_aim := false
 var _is_connected_to_server := false
 var _has_sent_join_request := false
 var _was_attack_pressed := false
+var _was_combat_toggle_pressed := false
 var _is_local_player_down := false
 
 
@@ -35,10 +37,12 @@ func _ready() -> void:
 	world_spawner.player_spawned.connect(_on_player_spawned)
 	world_spawner.player_health_updated.connect(_on_player_health_updated)
 	world_spawner.player_down_state_updated.connect(_on_player_down_state_updated)
+	world_spawner.combat_mode_updated.connect(_on_combat_mode_updated)
 	_camera_follow_offset = active_camera.global_position
 	_fixed_camera_basis = active_camera.global_transform.basis
 	_on_spawned_player_count_changed(0)
 	_on_player_health_updated(multiplayer.get_unique_id(), 100, 100)
+	_on_combat_mode_updated(multiplayer.get_unique_id(), false, "Slash, HP Regen")
 	set_selected_character(ClientSession.selected_character)
 	_connect_to_server()
 
@@ -76,6 +80,7 @@ func _process(delta: float) -> void:
 	if aim_direction != Vector2.ZERO and _should_send_aim(aim_direction):
 		_send_aim_input(aim_direction)
 
+	_read_combat_toggle_input()
 	_read_basic_attack_input()
 	_update_camera_follow(delta)
 
@@ -106,6 +111,7 @@ func _on_connection_failed() -> void:
 	_is_local_player_down = false
 	world_spawner.set_local_prediction_input(Vector2.ZERO)
 	_was_attack_pressed = false
+	_was_combat_toggle_pressed = false
 	print("Failed to connect to game server.")
 
 
@@ -115,6 +121,7 @@ func _on_server_disconnected() -> void:
 	_is_local_player_down = false
 	world_spawner.set_local_prediction_input(Vector2.ZERO)
 	_was_attack_pressed = false
+	_was_combat_toggle_pressed = false
 	print("Disconnected from game server.")
 
 
@@ -152,6 +159,16 @@ func _on_player_down_state_updated(peer_id: int, is_down: bool) -> void:
 	else:
 		_is_local_player_down = false
 		status_label.text = _character_status_text
+
+
+func _on_combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_text: String) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+
+	var mode_text: String = "OFF"
+	if combat_enabled:
+		mode_text = "ON"
+	combat_label.text = "Combat: %s | Loadout: %s" % [mode_text, loadout_text]
 
 
 func _read_movement_input() -> Vector2:
@@ -244,6 +261,19 @@ func _read_basic_attack_input() -> void:
 		_send_basic_attack_intent()
 
 	_was_attack_pressed = is_attack_pressed
+
+
+func _read_combat_toggle_input() -> void:
+	var is_toggle_pressed: bool = Input.is_key_pressed(KEY_Q)
+	if is_toggle_pressed and not _was_combat_toggle_pressed:
+		_send_combat_toggle_request()
+
+	_was_combat_toggle_pressed = is_toggle_pressed
+
+
+func _send_combat_toggle_request() -> void:
+	# Client only requests a toggle; the server owns the actual combat mode state.
+	world_spawner.rpc_id(1, "request_toggle_combat_mode")
 
 
 func _send_basic_attack_intent() -> void:
