@@ -44,6 +44,11 @@ func _on_peer_connected(peer_id: int) -> void:
 
 func _on_peer_disconnected(peer_id: int) -> void:
 	print("Peer disconnected: %s" % peer_id)
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	if bool(session.get("joined", false)):
+		var position: Vector3 = world_spawner.get_authoritative_position(peer_id)
+		_save_peer_position(peer_id, session, position)
+
 	connected_peers.erase(peer_id)
 	peer_sessions.erase(peer_id)
 	_pending_join_validations.erase(peer_id)
@@ -80,7 +85,7 @@ func _validate_join_with_backend(peer_id: int, character_id: int, access_token: 
 	add_child(request)
 	_pending_join_validations[peer_id] = request
 
-	request.request_completed.connect(_on_join_validation_completed.bind(peer_id, request))
+	request.request_completed.connect(_on_join_validation_completed.bind(peer_id, access_token, request))
 
 	var headers: PackedStringArray = PackedStringArray([
 		"Content-Type: application/json",
@@ -102,6 +107,7 @@ func _on_join_validation_completed(
 	_headers: PackedStringArray,
 	body: PackedByteArray,
 	peer_id: int,
+	access_token: String,
 	request: HTTPRequest
 ) -> void:
 	_pending_join_validations.erase(peer_id)
@@ -151,6 +157,7 @@ func _on_join_validation_completed(
 		"user_id": int(response_data.get("user_id", 0)),
 		"character_id": character_id,
 		"character_name": character_name,
+		"access_token": access_token,
 		"region_id": region_id,
 		"position_x": float(response_data.get("position_x", 0.0)),
 		"position_y": float(response_data.get("position_y", 0.0)),
@@ -159,6 +166,52 @@ func _on_join_validation_completed(
 	peer_sessions[peer_id] = session
 	print("Peer %s validated as character %s (%s)." % [peer_id, character_name, character_id])
 	world_spawner.register_peer(peer_id, character_name)
+
+
+func _save_peer_position(peer_id: int, session: Dictionary, position: Vector3) -> void:
+	var access_token: String = str(session.get("access_token", ""))
+	var character_id: int = int(session.get("character_id", 0))
+	if access_token.strip_edges() == "" or character_id <= 0:
+		print("Failed to save position for peer %s: missing validated session data." % peer_id)
+		return
+
+	var request: HTTPRequest = HTTPRequest.new()
+	add_child(request)
+	request.request_completed.connect(_on_save_position_completed.bind(peer_id, character_id, request))
+
+	var headers: PackedStringArray = PackedStringArray([
+		"Content-Type: application/json",
+		"Authorization: Bearer %s" % access_token,
+	])
+	var body: String = JSON.stringify({
+		"character_id": character_id,
+		"region_id": server_region_id,
+		"position_x": position.x,
+		"position_y": position.z,
+	})
+	var url: String = "%s/game/save-position" % _normalized_backend_base_url()
+	var error: Error = request.request(url, headers, HTTPClient.METHOD_POST, body)
+	if error != OK:
+		print("Failed to start save-position request for peer %s: %s" % [peer_id, error])
+		request.queue_free()
+
+
+func _on_save_position_completed(
+	result: int,
+	response_code: int,
+	_headers: PackedStringArray,
+	body: PackedByteArray,
+	peer_id: int,
+	character_id: int,
+	request: HTTPRequest
+) -> void:
+	request.queue_free()
+	var response_text: String = body.get_string_from_utf8()
+	if result == HTTPRequest.RESULT_SUCCESS and response_code >= 200 and response_code < 300:
+		print("Saved position for peer %s character %s." % [peer_id, character_id])
+		return
+
+	print("Failed to save position for peer %s character %s: result=%s status=%s response=%s" % [peer_id, character_id, result, response_code, response_text])
 
 
 func _normalized_backend_base_url() -> String:

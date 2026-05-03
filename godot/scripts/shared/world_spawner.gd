@@ -57,6 +57,13 @@ func unregister_peer(peer_id: int) -> void:
 	rpc("despawn_player", peer_id)
 
 
+func get_authoritative_position(peer_id: int) -> Vector3:
+	if not players.has(peer_id):
+		return Vector3.ZERO
+
+	return players[peer_id] as Vector3
+
+
 func _register_player(peer_id: int) -> void:
 	players[peer_id] = _spawn_position_for_index(_next_spawn_index)
 	_last_input_by_peer[peer_id] = Vector2.ZERO
