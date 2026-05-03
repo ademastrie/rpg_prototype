@@ -59,7 +59,7 @@ const SPAWN_POSITIONS: Array[Vector3] = [
 	Vector3(-3, 0, -3),
 ]
 
-const DEFAULT_LOADOUT: Array[String] = ["Slash", "HP Regen"]
+const DEFAULT_LOADOUT: Array[String] = ["Slash", "HP Regen", "Damage Aura"]
 const ABILITY_DEFINITIONS: Dictionary = {
 	"Slash": {
 		"cooldown": 1.25,
@@ -67,6 +67,11 @@ const ABILITY_DEFINITIONS: Dictionary = {
 	"HP Regen": {
 		"cooldown": 2.0,
 		"heal": 8,
+	},
+	"Damage Aura": {
+		"cooldown": 1.0,
+		"damage": 5,
+		"radius": 4.0,
 	},
 }
 
@@ -332,6 +337,10 @@ func _process_combat_abilities() -> void:
 			_set_ability_used(peer_id_int, "HP Regen", now_seconds)
 			_send_ability_state(peer_id_int, "HP Regen")
 			_apply_hp_regen(peer_id_int)
+		if loadout.has("Damage Aura") and _is_ability_enabled(peer_id_int, "Damage Aura") and _is_ability_ready(peer_id_int, "Damage Aura", now_seconds):
+			_set_ability_used(peer_id_int, "Damage Aura", now_seconds)
+			_send_ability_state(peer_id_int, "Damage Aura")
+			_perform_damage_aura(peer_id_int)
 
 
 func _default_ability_enabled_state() -> Dictionary:
@@ -409,6 +418,16 @@ func _ability_heal_amount(ability_name: String) -> int:
 	return int(ability_definition.get("heal", 0))
 
 
+func _ability_damage_amount(ability_name: String) -> int:
+	var ability_definition: Dictionary = ABILITY_DEFINITIONS.get(ability_name, {}) as Dictionary
+	return int(ability_definition.get("damage", 0))
+
+
+func _ability_radius(ability_name: String) -> float:
+	var ability_definition: Dictionary = ABILITY_DEFINITIONS.get(ability_name, {}) as Dictionary
+	return float(ability_definition.get("radius", 0.0))
+
+
 func _apply_hp_regen(peer_id: int) -> void:
 	var current_hp: int = int(_player_current_hp_by_peer.get(peer_id, player_max_hp))
 	var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
@@ -418,6 +437,19 @@ func _apply_hp_regen(peer_id: int) -> void:
 	current_hp = int(min(current_hp + _ability_heal_amount("HP Regen"), max_hp))
 	_player_current_hp_by_peer[peer_id] = current_hp
 	rpc("apply_player_health_update", peer_id, current_hp, max_hp)
+
+
+func _perform_damage_aura(peer_id: int) -> void:
+	var aura_position: Vector3 = players[peer_id] as Vector3
+	var radius: float = _ability_radius("Damage Aura")
+	var damage: int = _ability_damage_amount("Damage Aura")
+	if radius <= 0.0 or damage <= 0:
+		return
+
+	rpc("show_damage_aura", peer_id, aura_position, radius)
+	var enemy_spawner: Node = get_node_or_null("../EnemySpawner")
+	if enemy_spawner != null:
+		enemy_spawner.call("resolve_damage_aura", peer_id, aura_position, radius, damage)
 
 
 func _loadout_text(peer_id: int) -> String:
@@ -745,6 +777,32 @@ func show_basic_attack(peer_id: int, attack_position: Vector3, facing_direction:
 	var cleanup_timer: Timer = Timer.new()
 	cleanup_timer.one_shot = true
 	cleanup_timer.wait_time = 0.18
+	marker.add_child(cleanup_timer)
+	cleanup_timer.timeout.connect(marker.queue_free)
+	cleanup_timer.start()
+
+
+@rpc("authority", "call_remote", "reliable")
+func show_damage_aura(peer_id: int, aura_position: Vector3, radius: float) -> void:
+	var marker: MeshInstance3D = MeshInstance3D.new()
+	var marker_mesh: CylinderMesh = CylinderMesh.new()
+	marker_mesh.top_radius = radius
+	marker_mesh.bottom_radius = radius
+	marker_mesh.height = 0.08
+	marker.mesh = marker_mesh
+
+	var material: StandardMaterial3D = StandardMaterial3D.new()
+	material.albedo_color = Color(0.65, 0.2, 1.0, 0.35)
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	marker.material_override = material
+	marker.name = "DamageAura_%s" % peer_id
+	marker.position = aura_position + Vector3(0.0, 0.06, 0.0)
+	add_child(marker)
+
+	var cleanup_timer: Timer = Timer.new()
+	cleanup_timer.one_shot = true
+	cleanup_timer.wait_time = 0.25
 	marker.add_child(cleanup_timer)
 	cleanup_timer.timeout.connect(marker.queue_free)
 	cleanup_timer.start()

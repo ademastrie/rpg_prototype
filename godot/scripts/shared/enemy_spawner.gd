@@ -138,6 +138,29 @@ func resolve_basic_attack(_attacker_peer_id: int, attack_position: Vector3, faci
 		_despawn_enemy(best_enemy_id)
 
 
+func resolve_damage_aura(_attacker_peer_id: int, aura_position: Vector3, radius: float, damage: int) -> void:
+	if not multiplayer.is_server() or radius <= 0.0 or damage <= 0:
+		return
+
+	for enemy_id in enemies.keys():
+		var enemy_id_int: int = int(enemy_id)
+		if not enemies.has(enemy_id_int):
+			continue
+
+		var enemy_position: Vector3 = enemies[enemy_id_int] as Vector3
+		var offset_xz: Vector2 = Vector2(enemy_position.x - aura_position.x, enemy_position.z - aura_position.z)
+		if offset_xz.length() > radius:
+			continue
+
+		var current_hp: int = int(_enemy_current_hp_by_id.get(enemy_id_int, enemy_max_hp))
+		var max_hp: int = int(_enemy_max_hp_by_id.get(enemy_id_int, enemy_max_hp))
+		current_hp = max(current_hp - damage, 0)
+		_enemy_current_hp_by_id[enemy_id_int] = current_hp
+		rpc("show_enemy_hit", enemy_id_int, current_hp, max_hp)
+		if current_hp <= 0:
+			_despawn_enemy(enemy_id_int)
+
+
 func _despawn_enemy(enemy_id: int) -> void:
 	enemies.erase(enemy_id)
 	_enemy_origin_positions.erase(enemy_id)
