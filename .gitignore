@@ -1,0 +1,93 @@
+# ------------------------------------------------------------
+# Secrets / environment files
+# ------------------------------------------------------------
+.env
+*.env
+backend/.env
+backend/*.env
+
+# Keep examples safe to commit
+!.env.example
+!backend/.env.example
+
+
+# ------------------------------------------------------------
+# Python / FastAPI backend
+# ------------------------------------------------------------
+backend/.venv/
+.venv/
+venv/
+env/
+
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+*.egg-info/
+dist/
+build/
+
+# Alembic can be committed, but ignore local temp files
+backend/alembic.ini.local
+
+
+# ------------------------------------------------------------
+# Godot
+# ------------------------------------------------------------
+godot/.godot/
+godot/.import/
+godot/imported/
+godot/export_presets.cfg
+
+*.translation
+*.mono/
+
+# Godot 3 legacy imports, harmless if unused
+*.import
+
+
+# ------------------------------------------------------------
+# Godot exports / builds
+# ------------------------------------------------------------
+exports/
+builds/
+dist/
+*.exe
+*.pck
+*.zip
+
+
+# ------------------------------------------------------------
+# VS Code / editor files
+# ------------------------------------------------------------
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
+
+# Allow recommended extensions if you create it later
+!.vscode/extensions.json
+
+
+# ------------------------------------------------------------
+# Windows / OS files
+# ------------------------------------------------------------
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS just in case
+.DS_Store
+
+
+# ------------------------------------------------------------
+# Logs / temp files
+# ------------------------------------------------------------
+*.log
+*.tmp
+*.bak
+*.swp
