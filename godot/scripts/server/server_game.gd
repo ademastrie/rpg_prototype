@@ -143,6 +143,8 @@ func _on_join_validation_completed(
 	var character_id: int = int(response_data.get("character_id", 0))
 	var character_name: String = str(response_data.get("character_name", ""))
 	var region_id: String = str(response_data.get("region_id", ""))
+	var position_x: float = float(response_data.get("position_x", 0.0))
+	var position_y: float = float(response_data.get("position_y", 0.0))
 	if character_id <= 0 or character_name.strip_edges() == "":
 		print("Join validation failed for peer %s: missing character data." % peer_id)
 		_disconnect_peer(peer_id)
@@ -159,13 +161,16 @@ func _on_join_validation_completed(
 		"character_name": character_name,
 		"access_token": access_token,
 		"region_id": region_id,
-		"position_x": float(response_data.get("position_x", 0.0)),
-		"position_y": float(response_data.get("position_y", 0.0)),
+		"position_x": position_x,
+		"position_y": position_y,
 		"joined": true,
 	}
 	peer_sessions[peer_id] = session
 	print("Peer %s validated as character %s (%s)." % [peer_id, character_name, character_id])
-	world_spawner.register_peer(peer_id, character_name)
+	if _has_saved_position(position_x, position_y):
+		world_spawner.register_peer_at_position(peer_id, character_name, Vector3(position_x, 0.0, position_y))
+	else:
+		world_spawner.register_peer(peer_id, character_name)
 
 
 func _save_peer_position(peer_id: int, session: Dictionary, position: Vector3) -> void:
@@ -212,6 +217,10 @@ func _on_save_position_completed(
 		return
 
 	print("Failed to save position for peer %s character %s: result=%s status=%s response=%s" % [peer_id, character_id, result, response_code, response_text])
+
+
+func _has_saved_position(position_x: float, position_y: float) -> bool:
+	return is_finite(position_x) and is_finite(position_y) and (not is_zero_approx(position_x) or not is_zero_approx(position_y))
 
 
 func _normalized_backend_base_url() -> String:

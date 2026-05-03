@@ -36,13 +36,21 @@ func send_join_request(character_id: int, character_name: String, access_token: 
 
 
 func register_peer(peer_id: int, character_name: String = "") -> void:
+	_register_peer(peer_id, character_name, false, Vector3.ZERO)
+
+
+func register_peer_at_position(peer_id: int, character_name: String, spawn_position: Vector3) -> void:
+	_register_peer(peer_id, character_name, true, spawn_position)
+
+
+func _register_peer(peer_id: int, character_name: String, use_custom_spawn: bool, custom_spawn_position: Vector3) -> void:
 	for existing_peer_id in players:
 		var existing_peer_id_int: int = int(existing_peer_id)
 		var spawn_position: Vector3 = players[existing_peer_id] as Vector3
 		var existing_character_name: String = str(_character_names_by_peer.get(existing_peer_id, ""))
 		rpc_id(peer_id, "spawn_player", existing_peer_id_int, spawn_position, existing_character_name)
 
-	_register_player(peer_id)
+	_register_player(peer_id, use_custom_spawn, custom_spawn_position)
 	_character_names_by_peer[peer_id] = character_name
 	var peer_position: Vector3 = players[peer_id] as Vector3
 	rpc("spawn_player", peer_id, peer_position, character_name)
@@ -64,8 +72,12 @@ func get_authoritative_position(peer_id: int) -> Vector3:
 	return players[peer_id] as Vector3
 
 
-func _register_player(peer_id: int) -> void:
-	players[peer_id] = _spawn_position_for_index(_next_spawn_index)
+func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn_position: Vector3 = Vector3.ZERO) -> void:
+	if use_custom_spawn:
+		players[peer_id] = custom_spawn_position
+	else:
+		players[peer_id] = _spawn_position_for_index(_next_spawn_index)
+
 	_last_input_by_peer[peer_id] = Vector2.ZERO
 	_next_spawn_index += 1
 
