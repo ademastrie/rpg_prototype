@@ -1,20 +1,32 @@
 extends CanvasLayer
 
 signal combat_toggle_requested
+signal ability_toggle_requested(ability_name: String, enabled: bool)
 
 @onready var hp_label: Label = $Panel/VBoxContainer/HPLabel
 @onready var status_label: Label = $Panel/VBoxContainer/StatusLabel
 @onready var combat_label: Label = $Panel/VBoxContainer/CombatLabel
 @onready var loadout_label: Label = $Panel/VBoxContainer/LoadoutLabel
+@onready var slash_check_box: CheckBox = $Panel/VBoxContainer/SlashCheckBox
+@onready var hp_regen_check_box: CheckBox = $Panel/VBoxContainer/HPRegenCheckBox
 @onready var combat_toggle_button: Button = $Panel/VBoxContainer/CombatToggleButton
+
+var _ability_enabled_by_name: Dictionary = {
+	"Slash": true,
+	"HP Regen": true,
+}
 
 
 func _ready() -> void:
 	combat_toggle_button.pressed.connect(_on_combat_toggle_button_pressed)
+	slash_check_box.toggled.connect(_on_slash_check_box_toggled)
+	hp_regen_check_box.toggled.connect(_on_hp_regen_check_box_toggled)
 	update_health(100, 100)
 	update_down_state(false)
 	update_combat_mode(false)
 	update_loadout("Slash, HP Regen")
+	update_ability_enabled("Slash", true)
+	update_ability_enabled("HP Regen", true)
 
 
 func update_health(current_hp: int, max_hp: int) -> void:
@@ -39,5 +51,23 @@ func update_loadout(loadout_text: String) -> void:
 	loadout_label.text = "Loadout: %s" % loadout_text
 
 
+func update_ability_enabled(ability_name: String, enabled: bool) -> void:
+	_ability_enabled_by_name[ability_name] = enabled
+	if ability_name == "Slash":
+		slash_check_box.set_pressed_no_signal(enabled)
+	elif ability_name == "HP Regen":
+		hp_regen_check_box.set_pressed_no_signal(enabled)
+
+
 func _on_combat_toggle_button_pressed() -> void:
 	combat_toggle_requested.emit()
+
+
+func _on_slash_check_box_toggled(enabled: bool) -> void:
+	ability_toggle_requested.emit("Slash", enabled)
+	slash_check_box.set_pressed_no_signal(bool(_ability_enabled_by_name.get("Slash", true)))
+
+
+func _on_hp_regen_check_box_toggled(enabled: bool) -> void:
+	ability_toggle_requested.emit("HP Regen", enabled)
+	hp_regen_check_box.set_pressed_no_signal(bool(_ability_enabled_by_name.get("HP Regen", true)))

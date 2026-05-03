@@ -5,6 +5,7 @@ signal player_spawned(peer_id: int, player: Node3D)
 signal player_health_updated(peer_id: int, current_hp: int, max_hp: int)
 signal player_down_state_updated(peer_id: int, is_down: bool)
 signal combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_text: String)
+signal ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool)
 signal join_requested(peer_id: int, character_id: int, character_name: String, access_token: String)
 
 @export var player_placeholder_scene: PackedScene
@@ -37,6 +38,7 @@ var _player_respawn_positions: Dictionary = {}
 var _last_contact_damage_time_by_peer: Dictionary = {}
 var _combat_enabled_by_peer: Dictionary = {}
 var _loadout_by_peer: Dictionary = {}
+var _ability_enabled_by_peer: Dictionary = {}
 var _last_ability_time_by_peer: Dictionary = {}
 var _local_prediction_input: Vector2 = Vector2.ZERO
 var _simulation_accumulator := 0.0
@@ -115,6 +117,7 @@ func unregister_peer(peer_id: int) -> void:
 	_last_contact_damage_time_by_peer.erase(peer_id)
 	_combat_enabled_by_peer.erase(peer_id)
 	_loadout_by_peer.erase(peer_id)
+	_ability_enabled_by_peer.erase(peer_id)
 	_last_ability_time_by_peer.erase(peer_id)
 	_character_names_by_peer.erase(peer_id)
 	rpc("despawn_player", peer_id)
@@ -148,10 +151,12 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_player_respawn_positions[peer_id] = players[peer_id]
 	_combat_enabled_by_peer[peer_id] = false
 	_loadout_by_peer[peer_id] = DEFAULT_LOADOUT.duplicate()
+	_ability_enabled_by_peer[peer_id] = _default_ability_enabled_state()
 	_last_ability_time_by_peer[peer_id] = {}
 	rpc("apply_player_health_update", peer_id, player_max_hp, player_max_hp)
 	rpc("apply_player_down_state", peer_id, false)
 	rpc("apply_combat_mode_update", peer_id, false, _loadout_text(peer_id))
+	_send_ability_enabled_states(peer_id)
 	_next_spawn_index += 1
 
 
@@ -281,12 +286,31 @@ func _process_combat_abilities() -> void:
 			continue
 
 		var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
-		if loadout.has("Slash") and _is_ability_ready(peer_id_int, "Slash", now_seconds):
+		if loadout.has("Slash") and _is_ability_enabled(peer_id_int, "Slash") and _is_ability_ready(peer_id_int, "Slash", now_seconds):
 			_set_ability_used(peer_id_int, "Slash", now_seconds)
 			_perform_slash(peer_id_int)
-		if loadout.has("HP Regen") and _is_ability_ready(peer_id_int, "HP Regen", now_seconds):
+		if loadout.has("HP Regen") and _is_ability_enabled(peer_id_int, "HP Regen") and _is_ability_ready(peer_id_int, "HP Regen", now_seconds):
 			_set_ability_used(peer_id_int, "HP Regen", now_seconds)
 			_apply_hp_regen(peer_id_int)
+
+
+func _default_ability_enabled_state() -> Dictionary:
+	var ability_state: Dictionary = {}
+	for ability_name in DEFAULT_LOADOUT:
+		ability_state[ability_name] = true
+
+	return ability_state
+
+
+func _is_ability_enabled(peer_id: int, ability_name: String) -> bool:
+	var ability_state: Dictionary = _ability_enabled_by_peer.get(peer_id, {}) as Dictionary
+	return bool(ability_state.get(ability_name, true))
+
+
+func _send_ability_enabled_states(peer_id: int) -> void:
+	var ability_state: Dictionary = _ability_enabled_by_peer.get(peer_id, {}) as Dictionary
+	for ability_name in ability_state:
+		rpc_id(peer_id, "apply_ability_enabled_update", peer_id, str(ability_name), bool(ability_state[ability_name]))
 
 
 func _is_ability_ready(peer_id: int, ability_name: String, now_seconds: float) -> bool:
@@ -450,6 +474,11 @@ func apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_text: 
 	combat_mode_updated.emit(peer_id, combat_enabled, loadout_text)
 
 
+@rpc("authority", "call_remote", "reliable")
+func apply_ability_enabled_update(peer_id: int, ability_name: String, enabled: bool) -> void:
+	ability_enabled_updated.emit(peer_id, ability_name, enabled)
+
+
 @rpc("any_peer", "call_remote", "reliable")
 func request_join(character_id: int, character_name: String, access_token: String) -> void:
 	if not multiplayer.is_server():
@@ -507,6 +536,28 @@ func request_toggle_combat_mode() -> void:
 	_combat_enabled_by_peer[peer_id] = combat_enabled
 	# Server owns combat mode and the temporary prototype loadout.
 	rpc("apply_combat_mode_update", peer_id, combat_enabled, _loadout_text(peer_id))
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_set_ability_enabled(ability_name: String, enabled: bool) -> void:
+	if not multiplayer.is_server():
+		return
+
+	var peer_id: int = int(multiplayer.get_remote_sender_id())
+	if not players.has(peer_id):
+		return
+	if bool(_player_is_down_by_peer.get(peer_id, false)):
+		return
+
+	var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
+	if not loadout.has(ability_name):
+		return
+
+	var ability_state: Dictionary = _ability_enabled_by_peer.get(peer_id, {}) as Dictionary
+	ability_state[ability_name] = enabled
+	_ability_enabled_by_peer[peer_id] = ability_state
+	# Server confirms final enabled state; clients display this value only after confirmation.
+	rpc_id(peer_id, "apply_ability_enabled_update", peer_id, ability_name, enabled)
 
 
 @rpc("any_peer", "call_remote", "reliable")

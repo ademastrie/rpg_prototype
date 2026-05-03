@@ -38,7 +38,9 @@ func _ready() -> void:
 	world_spawner.player_health_updated.connect(_on_player_health_updated)
 	world_spawner.player_down_state_updated.connect(_on_player_down_state_updated)
 	world_spawner.combat_mode_updated.connect(_on_combat_mode_updated)
+	world_spawner.ability_enabled_updated.connect(_on_ability_enabled_updated)
 	game_hud.connect("combat_toggle_requested", Callable(self, "_send_combat_toggle_request"))
+	game_hud.connect("ability_toggle_requested", Callable(self, "_send_ability_toggle_request"))
 	_camera_follow_offset = active_camera.global_position
 	_fixed_camera_basis = active_camera.global_transform.basis
 	_on_spawned_player_count_changed(0)
@@ -180,6 +182,13 @@ func _on_combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_text: S
 	game_hud.call("update_loadout", loadout_text)
 
 
+func _on_ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+
+	game_hud.call("update_ability_enabled", ability_name, enabled)
+
+
 func _read_movement_input() -> Vector2:
 	var screen_direction := Vector2.ZERO
 
@@ -283,6 +292,11 @@ func _read_combat_toggle_input() -> void:
 func _send_combat_toggle_request() -> void:
 	# Client only requests a toggle; the server owns the actual combat mode state.
 	world_spawner.rpc_id(1, "request_toggle_combat_mode")
+
+
+func _send_ability_toggle_request(ability_name: String, enabled: bool) -> void:
+	# Client requests ability state; the server confirms the final enabled value.
+	world_spawner.rpc_id(1, "request_set_ability_enabled", ability_name, enabled)
 
 
 func _send_basic_attack_intent() -> void:
