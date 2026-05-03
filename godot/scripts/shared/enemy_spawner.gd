@@ -6,11 +6,17 @@ class_name EnemySpawner
 @export var idle_speed: float = 0.6
 @export var snapshot_rate: float = 6.0
 @export var interpolation_speed: float = 8.0
+@export var enemy_max_hp: int = 30
+@export var basic_attack_damage: int = 10
+@export var basic_attack_range: float = 4.0
+@export var basic_attack_cone_dot: float = 0.65
 
 var enemies: Dictionary = {}
 var _spawned_enemy_nodes: Dictionary = {}
 var _enemy_origin_positions: Dictionary = {}
 var _target_positions: Dictionary = {}
+var _enemy_max_hp_by_id: Dictionary = {}
+var _enemy_current_hp_by_id: Dictionary = {}
 var _next_enemy_id: int = 1
 var _idle_time: float = 0.0
 var _snapshot_accumulator: float = 0.0
@@ -37,7 +43,9 @@ func sync_peer(peer_id: int) -> void:
 	for enemy_id in enemies:
 		var enemy_id_int: int = int(enemy_id)
 		var spawn_position: Vector3 = enemies[enemy_id] as Vector3
-		rpc_id(peer_id, "spawn_enemy", enemy_id_int, spawn_position)
+		var current_hp: int = int(_enemy_current_hp_by_id.get(enemy_id, enemy_max_hp))
+		var max_hp: int = int(_enemy_max_hp_by_id.get(enemy_id, enemy_max_hp))
+		rpc_id(peer_id, "spawn_enemy", enemy_id_int, spawn_position, current_hp, max_hp)
 
 
 func _process(delta: float) -> void:
@@ -64,8 +72,54 @@ func _spawn_enemy(spawn_position: Vector3) -> void:
 	_next_enemy_id += 1
 	enemies[enemy_id] = spawn_position
 	_enemy_origin_positions[enemy_id] = spawn_position
-	rpc("spawn_enemy", enemy_id, spawn_position)
+	_enemy_max_hp_by_id[enemy_id] = enemy_max_hp
+	_enemy_current_hp_by_id[enemy_id] = enemy_max_hp
+	rpc("spawn_enemy", enemy_id, spawn_position, enemy_max_hp, enemy_max_hp)
 	print("Spawned enemy %s at %s." % [enemy_id, spawn_position])
+
+
+func resolve_basic_attack(_attacker_peer_id: int, attack_position: Vector3, facing_direction: Vector2) -> void:
+	if not multiplayer.is_server() or facing_direction.length_squared() <= 0.0001:
+		return
+
+	var normalized_facing: Vector2 = facing_direction.normalized()
+	var best_enemy_id: int = 0
+	var best_distance: float = basic_attack_range
+	for enemy_id in enemies:
+		var enemy_id_int: int = int(enemy_id)
+		var enemy_position: Vector3 = enemies[enemy_id] as Vector3
+		var offset_xz: Vector2 = Vector2(enemy_position.x - attack_position.x, enemy_position.z - attack_position.z)
+		var distance: float = offset_xz.length()
+		if distance <= 0.001 or distance > basic_attack_range:
+			continue
+
+		var direction_to_enemy: Vector2 = offset_xz / distance
+		if normalized_facing.dot(direction_to_enemy) < basic_attack_cone_dot:
+			continue
+		if distance < best_distance:
+			best_distance = distance
+			best_enemy_id = enemy_id_int
+
+	if best_enemy_id <= 0:
+		return
+
+	var current_hp: int = int(_enemy_current_hp_by_id.get(best_enemy_id, enemy_max_hp))
+	var max_hp: int = int(_enemy_max_hp_by_id.get(best_enemy_id, enemy_max_hp))
+	current_hp = max(current_hp - basic_attack_damage, 0)
+	_enemy_current_hp_by_id[best_enemy_id] = current_hp
+	rpc("show_enemy_hit", best_enemy_id, current_hp, max_hp)
+
+	if current_hp <= 0:
+		_despawn_enemy(best_enemy_id)
+
+
+func _despawn_enemy(enemy_id: int) -> void:
+	enemies.erase(enemy_id)
+	_enemy_origin_positions.erase(enemy_id)
+	_target_positions.erase(enemy_id)
+	_enemy_current_hp_by_id.erase(enemy_id)
+	_enemy_max_hp_by_id.erase(enemy_id)
+	rpc("despawn_enemy", enemy_id)
 
 
 func _update_enemy_idle_positions() -> void:
@@ -102,11 +156,12 @@ func _smooth_spawned_enemies(delta: float) -> void:
 
 
 @rpc("authority", "call_remote", "reliable")
-func spawn_enemy(enemy_id: int, spawn_position: Vector3) -> void:
+func spawn_enemy(enemy_id: int, spawn_position: Vector3, current_hp: int = 30, max_hp: int = 30) -> void:
 	if _spawned_enemy_nodes.has(enemy_id):
 		var existing_enemy: Node3D = _spawned_enemy_nodes[enemy_id] as Node3D
 		existing_enemy.position = spawn_position
 		_target_positions[enemy_id] = spawn_position
+		_set_enemy_label(existing_enemy, enemy_id, current_hp, max_hp)
 		return
 
 	if enemy_placeholder_scene == null:
@@ -123,7 +178,7 @@ func spawn_enemy(enemy_id: int, spawn_position: Vector3) -> void:
 	add_child(enemy)
 	_spawned_enemy_nodes[enemy_id] = enemy
 	_target_positions[enemy_id] = initial_position
-	_set_enemy_label(enemy, enemy_id)
+	_set_enemy_label(enemy, enemy_id, current_hp, max_hp)
 	print("Enemy placeholder instantiated on client: enemy_id=%s position=%s node_name=%s" % [enemy_id, spawn_position, enemy.name])
 
 
@@ -142,7 +197,29 @@ func apply_enemy_position_snapshots(snapshots: Array) -> void:
 		_target_positions[enemy_id] = authoritative_position
 
 
-func _set_enemy_label(enemy: Node, enemy_id: int) -> void:
+@rpc("authority", "call_remote", "reliable")
+func show_enemy_hit(enemy_id: int, current_hp: int, max_hp: int) -> void:
+	if not _spawned_enemy_nodes.has(enemy_id):
+		return
+
+	var enemy: Node3D = _spawned_enemy_nodes[enemy_id] as Node3D
+	_set_enemy_label(enemy, enemy_id, current_hp, max_hp)
+	print("Enemy %s hit. HP: %s/%s" % [enemy_id, current_hp, max_hp])
+
+
+@rpc("authority", "call_remote", "reliable")
+func despawn_enemy(enemy_id: int) -> void:
+	if not _spawned_enemy_nodes.has(enemy_id):
+		return
+
+	var enemy: Node3D = _spawned_enemy_nodes[enemy_id] as Node3D
+	enemy.queue_free()
+	_spawned_enemy_nodes.erase(enemy_id)
+	_target_positions.erase(enemy_id)
+	print("Enemy %s defeated and removed." % enemy_id)
+
+
+func _set_enemy_label(enemy: Node, enemy_id: int, current_hp: int, max_hp: int) -> void:
 	var enemy_label: Label3D = enemy.get_node_or_null("EnemyLabel") as Label3D
 	if enemy_label != null:
-		enemy_label.text = "Enemy %s" % enemy_id
+		enemy_label.text = "Enemy %s\nHP %s/%s" % [enemy_id, current_hp, max_hp]

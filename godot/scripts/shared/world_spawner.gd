@@ -13,6 +13,7 @@ signal join_requested(peer_id: int, character_id: int, character_name: String, a
 @export var local_prediction_correction_deadzone: float = 0.2
 @export var local_prediction_snap_distance: float = 3.0
 @export var local_prediction_correction_speed: float = 4.0
+@export var basic_attack_cooldown_seconds: float = 0.75
 
 var players: Dictionary = {}
 var _spawned_nodes: Dictionary = {}
@@ -20,6 +21,7 @@ var _target_positions: Dictionary = {}
 var _target_facing_directions: Dictionary = {}
 var _last_input_by_peer: Dictionary = {}
 var _aim_direction_by_peer: Dictionary = {}
+var _last_attack_time_by_peer: Dictionary = {}
 var _local_prediction_input: Vector2 = Vector2.ZERO
 var _simulation_accumulator := 0.0
 var _snapshot_accumulator := 0.0
@@ -78,6 +80,7 @@ func unregister_peer(peer_id: int) -> void:
 	_target_facing_directions.erase(peer_id)
 	_last_input_by_peer.erase(peer_id)
 	_aim_direction_by_peer.erase(peer_id)
+	_last_attack_time_by_peer.erase(peer_id)
 	_character_names_by_peer.erase(peer_id)
 	rpc("despawn_player", peer_id)
 
@@ -282,6 +285,62 @@ func submit_aim_input(aim_direction: Vector2) -> void:
 
 	# The server stores authoritative facing intent for snapshots.
 	_aim_direction_by_peer[peer_id] = aim_direction
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func submit_basic_attack() -> void:
+	if not multiplayer.is_server():
+		return
+
+	var peer_id: int = int(multiplayer.get_remote_sender_id())
+	if not players.has(peer_id):
+		return
+
+	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
+	var last_attack_time: float = float(_last_attack_time_by_peer.get(peer_id, -basic_attack_cooldown_seconds))
+	if now_seconds - last_attack_time < basic_attack_cooldown_seconds:
+		return
+
+	_last_attack_time_by_peer[peer_id] = now_seconds
+	var attack_position: Vector3 = players[peer_id] as Vector3
+	var facing_direction: Vector2 = _aim_direction_by_peer.get(peer_id, Vector2(0.0, -1.0)) as Vector2
+	if facing_direction.length_squared() <= 0.0001:
+		facing_direction = Vector2(0.0, -1.0)
+
+	# Server accepts attack intent only for joined players and uses authoritative facing.
+	var normalized_facing: Vector2 = facing_direction.normalized()
+	rpc("show_basic_attack", peer_id, attack_position, normalized_facing)
+	var enemy_spawner: Node = get_node_or_null("../EnemySpawner")
+	if enemy_spawner != null:
+		enemy_spawner.call("resolve_basic_attack", peer_id, attack_position, normalized_facing)
+
+
+@rpc("authority", "call_remote", "reliable")
+func show_basic_attack(peer_id: int, attack_position: Vector3, facing_direction: Vector2) -> void:
+	if facing_direction.length_squared() <= 0.0001:
+		return
+
+	var normalized_facing: Vector2 = facing_direction.normalized()
+	var marker: MeshInstance3D = MeshInstance3D.new()
+	var marker_mesh: BoxMesh = BoxMesh.new()
+	marker_mesh.size = Vector3(0.7, 0.18, 1.4)
+	marker.mesh = marker_mesh
+
+	var material: StandardMaterial3D = StandardMaterial3D.new()
+	material.albedo_color = Color(1.0, 0.75, 0.05, 0.75)
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	marker.material_override = material
+	marker.name = "BasicAttack_%s" % peer_id
+	marker.position = attack_position + Vector3(normalized_facing.x, 0.0, normalized_facing.y) * 1.2 + Vector3(0.0, 0.25, 0.0)
+	marker.rotation.y = atan2(-normalized_facing.x, -normalized_facing.y)
+	add_child(marker)
+
+	var cleanup_timer: Timer = Timer.new()
+	cleanup_timer.one_shot = true
+	cleanup_timer.wait_time = 0.18
+	marker.add_child(cleanup_timer)
+	cleanup_timer.timeout.connect(marker.queue_free)
+	cleanup_timer.start()
 
 
 @rpc("authority", "call_remote", "reliable")

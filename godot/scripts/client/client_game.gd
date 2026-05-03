@@ -24,6 +24,7 @@ var _has_sent_input := false
 var _has_sent_aim := false
 var _is_connected_to_server := false
 var _has_sent_join_request := false
+var _was_attack_pressed := false
 
 
 func _ready() -> void:
@@ -65,6 +66,7 @@ func _process(delta: float) -> void:
 	if aim_direction != Vector2.ZERO and _should_send_aim(aim_direction):
 		_send_aim_input(aim_direction)
 
+	_read_basic_attack_input()
 	_update_camera_follow(delta)
 
 
@@ -92,6 +94,7 @@ func _on_connected_to_server() -> void:
 func _on_connection_failed() -> void:
 	_is_connected_to_server = false
 	world_spawner.set_local_prediction_input(Vector2.ZERO)
+	_was_attack_pressed = false
 	print("Failed to connect to game server.")
 
 
@@ -99,6 +102,7 @@ func _on_server_disconnected() -> void:
 	_is_connected_to_server = false
 	_has_sent_join_request = false
 	world_spawner.set_local_prediction_input(Vector2.ZERO)
+	_was_attack_pressed = false
 	print("Disconnected from game server.")
 
 
@@ -198,6 +202,19 @@ func _send_aim_input(aim_direction: Vector2) -> void:
 	_last_sent_aim = aim_direction
 	_aim_heartbeat_timer = 0.0
 	_has_sent_aim = true
+
+
+func _read_basic_attack_input() -> void:
+	var is_attack_pressed: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_key_pressed(KEY_SPACE)
+	if is_attack_pressed and not _was_attack_pressed:
+		_send_basic_attack_intent()
+
+	_was_attack_pressed = is_attack_pressed
+
+
+func _send_basic_attack_intent() -> void:
+	# Client sends attack intent only; the server decides cooldown and visual event timing.
+	world_spawner.rpc_id(1, "submit_basic_attack")
 
 
 func _update_camera_follow(delta: float) -> void:
