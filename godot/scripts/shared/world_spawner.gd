@@ -167,10 +167,14 @@ func spawn_player(peer_id: int, spawn_position: Vector3, character_name: String 
 
 	var player: Node3D = player_placeholder_scene.instantiate() as Node3D
 	player.name = "Player_%s" % peer_id
-	player.position = spawn_position
+	var initial_position: Vector3 = spawn_position
+	if _target_positions.has(peer_id):
+		initial_position = _target_positions[peer_id] as Vector3
+
+	player.position = initial_position
 	add_child(player)
 	_spawned_nodes[peer_id] = player
-	_target_positions[peer_id] = spawn_position
+	_target_positions[peer_id] = initial_position
 	_set_peer_label(player, peer_id, character_name)
 
 	print("Network player instantiated on client: peer_id=%s position=%s node_name=%s" % [peer_id, spawn_position, player.name])
