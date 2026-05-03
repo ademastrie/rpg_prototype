@@ -1,0 +1,107 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/client/login_character_select.gd" id="1_login_character_select"]
+[ext_resource type="Script" path="res://scripts/backend_api_client.gd" id="2_backend_api_client"]
+
+[node name="LoginCharacterSelect" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_login_character_select")
+
+[node name="BackendApiClient" type="Node" parent="."]
+script = ExtResource("2_backend_api_client")
+
+[node name="RootMargin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 24
+
+[node name="RootLayout" type="VBoxContainer" parent="RootMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="TitleLabel" type="Label" parent="RootMargin/RootLayout"]
+layout_mode = 2
+text = "Backend Login / Character Test"
+
+[node name="EmailLabel" type="Label" parent="RootMargin/RootLayout"]
+layout_mode = 2
+text = "Email"
+
+[node name="EmailEdit" type="LineEdit" parent="RootMargin/RootLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "email@example.com"
+
+[node name="PasswordLabel" type="Label" parent="RootMargin/RootLayout"]
+layout_mode = 2
+text = "Password"
+
+[node name="PasswordEdit" type="LineEdit" parent="RootMargin/RootLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "password"
+secret = true
+
+[node name="AuthButtons" type="HBoxContainer" parent="RootMargin/RootLayout"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="RegisterButton" type="Button" parent="RootMargin/RootLayout/AuthButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Register"
+
+[node name="LoginButton" type="Button" parent="RootMargin/RootLayout/AuthButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Login"
+
+[node name="StatusLabel" type="Label" parent="RootMargin/RootLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+text = "Ready."
+
+[node name="CharacterSectionLabel" type="Label" parent="RootMargin/RootLayout"]
+layout_mode = 2
+text = "Characters"
+
+[node name="CharacterList" type="ItemList" parent="RootMargin/RootLayout"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 180)
+layout_mode = 2
+
+[node name="CharacterNameLabel" type="Label" parent="RootMargin/RootLayout"]
+layout_mode = 2
+text = "New Character Name"
+
+[node name="CharacterNameEdit" type="LineEdit" parent="RootMargin/RootLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Character name"
+
+[node name="CharacterButtons" type="HBoxContainer" parent="RootMargin/RootLayout"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="CreateCharacterButton" type="Button" parent="RootMargin/RootLayout/CharacterButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Create Character"
+
+[node name="RefreshCharactersButton" type="Button" parent="RootMargin/RootLayout/CharacterButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Refresh Characters"
