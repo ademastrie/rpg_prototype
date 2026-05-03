@@ -2,6 +2,10 @@ extends Node
 
 @export var server_port: int = 7777
 
+@onready var world_spawner: Node2D = $WorldSpawner
+
+var connected_peers: Array[int] = []
+
 
 func _ready() -> void:
 	print("Server game scene ready.")
@@ -19,12 +23,17 @@ func _start_server() -> void:
 		return
 
 	multiplayer.multiplayer_peer = peer
+	world_spawner.register_server_player()
 	print("ENet server started on port %s." % server_port)
 
 
 func _on_peer_connected(peer_id: int) -> void:
 	print("Peer connected: %s" % peer_id)
+	connected_peers.append(peer_id)
+	world_spawner.register_peer(peer_id)
 
 
 func _on_peer_disconnected(peer_id: int) -> void:
 	print("Peer disconnected: %s" % peer_id)
+	connected_peers.erase(peer_id)
+	world_spawner.unregister_peer(peer_id)

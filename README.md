@@ -21,6 +21,21 @@ From `backend/`:
 uvicorn app.main:app --reload
 ```
 
+Or launch the backend from anywhere:
+
+```powershell
+.\scripts\run_backend.ps1
+```
+
+Launch the Godot server and client scenes:
+
+```powershell
+.\godot\scripts\dev\run_server.ps1 -GodotExe "C:\path\to\godot.exe"
+.\godot\scripts\dev\run_client.ps1 -GodotExe "C:\path\to\godot.exe"
+```
+
+You can also set `GODOT_EXE` instead of passing `-GodotExe`.
+
 Check the PostgreSQL connection:
 
 ```powershell
