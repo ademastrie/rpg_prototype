@@ -6,9 +6,11 @@ signal spawned_player_count_changed(count: int)
 @export var movement_speed: float = 4.0
 @export var simulation_tick_rate: float = 30.0
 @export var snapshot_rate: float = 10.0
+@export var interpolation_speed: float = 12.0
 
 var players: Dictionary = {}
 var _spawned_nodes: Dictionary = {}
+var _target_positions: Dictionary = {}
 var _last_input_by_peer: Dictionary = {}
 var _simulation_accumulator := 0.0
 var _snapshot_accumulator := 0.0
@@ -29,17 +31,19 @@ const SPAWN_POSITIONS: Array[Vector3] = [
 
 func register_peer(peer_id: int) -> void:
 	for existing_peer_id in players:
-		var spawn_position: Vector3 = players[existing_peer_id]
-		rpc_id(peer_id, "spawn_player", existing_peer_id, spawn_position)
+		var existing_peer_id_int: int = int(existing_peer_id)
+		var spawn_position: Vector3 = players[existing_peer_id] as Vector3
+		rpc_id(peer_id, "spawn_player", existing_peer_id_int, spawn_position)
 
 	_register_player(peer_id)
-	var peer_position: Vector3 = players[peer_id]
+	var peer_position: Vector3 = players[peer_id] as Vector3
 	rpc("spawn_player", peer_id, peer_position)
 	_broadcast_position_snapshots()
 
 
 func unregister_peer(peer_id: int) -> void:
 	players.erase(peer_id)
+	_target_positions.erase(peer_id)
 	_last_input_by_peer.erase(peer_id)
 	rpc("despawn_player", peer_id)
 
@@ -52,6 +56,7 @@ func _register_player(peer_id: int) -> void:
 
 func _process(delta: float) -> void:
 	if not multiplayer.is_server():
+		_smooth_spawned_players(delta)
 		return
 
 	_simulation_accumulator += delta
@@ -70,11 +75,11 @@ func _process(delta: float) -> void:
 
 func _simulate(delta: float) -> void:
 	for peer_id in players:
-		var input_direction: Vector2 = _last_input_by_peer.get(peer_id, Vector2.ZERO)
+		var input_direction: Vector2 = _last_input_by_peer.get(peer_id, Vector2.ZERO) as Vector2
 		if input_direction.length_squared() > 1.0:
 			input_direction = input_direction.normalized()
 
-		var position: Vector3 = players[peer_id]
+		var position: Vector3 = players[peer_id] as Vector3
 		position.x += input_direction.x * movement_speed * delta
 		position.z += input_direction.y * movement_speed * delta
 		players[peer_id] = position
@@ -82,7 +87,21 @@ func _simulate(delta: float) -> void:
 
 func _broadcast_position_snapshots() -> void:
 	for peer_id in players:
-		rpc("apply_position_snapshot", peer_id, players[peer_id])
+		var peer_id_int: int = int(peer_id)
+		var position: Vector3 = players[peer_id] as Vector3
+		rpc("apply_position_snapshot", peer_id_int, position)
+
+
+func _smooth_spawned_players(delta: float) -> void:
+	var weight: float = clamp(interpolation_speed * delta, 0.0, 1.0)
+	for peer_id in _spawned_nodes:
+		if not _target_positions.has(peer_id):
+			continue
+
+		var player: Node3D = _spawned_nodes[peer_id] as Node3D
+		var target_position: Vector3 = _target_positions[peer_id] as Vector3
+		# Visual smoothing happens here; authoritative state remains on the server.
+		player.position = player.position.lerp(target_position, weight)
 
 
 func _spawn_position_for_index(spawn_index: int) -> Vector3:
@@ -110,17 +129,19 @@ func _spawn_position_for_index(spawn_index: int) -> Vector3:
 func spawn_player(peer_id: int, spawn_position: Vector3) -> void:
 	if _spawned_nodes.has(peer_id):
 		_spawned_nodes[peer_id].position = spawn_position
+		_target_positions[peer_id] = spawn_position
 		return
 
 	if player_placeholder_scene == null:
 		print("Cannot spawn player %s: player placeholder scene is not set." % peer_id)
 		return
 
-	var player := player_placeholder_scene.instantiate()
+	var player: Node3D = player_placeholder_scene.instantiate() as Node3D
 	player.name = "Player_%s" % peer_id
 	player.position = spawn_position
 	add_child(player)
 	_spawned_nodes[peer_id] = player
+	_target_positions[peer_id] = spawn_position
 	_set_peer_label(player, peer_id)
 
 	print("Network player instantiated on client: peer_id=%s position=%s node_name=%s" % [peer_id, spawn_position, player.name])
@@ -129,8 +150,8 @@ func spawn_player(peer_id: int, spawn_position: Vector3) -> void:
 
 @rpc("authority", "call_remote", "unreliable")
 func apply_position_snapshot(peer_id: int, authoritative_position: Vector3) -> void:
-	if _spawned_nodes.has(peer_id):
-		_spawned_nodes[peer_id].position = authoritative_position
+	# Authoritative positions are received here and stored as visual targets.
+	_target_positions[peer_id] = authoritative_position
 
 
 @rpc("any_peer", "call_remote", "unreliable")
@@ -138,7 +159,7 @@ func submit_movement_input(input_direction: Vector2) -> void:
 	if not multiplayer.is_server():
 		return
 
-	var peer_id := multiplayer.get_remote_sender_id()
+	var peer_id: int = int(multiplayer.get_remote_sender_id())
 	if not players.has(peer_id):
 		return
 
@@ -153,13 +174,15 @@ func despawn_player(peer_id: int) -> void:
 	if not _spawned_nodes.has(peer_id):
 		return
 
-	_spawned_nodes[peer_id].queue_free()
+	var player: Node3D = _spawned_nodes[peer_id] as Node3D
+	player.queue_free()
 	_spawned_nodes.erase(peer_id)
+	_target_positions.erase(peer_id)
 	print("Despawned player for peer %s." % peer_id)
 	spawned_player_count_changed.emit(_spawned_nodes.size())
 
 
 func _set_peer_label(player: Node, peer_id: int) -> void:
-	var peer_label := player.get_node_or_null("PeerLabel")
+	var peer_label: Label3D = player.get_node_or_null("PeerLabel") as Label3D
 	if peer_label != null:
 		peer_label.text = "Peer %s" % peer_id
