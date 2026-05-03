@@ -1,6 +1,7 @@
 extends Node3D
 
 signal spawned_player_count_changed(count: int)
+signal join_requested(peer_id: int, character_id: int, character_name: String, access_token: String)
 
 @export var player_placeholder_scene: PackedScene
 @export var movement_speed: float = 4.0
@@ -15,6 +16,7 @@ var _last_input_by_peer: Dictionary = {}
 var _simulation_accumulator := 0.0
 var _snapshot_accumulator := 0.0
 var _next_spawn_index := 0
+var _character_names_by_peer: Dictionary = {}
 
 const SPAWN_POSITIONS: Array[Vector3] = [
 	Vector3(0, 0, 0),
@@ -29,15 +31,21 @@ const SPAWN_POSITIONS: Array[Vector3] = [
 ]
 
 
-func register_peer(peer_id: int) -> void:
+func send_join_request(character_id: int, character_name: String, access_token: String) -> void:
+	rpc_id(1, "request_join", character_id, character_name, access_token)
+
+
+func register_peer(peer_id: int, character_name: String = "") -> void:
 	for existing_peer_id in players:
 		var existing_peer_id_int: int = int(existing_peer_id)
 		var spawn_position: Vector3 = players[existing_peer_id] as Vector3
-		rpc_id(peer_id, "spawn_player", existing_peer_id_int, spawn_position)
+		var existing_character_name: String = str(_character_names_by_peer.get(existing_peer_id, ""))
+		rpc_id(peer_id, "spawn_player", existing_peer_id_int, spawn_position, existing_character_name)
 
 	_register_player(peer_id)
+	_character_names_by_peer[peer_id] = character_name
 	var peer_position: Vector3 = players[peer_id] as Vector3
-	rpc("spawn_player", peer_id, peer_position)
+	rpc("spawn_player", peer_id, peer_position, character_name)
 	_broadcast_position_snapshots()
 
 
@@ -45,6 +53,7 @@ func unregister_peer(peer_id: int) -> void:
 	players.erase(peer_id)
 	_target_positions.erase(peer_id)
 	_last_input_by_peer.erase(peer_id)
+	_character_names_by_peer.erase(peer_id)
 	rpc("despawn_player", peer_id)
 
 
@@ -126,10 +135,11 @@ func _spawn_position_for_index(spawn_index: int) -> Vector3:
 
 
 @rpc("authority", "call_remote", "reliable")
-func spawn_player(peer_id: int, spawn_position: Vector3) -> void:
+func spawn_player(peer_id: int, spawn_position: Vector3, character_name: String = "") -> void:
 	if _spawned_nodes.has(peer_id):
 		_spawned_nodes[peer_id].position = spawn_position
 		_target_positions[peer_id] = spawn_position
+		_set_peer_label(_spawned_nodes[peer_id] as Node, peer_id, character_name)
 		return
 
 	if player_placeholder_scene == null:
@@ -142,7 +152,7 @@ func spawn_player(peer_id: int, spawn_position: Vector3) -> void:
 	add_child(player)
 	_spawned_nodes[peer_id] = player
 	_target_positions[peer_id] = spawn_position
-	_set_peer_label(player, peer_id)
+	_set_peer_label(player, peer_id, character_name)
 
 	print("Network player instantiated on client: peer_id=%s position=%s node_name=%s" % [peer_id, spawn_position, player.name])
 	spawned_player_count_changed.emit(_spawned_nodes.size())
@@ -152,6 +162,15 @@ func spawn_player(peer_id: int, spawn_position: Vector3) -> void:
 func apply_position_snapshot(peer_id: int, authoritative_position: Vector3) -> void:
 	# Authoritative positions are received here and stored as visual targets.
 	_target_positions[peer_id] = authoritative_position
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_join(character_id: int, character_name: String, access_token: String) -> void:
+	if not multiplayer.is_server():
+		return
+
+	var peer_id: int = int(multiplayer.get_remote_sender_id())
+	join_requested.emit(peer_id, character_id, character_name, access_token)
 
 
 @rpc("any_peer", "call_remote", "unreliable")
@@ -182,7 +201,10 @@ func despawn_player(peer_id: int) -> void:
 	spawned_player_count_changed.emit(_spawned_nodes.size())
 
 
-func _set_peer_label(player: Node, peer_id: int) -> void:
+func _set_peer_label(player: Node, peer_id: int, character_name: String = "") -> void:
 	var peer_label: Label3D = player.get_node_or_null("PeerLabel") as Label3D
 	if peer_label != null:
-		peer_label.text = "Peer %s" % peer_id
+		if character_name.strip_edges() == "":
+			peer_label.text = "Peer %s" % peer_id
+		else:
+			peer_label.text = "%s\nPeer %s" % [character_name, peer_id]

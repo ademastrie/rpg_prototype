@@ -14,6 +14,7 @@ var _last_sent_input := Vector2.ZERO
 var _input_heartbeat_timer := 0.0
 var _has_sent_input := false
 var _is_connected_to_server := false
+var _has_sent_join_request := false
 
 
 func _ready() -> void:
@@ -38,7 +39,7 @@ func set_selected_character(character_data: Dictionary) -> void:
 
 
 func _process(delta: float) -> void:
-	if not _is_connected_to_server:
+	if not _is_connected_to_server or not _has_sent_join_request:
 		return
 
 	_input_heartbeat_timer += delta
@@ -64,8 +65,8 @@ func _connect_to_server() -> void:
 
 func _on_connected_to_server() -> void:
 	_is_connected_to_server = true
-	_send_movement_input(Vector2.ZERO)
 	print("Connected to game server.")
+	_send_join_request()
 
 
 func _on_connection_failed() -> void:
@@ -75,6 +76,7 @@ func _on_connection_failed() -> void:
 
 func _on_server_disconnected() -> void:
 	_is_connected_to_server = false
+	_has_sent_join_request = false
 	print("Disconnected from game server.")
 
 
@@ -124,3 +126,20 @@ func _send_movement_input(input_direction: Vector2) -> void:
 	_last_sent_input = input_direction
 	_input_heartbeat_timer = 0.0
 	_has_sent_input = true
+
+
+func _send_join_request() -> void:
+	if selected_character.is_empty():
+		print("Cannot join game server: no selected character in ClientSession.")
+		return
+
+	var character_id: int = int(selected_character.get("id", 0))
+	var character_name: String = str(selected_character.get("name", "Unnamed"))
+	if character_id <= 0:
+		print("Cannot join game server: selected character is missing a valid id.")
+		return
+
+	world_spawner.send_join_request(character_id, character_name, ClientSession.access_token)
+	_has_sent_join_request = true
+	_send_movement_input(Vector2.ZERO)
+	print("Sent join request for character %s (%s)." % [character_name, character_id])
