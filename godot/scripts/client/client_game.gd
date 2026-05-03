@@ -7,6 +7,7 @@ extends Node3D
 @onready var status_label: Label = $StatusLabel
 @onready var spawn_count_label: Label = $SpawnCountLabel
 @onready var world_spawner: Node3D = $WorldSpawner
+@onready var active_camera: Camera3D = $Camera3D
 
 var selected_character: Dictionary = {}
 var _last_sent_input := Vector2.ZERO
@@ -83,21 +84,39 @@ func _on_spawned_player_count_changed(count: int) -> void:
 
 
 func _read_movement_input() -> Vector2:
-	var input_direction := Vector2.ZERO
+	var screen_direction := Vector2.ZERO
 
 	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
-		input_direction.x += 1.0
+		screen_direction.x += 1.0
 	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
-		input_direction.x -= 1.0
+		screen_direction.x -= 1.0
 	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
-		input_direction.y += 1.0
+		screen_direction.y += 1.0
 	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
-		input_direction.y -= 1.0
+		screen_direction.y -= 1.0
 
-	if input_direction.length_squared() > 1.0:
-		input_direction = input_direction.normalized()
+	if screen_direction == Vector2.ZERO:
+		return Vector2.ZERO
 
-	return input_direction
+	if screen_direction.length_squared() > 1.0:
+		screen_direction = screen_direction.normalized()
+
+	var world_direction := _screen_input_to_world_xz(screen_direction)
+	return Vector2(world_direction.x, world_direction.z)
+
+
+func _screen_input_to_world_xz(screen_direction: Vector2) -> Vector3:
+	var camera_right := active_camera.global_transform.basis.x
+	var camera_up := active_camera.global_transform.basis.y
+
+	var world_right := Vector3(camera_right.x, 0.0, camera_right.z).normalized()
+	var world_up := Vector3(camera_up.x, 0.0, camera_up.z).normalized()
+	var world_direction := (world_right * screen_direction.x) + (world_up * -screen_direction.y)
+
+	if world_direction.length_squared() > 1.0:
+		world_direction = world_direction.normalized()
+
+	return world_direction
 
 
 func _send_movement_input(input_direction: Vector2) -> void:
