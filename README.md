@@ -2,6 +2,18 @@
 
 ## Backend
 
+Set up the Windows development environment:
+
+```powershell
+.\backend\scripts\setup_dev.ps1
+```
+
+Or from `backend/`:
+
+```powershell
+.\scripts\setup_dev.ps1
+```
+
 From `backend/`:
 
 ```powershell

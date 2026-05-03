@@ -23,3 +23,10 @@ From `backend/`:
 ```powershell
 .\.venv\Scripts\activate
 uvicorn app.main:app --reload
+```
+
+If backend virtualenv launchers fail because they point at a missing Python executable, recreate `backend/.venv` from `backend/requirements.txt` using:
+
+```powershell
+.\backend\scripts\setup_dev.ps1
+```
