@@ -1,5 +1,7 @@
 extends Node3D
 
+signal spawned_player_count_changed(count: int)
+
 @export var player_placeholder_scene: PackedScene
 
 var players: Dictionary = {}
@@ -45,7 +47,8 @@ func spawn_player(peer_id: int, spawn_position: Vector3) -> void:
 	add_child(player)
 	_spawned_nodes[peer_id] = player
 
-	print("Spawned player for peer %s at %s." % [peer_id, spawn_position])
+	print("Instantiated player placeholder: peer_id=%s spawn_position=%s node_name=%s" % [peer_id, spawn_position, player.name])
+	spawned_player_count_changed.emit(_spawned_nodes.size())
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -56,3 +59,4 @@ func despawn_player(peer_id: int) -> void:
 	_spawned_nodes[peer_id].queue_free()
 	_spawned_nodes.erase(peer_id)
 	print("Despawned player for peer %s." % peer_id)
+	spawned_player_count_changed.emit(_spawned_nodes.size())

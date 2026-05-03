@@ -4,11 +4,15 @@ extends Node3D
 @export var server_port: int = 7777
 
 @onready var status_label: Label = $StatusLabel
+@onready var spawn_count_label: Label = $SpawnCountLabel
+@onready var world_spawner: Node3D = $WorldSpawner
 
 var selected_character: Dictionary = {}
 
 
 func _ready() -> void:
+	world_spawner.spawned_player_count_changed.connect(_on_spawned_player_count_changed)
+	_on_spawned_player_count_changed(0)
 	set_selected_character(ClientSession.selected_character)
 	_connect_to_server()
 
@@ -52,3 +56,8 @@ func _on_connection_failed() -> void:
 
 func _on_server_disconnected() -> void:
 	print("Disconnected from game server.")
+
+
+func _on_spawned_player_count_changed(count: int) -> void:
+	spawn_count_label.text = "Spawned players: %s" % count
+	print("Spawned player count: %s" % count)

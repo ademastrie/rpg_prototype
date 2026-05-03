@@ -1,11 +1,47 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://scripts/client/client_game.gd" id="1_client_game"]
 [ext_resource type="PackedScene" path="res://scenes/shared/player_placeholder_3d.tscn" id="2_player_placeholder_3d"]
 [ext_resource type="Script" path="res://scripts/shared/world_spawner.gd" id="3_world_spawner"]
+[ext_resource type="Script" path="res://scripts/client/isometric_camera.gd" id="4_isometric_camera"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
-size = Vector2(24, 24)
+size = Vector2(48, 48)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_color = Color(0.18, 0.24, 0.2, 1)
+shading_mode = 0
+
+[sub_resource type="BoxMesh" id="BoxMesh_axis_x"]
+size = Vector3(18, 0.08, 0.18)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_axis_x"]
+albedo_color = Color(0.9, 0.12, 0.12, 1)
+shading_mode = 0
+
+[sub_resource type="BoxMesh" id="BoxMesh_axis_z"]
+size = Vector3(0.18, 0.08, 18)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_axis_z"]
+albedo_color = Color(0.12, 0.35, 1, 1)
+shading_mode = 0
+
+[sub_resource type="SphereMesh" id="SphereMesh_origin"]
+radius = 0.45
+height = 0.9
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_origin"]
+albedo_color = Color(1, 1, 1, 1)
+shading_mode = 0
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_spawn"]
+top_radius = 0.35
+bottom_radius = 0.35
+height = 0.08
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_spawn"]
+albedo_color = Color(0.2, 1, 0.25, 1)
+shading_mode = 0
 
 [node name="Game" type="Node3D"]
 script = ExtResource("1_client_game")
@@ -17,18 +53,56 @@ offset_right = 360.0
 offset_bottom = 40.0
 text = "Client game scene scaffold"
 
+[node name="SpawnCountLabel" type="Label" parent="."]
+offset_left = 16.0
+offset_top = 44.0
+offset_right = 260.0
+offset_bottom = 68.0
+text = "Spawned players: 0"
+
 [node name="WorldSpawner" type="Node3D" parent="."]
 script = ExtResource("3_world_spawner")
 player_placeholder_scene = ExtResource("2_player_placeholder_3d")
 
+[node name="LocalDebugPlayer_NotNetworked" parent="." instance=ExtResource("2_player_placeholder_3d")]
+position = Vector3(0, 0, 0)
+
 [node name="Ground" type="MeshInstance3D" parent="."]
 mesh = SubResource("PlaneMesh_ground")
+surface_material_override/0 = SubResource("StandardMaterial3D_ground")
+
+[node name="XAxisMarker" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9, 0.06, 0)
+mesh = SubResource("BoxMesh_axis_x")
+surface_material_override/0 = SubResource("StandardMaterial3D_axis_x")
+
+[node name="ZAxisMarker" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.07, 9)
+mesh = SubResource("BoxMesh_axis_z")
+surface_material_override/0 = SubResource("StandardMaterial3D_axis_z")
+
+[node name="OriginMarker" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+mesh = SubResource("SphereMesh_origin")
+surface_material_override/0 = SubResource("StandardMaterial3D_origin")
+
+[node name="SpawnAreaMarkerA" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 2, 0.08, 0)
+mesh = SubResource("CylinderMesh_spawn")
+surface_material_override/0 = SubResource("StandardMaterial3D_spawn")
+
+[node name="SpawnAreaMarkerB" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 4, 0.08, 0)
+mesh = SubResource("CylinderMesh_spawn")
+surface_material_override/0 = SubResource("StandardMaterial3D_spawn")
 
 [node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 6, 8, 6)
+transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 10, 12, 10)
 projection = 1
-size = 12.0
+size = 30.0
 current = true
+far = 200.0
+script = ExtResource("4_isometric_camera")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.707107, -0.5, 0.5, 0, 0.707107, 0.707107, -0.707107, -0.5, 0.5, 0, 6, 0)
