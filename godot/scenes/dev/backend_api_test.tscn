@@ -1,0 +1,12 @@
+[gd_scene load_steps=3 format=3 uid="uid://m1dhxel8x38m"]
+
+[ext_resource type="Script" uid="uid://c7xpnuofuf34d" path="res://scripts/dev/backend_api_test.gd" id="1_backend_api_test"]
+[ext_resource type="Script" uid="uid://ccgbs0bk1gmnc" path="res://scripts/backend_api_client.gd" id="2_backend_api_client"]
+
+[node name="BackendApiTest" type="Node"]
+script = ExtResource("1_backend_api_test")
+email = "testing@example.com"
+login_on_ready = true
+
+[node name="BackendApiClient" type="Node" parent="."]
+script = ExtResource("2_backend_api_client")
