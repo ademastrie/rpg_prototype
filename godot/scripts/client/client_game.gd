@@ -17,6 +17,7 @@ var selected_character: Dictionary = {}
 var _local_player: Node3D = null
 var _camera_follow_offset: Vector3 = Vector3.ZERO
 var _fixed_camera_basis: Basis = Basis.IDENTITY
+var _character_status_text: String = ""
 var _last_sent_input := Vector2.ZERO
 var _last_sent_aim := Vector2.ZERO
 var _input_heartbeat_timer := 0.0
@@ -26,12 +27,14 @@ var _has_sent_aim := false
 var _is_connected_to_server := false
 var _has_sent_join_request := false
 var _was_attack_pressed := false
+var _is_local_player_down := false
 
 
 func _ready() -> void:
 	world_spawner.spawned_player_count_changed.connect(_on_spawned_player_count_changed)
 	world_spawner.player_spawned.connect(_on_player_spawned)
 	world_spawner.player_health_updated.connect(_on_player_health_updated)
+	world_spawner.player_down_state_updated.connect(_on_player_down_state_updated)
 	_camera_follow_offset = active_camera.global_position
 	_fixed_camera_basis = active_camera.global_transform.basis
 	_on_spawned_player_count_changed(0)
@@ -50,7 +53,8 @@ func set_selected_character(character_data: Dictionary) -> void:
 	var character_name := str(selected_character.get("name", "Unnamed"))
 	var level := int(selected_character.get("level", 1))
 	var region_id := str(selected_character.get("region_id", "unknown_region"))
-	status_label.text = "Character: %s | Level %s | Region: %s" % [character_name, level, region_id]
+	_character_status_text = "Character: %s | Level %s | Region: %s" % [character_name, level, region_id]
+	status_label.text = _character_status_text
 	print("Client game loaded character: %s" % selected_character)
 
 
@@ -61,6 +65,9 @@ func _process(delta: float) -> void:
 	_input_heartbeat_timer += delta
 	_aim_heartbeat_timer += delta
 	var input_direction := _read_movement_input()
+	if _is_local_player_down:
+		input_direction = Vector2.ZERO
+
 	world_spawner.set_local_prediction_input(input_direction)
 	if not _has_sent_input or input_direction != _last_sent_input or _input_heartbeat_timer >= input_heartbeat_interval:
 		_send_movement_input(input_direction)
@@ -96,6 +103,7 @@ func _on_connected_to_server() -> void:
 
 func _on_connection_failed() -> void:
 	_is_connected_to_server = false
+	_is_local_player_down = false
 	world_spawner.set_local_prediction_input(Vector2.ZERO)
 	_was_attack_pressed = false
 	print("Failed to connect to game server.")
@@ -104,6 +112,7 @@ func _on_connection_failed() -> void:
 func _on_server_disconnected() -> void:
 	_is_connected_to_server = false
 	_has_sent_join_request = false
+	_is_local_player_down = false
 	world_spawner.set_local_prediction_input(Vector2.ZERO)
 	_was_attack_pressed = false
 	print("Disconnected from game server.")
@@ -130,6 +139,19 @@ func _on_player_health_updated(peer_id: int, current_hp: int, max_hp: int) -> vo
 	health_label.text = "HP: %s/%s" % [current_hp, max_hp]
 	if current_hp <= 0:
 		print("Local player is down.")
+
+
+func _on_player_down_state_updated(peer_id: int, is_down: bool) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+
+	if is_down:
+		_is_local_player_down = true
+		world_spawner.set_local_prediction_input(Vector2.ZERO)
+		status_label.text = "%s | DOWN" % _character_status_text
+	else:
+		_is_local_player_down = false
+		status_label.text = _character_status_text
 
 
 func _read_movement_input() -> Vector2:
@@ -225,6 +247,9 @@ func _read_basic_attack_input() -> void:
 
 
 func _send_basic_attack_intent() -> void:
+	if _is_local_player_down:
+		return
+
 	# Client sends attack intent only; the server decides cooldown and visual event timing.
 	world_spawner.rpc_id(1, "submit_basic_attack")
 

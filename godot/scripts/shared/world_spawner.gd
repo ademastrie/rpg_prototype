@@ -3,6 +3,7 @@ extends Node3D
 signal spawned_player_count_changed(count: int)
 signal player_spawned(peer_id: int, player: Node3D)
 signal player_health_updated(peer_id: int, current_hp: int, max_hp: int)
+signal player_down_state_updated(peer_id: int, is_down: bool)
 signal join_requested(peer_id: int, character_id: int, character_name: String, access_token: String)
 
 @export var player_placeholder_scene: PackedScene
@@ -19,6 +20,7 @@ signal join_requested(peer_id: int, character_id: int, character_name: String, a
 @export var enemy_contact_range: float = 1.75
 @export var enemy_contact_damage: int = 10
 @export var enemy_contact_damage_interval: float = 1.0
+@export var player_respawn_delay_seconds: float = 3.0
 
 var players: Dictionary = {}
 var _spawned_nodes: Dictionary = {}
@@ -29,6 +31,8 @@ var _aim_direction_by_peer: Dictionary = {}
 var _last_attack_time_by_peer: Dictionary = {}
 var _player_max_hp_by_peer: Dictionary = {}
 var _player_current_hp_by_peer: Dictionary = {}
+var _player_is_down_by_peer: Dictionary = {}
+var _player_respawn_positions: Dictionary = {}
 var _last_contact_damage_time_by_peer: Dictionary = {}
 var _local_prediction_input: Vector2 = Vector2.ZERO
 var _simulation_accumulator := 0.0
@@ -91,6 +95,8 @@ func unregister_peer(peer_id: int) -> void:
 	_last_attack_time_by_peer.erase(peer_id)
 	_player_max_hp_by_peer.erase(peer_id)
 	_player_current_hp_by_peer.erase(peer_id)
+	_player_is_down_by_peer.erase(peer_id)
+	_player_respawn_positions.erase(peer_id)
 	_last_contact_damage_time_by_peer.erase(peer_id)
 	_character_names_by_peer.erase(peer_id)
 	rpc("despawn_player", peer_id)
@@ -120,7 +126,10 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_aim_direction_by_peer[peer_id] = Vector2(0.0, -1.0)
 	_player_max_hp_by_peer[peer_id] = player_max_hp
 	_player_current_hp_by_peer[peer_id] = player_max_hp
+	_player_is_down_by_peer[peer_id] = false
+	_player_respawn_positions[peer_id] = players[peer_id]
 	rpc("apply_player_health_update", peer_id, player_max_hp, player_max_hp)
+	rpc("apply_player_down_state", peer_id, false)
 	_next_spawn_index += 1
 
 
@@ -146,6 +155,9 @@ func _process(delta: float) -> void:
 
 func _simulate(delta: float) -> void:
 	for peer_id in players:
+		if bool(_player_is_down_by_peer.get(peer_id, false)):
+			continue
+
 		var input_direction: Vector2 = _last_input_by_peer.get(peer_id, Vector2.ZERO) as Vector2
 		if input_direction.length_squared() > 1.0:
 			input_direction = input_direction.normalized()
@@ -184,7 +196,46 @@ func _apply_enemy_contact_damage(_delta: float) -> void:
 			var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
 			rpc("apply_player_health_update", peer_id_int, current_hp, max_hp)
 			if current_hp <= 0:
-				print("Player peer %s is down." % peer_id_int)
+				_mark_player_down(peer_id_int)
+
+
+func _mark_player_down(peer_id: int) -> void:
+	if bool(_player_is_down_by_peer.get(peer_id, false)):
+		return
+
+	_player_is_down_by_peer[peer_id] = true
+	_last_input_by_peer[peer_id] = Vector2.ZERO
+	rpc("apply_player_down_state", peer_id, true)
+	print("Player peer %s is down." % peer_id)
+	_schedule_player_respawn(peer_id)
+
+
+func _schedule_player_respawn(peer_id: int) -> void:
+	var respawn_timer: Timer = Timer.new()
+	respawn_timer.one_shot = true
+	respawn_timer.wait_time = player_respawn_delay_seconds
+	add_child(respawn_timer)
+	respawn_timer.timeout.connect(_on_player_respawn_timer_timeout.bind(peer_id, respawn_timer))
+	respawn_timer.start()
+
+
+func _on_player_respawn_timer_timeout(peer_id: int, respawn_timer: Timer) -> void:
+	respawn_timer.queue_free()
+	if not multiplayer.is_server() or not players.has(peer_id):
+		return
+
+	var respawn_position: Vector3 = _player_respawn_positions.get(peer_id, Vector3.ZERO) as Vector3
+	var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
+	players[peer_id] = respawn_position
+	_last_input_by_peer[peer_id] = Vector2.ZERO
+	_player_current_hp_by_peer[peer_id] = max_hp
+	_player_is_down_by_peer[peer_id] = false
+	_last_contact_damage_time_by_peer[peer_id] = float(Time.get_ticks_msec()) / 1000.0
+	rpc("spawn_player", peer_id, respawn_position, str(_character_names_by_peer.get(peer_id, "")))
+	rpc("apply_position_snapshot", peer_id, respawn_position, _aim_direction_by_peer.get(peer_id, Vector2(0.0, -1.0)) as Vector2)
+	rpc("apply_player_health_update", peer_id, max_hp, max_hp)
+	rpc("apply_player_down_state", peer_id, false)
+	print("Player peer %s respawned." % peer_id)
 
 
 func _is_enemy_in_contact_range(player_position: Vector3, enemy_positions: Dictionary) -> bool:
@@ -306,6 +357,11 @@ func apply_player_health_update(peer_id: int, current_hp: int, max_hp: int) -> v
 	player_health_updated.emit(peer_id, current_hp, max_hp)
 
 
+@rpc("authority", "call_remote", "reliable")
+func apply_player_down_state(peer_id: int, is_down: bool) -> void:
+	player_down_state_updated.emit(peer_id, is_down)
+
+
 @rpc("any_peer", "call_remote", "reliable")
 func request_join(character_id: int, character_name: String, access_token: String) -> void:
 	if not multiplayer.is_server():
@@ -322,6 +378,8 @@ func submit_movement_input(input_direction: Vector2) -> void:
 
 	var peer_id: int = int(multiplayer.get_remote_sender_id())
 	if not players.has(peer_id):
+		return
+	if bool(_player_is_down_by_peer.get(peer_id, false)):
 		return
 
 	if input_direction.length_squared() > 1.0:
@@ -355,6 +413,8 @@ func submit_basic_attack() -> void:
 
 	var peer_id: int = int(multiplayer.get_remote_sender_id())
 	if not players.has(peer_id):
+		return
+	if bool(_player_is_down_by_peer.get(peer_id, false)):
 		return
 
 	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
