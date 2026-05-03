@@ -91,19 +91,32 @@ func register_peer_at_position(peer_id: int, character_name: String, spawn_posit
 
 
 func _register_peer(peer_id: int, character_name: String, use_custom_spawn: bool, custom_spawn_position: Vector3) -> void:
-	for existing_peer_id in players:
-		var existing_peer_id_int: int = int(existing_peer_id)
-		var spawn_position: Vector3 = players[existing_peer_id] as Vector3
-		var existing_character_name: String = str(_character_names_by_peer.get(existing_peer_id, ""))
-		rpc_id(peer_id, "spawn_player", existing_peer_id_int, spawn_position, existing_character_name)
-		rpc_id(peer_id, "apply_hp_regen_active_state", existing_peer_id_int, _is_hp_regen_active(existing_peer_id_int))
+	_sync_existing_players_to_peer(peer_id)
 
 	_register_player(peer_id, use_custom_spawn, custom_spawn_position)
 	_character_names_by_peer[peer_id] = character_name
 	var peer_position: Vector3 = players[peer_id] as Vector3
 	rpc("spawn_player", peer_id, peer_position, character_name)
 	_broadcast_hp_regen_active_state(peer_id)
-	_broadcast_position_snapshots()
+	_send_position_snapshots(peer_id)
+
+
+func _sync_existing_players_to_peer(peer_id: int) -> void:
+	var player_snapshots: Array = []
+	for existing_peer_id in players:
+		var existing_peer_id_int: int = int(existing_peer_id)
+		var spawn_position: Vector3 = players[existing_peer_id] as Vector3
+		var existing_character_name: String = str(_character_names_by_peer.get(existing_peer_id, ""))
+		player_snapshots.append({
+			"peer_id": existing_peer_id_int,
+			"position": spawn_position,
+			"character_name": existing_character_name,
+			"hp_regen_active": _is_hp_regen_active(existing_peer_id_int),
+		})
+
+	if not player_snapshots.is_empty():
+		rpc_id(peer_id, "spawn_players", player_snapshots)
+	print("Join sync targeted to peer %s: players=%s broadcast=false." % [peer_id, player_snapshots.size()])
 
 
 func unregister_peer(peer_id: int) -> void:
@@ -131,6 +144,22 @@ func get_authoritative_position(peer_id: int) -> Vector3:
 		return Vector3.ZERO
 
 	return players[peer_id] as Vector3
+
+
+func get_alive_player_positions() -> Dictionary:
+	var alive_positions: Dictionary = {}
+	for peer_id in players:
+		var peer_id_int: int = int(peer_id)
+		if bool(_player_is_down_by_peer.get(peer_id, false)):
+			continue
+
+		var current_hp: int = int(_player_current_hp_by_peer.get(peer_id, player_max_hp))
+		if current_hp <= 0:
+			continue
+
+		alive_positions[peer_id_int] = players[peer_id] as Vector3
+
+	return alive_positions
 
 
 func get_spawned_player(peer_id: int) -> Node3D:
@@ -408,6 +437,14 @@ func _broadcast_position_snapshots() -> void:
 		rpc("apply_position_snapshot", peer_id_int, position, facing_direction)
 
 
+func _send_position_snapshots(target_peer_id: int) -> void:
+	for peer_id in players:
+		var peer_id_int: int = int(peer_id)
+		var position: Vector3 = players[peer_id] as Vector3
+		var facing_direction: Vector2 = _aim_direction_by_peer.get(peer_id, Vector2(0.0, -1.0)) as Vector2
+		rpc_id(target_peer_id, "apply_position_snapshot", peer_id_int, position, facing_direction)
+
+
 func _smooth_spawned_players(delta: float) -> void:
 	var weight: float = clamp(interpolation_speed * delta, 0.0, 1.0)
 	for peer_id in _spawned_nodes:
@@ -467,6 +504,13 @@ func _spawn_position_for_index(spawn_index: int) -> Vector3:
 
 @rpc("authority", "call_remote", "reliable")
 func spawn_player(peer_id: int, spawn_position: Vector3, character_name: String = "") -> void:
+	if multiplayer.is_server():
+		return
+
+	_spawn_player_visual(peer_id, spawn_position, character_name, true)
+
+
+func _spawn_player_visual(peer_id: int, spawn_position: Vector3, character_name: String, print_spawn: bool) -> void:
 	if _spawned_nodes.has(peer_id):
 		_spawned_nodes[peer_id].position = spawn_position
 		_target_positions[peer_id] = spawn_position
@@ -489,9 +533,29 @@ func spawn_player(peer_id: int, spawn_position: Vector3, character_name: String 
 	_target_positions[peer_id] = initial_position
 	_set_peer_label(player, peer_id, character_name)
 
-	print("Network player instantiated on client: peer_id=%s position=%s node_name=%s" % [peer_id, spawn_position, player.name])
+	if print_spawn:
+		print("Network player instantiated on client: peer_id=%s position=%s node_name=%s" % [peer_id, spawn_position, player.name])
 	player_spawned.emit(peer_id, player)
 	spawned_player_count_changed.emit(_spawned_nodes.size())
+
+
+@rpc("authority", "call_remote", "reliable")
+func spawn_players(player_snapshots: Array) -> void:
+	if multiplayer.is_server():
+		return
+
+	for snapshot in player_snapshots:
+		var snapshot_data: Dictionary = snapshot as Dictionary
+		var peer_id: int = int(snapshot_data.get("peer_id", 0))
+		var spawn_position: Vector3 = snapshot_data.get("position", Vector3.ZERO) as Vector3
+		var character_name: String = str(snapshot_data.get("character_name", ""))
+		var hp_regen_active: bool = bool(snapshot_data.get("hp_regen_active", false))
+		if peer_id <= 0:
+			continue
+
+		_spawn_player_visual(peer_id, spawn_position, character_name, false)
+		_update_hp_regen_visual(peer_id, hp_regen_active)
+	print("Received targeted player sync: players=%s broadcast=false." % player_snapshots.size())
 
 
 @rpc("authority", "call_remote", "unreliable")

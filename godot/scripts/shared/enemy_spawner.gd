@@ -24,6 +24,11 @@ var _next_enemy_id: int = 1
 var _idle_time: float = 0.0
 var _snapshot_accumulator: float = 0.0
 
+const DEFAULT_ENEMY_DEFINITION: Dictionary = {
+	"aggro_radius": 8.0,
+	"chase_speed": 2.2,
+}
+
 const INITIAL_ENEMY_POSITIONS: Array[Vector3] = [
 	Vector3(6, 0, 2),
 	Vector3(8, 0, -2),
@@ -43,12 +48,24 @@ func sync_peer(peer_id: int) -> void:
 	if not multiplayer.is_server():
 		return
 
+	var alive_player_count: int = _get_alive_player_positions().size()
+	var enemy_snapshots: Array = []
 	for enemy_id in enemies:
 		var enemy_id_int: int = int(enemy_id)
 		var spawn_position: Vector3 = enemies[enemy_id] as Vector3
 		var current_hp: int = int(_enemy_current_hp_by_id.get(enemy_id, enemy_max_hp))
 		var max_hp: int = int(_enemy_max_hp_by_id.get(enemy_id, enemy_max_hp))
-		rpc_id(peer_id, "spawn_enemy", enemy_id_int, spawn_position, current_hp, max_hp)
+		enemy_snapshots.append({
+			"enemy_id": enemy_id_int,
+			"position": spawn_position,
+			"current_hp": current_hp,
+			"max_hp": max_hp,
+		})
+
+	if not enemy_snapshots.is_empty():
+		rpc_id(peer_id, "spawn_enemies", enemy_snapshots)
+	print("Join sync targeted to peer %s: enemies=%s broadcast=false." % [peer_id, enemy_snapshots.size()])
+	print("Enemy aggro accepted/alive players considered after peer %s join: %s." % [peer_id, alive_player_count])
 
 
 func get_active_enemy_positions() -> Dictionary:
@@ -62,7 +79,7 @@ func _process(delta: float) -> void:
 
 	_idle_time += delta
 	_snapshot_accumulator += delta
-	_update_enemy_idle_positions()
+	_update_enemy_positions(delta)
 
 	var safe_snapshot_rate: float = snapshot_rate
 	if safe_snapshot_rate <= 0.0:
@@ -162,12 +179,67 @@ func _respawn_enemy(enemy_id: int, spawn_position: Vector3) -> void:
 	print("Respawned enemy %s at %s." % [enemy_id, spawn_position])
 
 
-func _update_enemy_idle_positions() -> void:
+func _update_enemy_positions(delta: float) -> void:
+	var alive_player_positions: Dictionary = _get_alive_player_positions()
 	for enemy_id in enemies:
 		var enemy_id_int: int = int(enemy_id)
+		var enemy_position: Vector3 = enemies[enemy_id] as Vector3
+		var target: Dictionary = _nearest_aggro_player(enemy_position, alive_player_positions)
+		if bool(target.get("has_target", false)):
+			var target_position: Vector3 = target.get("position", Vector3.ZERO) as Vector3
+			enemies[enemy_id] = _chase_position(enemy_position, target_position, delta)
+			continue
+
 		var origin_position: Vector3 = _enemy_origin_positions[enemy_id] as Vector3
 		var angle: float = _idle_time * idle_speed + float(enemy_id_int)
 		enemies[enemy_id] = origin_position + Vector3(cos(angle) * idle_radius, 0.0, sin(angle) * idle_radius)
+
+
+func _get_alive_player_positions() -> Dictionary:
+	var world_spawner: Node = get_node_or_null("../WorldSpawner")
+	if world_spawner == null:
+		return {}
+
+	return world_spawner.call("get_alive_player_positions") as Dictionary
+
+
+func _nearest_aggro_player(enemy_position: Vector3, alive_player_positions: Dictionary) -> Dictionary:
+	var aggro_radius: float = _enemy_definition_float("aggro_radius", 8.0)
+	var nearest_position: Vector3 = Vector3.ZERO
+	var nearest_distance: float = aggro_radius
+	var has_target: bool = false
+	for peer_id in alive_player_positions:
+		var player_position: Vector3 = alive_player_positions[peer_id] as Vector3
+		var offset_xz: Vector2 = Vector2(player_position.x - enemy_position.x, player_position.z - enemy_position.z)
+		var distance: float = offset_xz.length()
+		if distance <= nearest_distance:
+			nearest_distance = distance
+			nearest_position = player_position
+			has_target = true
+
+	return {
+		"has_target": has_target,
+		"position": nearest_position,
+	}
+
+
+func _chase_position(enemy_position: Vector3, target_position: Vector3, delta: float) -> Vector3:
+	var offset: Vector3 = target_position - enemy_position
+	offset.y = 0.0
+	if offset.length_squared() <= 0.0001:
+		return enemy_position
+
+	var chase_speed: float = _enemy_definition_float("chase_speed", 2.2)
+	var max_step: float = chase_speed * delta
+	var distance: float = offset.length()
+	if distance <= max_step:
+		return Vector3(target_position.x, enemy_position.y, target_position.z)
+
+	return enemy_position + offset.normalized() * max_step
+
+
+func _enemy_definition_float(key: String, fallback: float) -> float:
+	return float(DEFAULT_ENEMY_DEFINITION.get(key, fallback))
 
 
 func _broadcast_enemy_position_snapshots() -> void:
@@ -197,6 +269,31 @@ func _smooth_spawned_enemies(delta: float) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func spawn_enemy(enemy_id: int, spawn_position: Vector3, current_hp: int = 30, max_hp: int = 30) -> void:
+	if multiplayer.is_server():
+		return
+
+	_spawn_enemy_visual(enemy_id, spawn_position, current_hp, max_hp, true)
+
+
+@rpc("authority", "call_remote", "reliable")
+func spawn_enemies(enemy_snapshots: Array) -> void:
+	if multiplayer.is_server():
+		return
+
+	for snapshot in enemy_snapshots:
+		var snapshot_data: Dictionary = snapshot as Dictionary
+		var enemy_id: int = int(snapshot_data.get("enemy_id", 0))
+		var spawn_position: Vector3 = snapshot_data.get("position", Vector3.ZERO) as Vector3
+		var current_hp: int = int(snapshot_data.get("current_hp", enemy_max_hp))
+		var max_hp: int = int(snapshot_data.get("max_hp", enemy_max_hp))
+		if enemy_id <= 0:
+			continue
+
+		_spawn_enemy_visual(enemy_id, spawn_position, current_hp, max_hp, false)
+	print("Received targeted enemy sync: enemies=%s broadcast=false." % enemy_snapshots.size())
+
+
+func _spawn_enemy_visual(enemy_id: int, spawn_position: Vector3, current_hp: int, max_hp: int, print_spawn: bool) -> void:
 	if _spawned_enemy_nodes.has(enemy_id):
 		var existing_enemy: Node3D = _spawned_enemy_nodes[enemy_id] as Node3D
 		existing_enemy.position = spawn_position
@@ -219,7 +316,8 @@ func spawn_enemy(enemy_id: int, spawn_position: Vector3, current_hp: int = 30, m
 	_spawned_enemy_nodes[enemy_id] = enemy
 	_target_positions[enemy_id] = initial_position
 	_set_enemy_label(enemy, enemy_id, current_hp, max_hp)
-	print("Enemy placeholder instantiated on client: enemy_id=%s position=%s node_name=%s" % [enemy_id, spawn_position, enemy.name])
+	if print_spawn:
+		print("Enemy placeholder instantiated on client: enemy_id=%s position=%s node_name=%s" % [enemy_id, spawn_position, enemy.name])
 
 
 @rpc("authority", "call_remote", "unreliable")

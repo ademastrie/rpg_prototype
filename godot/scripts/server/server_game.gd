@@ -35,6 +35,7 @@ func _start_server() -> void:
 
 func _on_peer_connected(peer_id: int) -> void:
 	print("Peer connected: %s" % peer_id)
+	print("Peer joined pending validation: %s." % peer_id)
 	connected_peers.append(peer_id)
 	peer_sessions[peer_id] = {
 		"peer_id": peer_id,
@@ -168,7 +169,7 @@ func _on_join_validation_completed(
 		"joined": true,
 	}
 	peer_sessions[peer_id] = session
-	print("Peer %s validated as character %s (%s)." % [peer_id, character_name, character_id])
+	print("Peer %s accepted as character %s (%s)." % [peer_id, character_name, character_id])
 	if _has_saved_position(position_x, position_y):
 		world_spawner.register_peer_at_position(peer_id, character_name, Vector3(position_x, 0.0, position_y))
 	else:
