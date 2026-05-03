@@ -95,11 +95,13 @@ func _register_peer(peer_id: int, character_name: String, use_custom_spawn: bool
 		var spawn_position: Vector3 = players[existing_peer_id] as Vector3
 		var existing_character_name: String = str(_character_names_by_peer.get(existing_peer_id, ""))
 		rpc_id(peer_id, "spawn_player", existing_peer_id_int, spawn_position, existing_character_name)
+		rpc_id(peer_id, "apply_hp_regen_active_state", existing_peer_id_int, _is_hp_regen_active(existing_peer_id_int))
 
 	_register_player(peer_id, use_custom_spawn, custom_spawn_position)
 	_character_names_by_peer[peer_id] = character_name
 	var peer_position: Vector3 = players[peer_id] as Vector3
 	rpc("spawn_player", peer_id, peer_position, character_name)
+	_broadcast_hp_regen_active_state(peer_id)
 	_broadcast_position_snapshots()
 
 
@@ -157,6 +159,7 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	rpc("apply_player_down_state", peer_id, false)
 	rpc("apply_combat_mode_update", peer_id, false, _loadout_text(peer_id))
 	_send_ability_enabled_states(peer_id)
+	_broadcast_hp_regen_active_state(peer_id)
 	_next_spawn_index += 1
 
 
@@ -234,6 +237,7 @@ func _mark_player_down(peer_id: int) -> void:
 	_player_is_down_by_peer[peer_id] = true
 	_last_input_by_peer[peer_id] = Vector2.ZERO
 	rpc("apply_player_down_state", peer_id, true)
+	_broadcast_hp_regen_active_state(peer_id)
 	print("Player peer %s is down." % peer_id)
 	_schedule_player_respawn(peer_id)
 
@@ -263,6 +267,7 @@ func _on_player_respawn_timer_timeout(peer_id: int, respawn_timer: Timer) -> voi
 	rpc("apply_position_snapshot", peer_id, respawn_position, _aim_direction_by_peer.get(peer_id, Vector2(0.0, -1.0)) as Vector2)
 	rpc("apply_player_health_update", peer_id, max_hp, max_hp)
 	rpc("apply_player_down_state", peer_id, false)
+	_broadcast_hp_regen_active_state(peer_id)
 	print("Player peer %s respawned." % peer_id)
 
 
@@ -305,6 +310,17 @@ func _default_ability_enabled_state() -> Dictionary:
 func _is_ability_enabled(peer_id: int, ability_name: String) -> bool:
 	var ability_state: Dictionary = _ability_enabled_by_peer.get(peer_id, {}) as Dictionary
 	return bool(ability_state.get(ability_name, true))
+
+
+func _is_hp_regen_active(peer_id: int) -> bool:
+	var combat_enabled: bool = bool(_combat_enabled_by_peer.get(peer_id, false))
+	var hp_regen_enabled: bool = _is_ability_enabled(peer_id, "HP Regen")
+	var is_down: bool = bool(_player_is_down_by_peer.get(peer_id, false))
+	return combat_enabled and hp_regen_enabled and not is_down
+
+
+func _broadcast_hp_regen_active_state(peer_id: int) -> void:
+	rpc("apply_hp_regen_active_state", peer_id, _is_hp_regen_active(peer_id))
 
 
 func _send_ability_enabled_states(peer_id: int) -> void:
@@ -466,17 +482,27 @@ func apply_player_health_update(peer_id: int, current_hp: int, max_hp: int) -> v
 
 @rpc("authority", "call_remote", "reliable")
 func apply_player_down_state(peer_id: int, is_down: bool) -> void:
+	_player_is_down_by_peer[peer_id] = is_down
 	player_down_state_updated.emit(peer_id, is_down)
 
 
 @rpc("authority", "call_remote", "reliable")
 func apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_text: String) -> void:
+	_combat_enabled_by_peer[peer_id] = combat_enabled
 	combat_mode_updated.emit(peer_id, combat_enabled, loadout_text)
 
 
 @rpc("authority", "call_remote", "reliable")
 func apply_ability_enabled_update(peer_id: int, ability_name: String, enabled: bool) -> void:
+	var ability_state: Dictionary = _ability_enabled_by_peer.get(peer_id, {}) as Dictionary
+	ability_state[ability_name] = enabled
+	_ability_enabled_by_peer[peer_id] = ability_state
 	ability_enabled_updated.emit(peer_id, ability_name, enabled)
+
+
+@rpc("authority", "call_remote", "reliable")
+func apply_hp_regen_active_state(peer_id: int, active: bool) -> void:
+	_update_hp_regen_visual(peer_id, active)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -536,6 +562,7 @@ func request_toggle_combat_mode() -> void:
 	_combat_enabled_by_peer[peer_id] = combat_enabled
 	# Server owns combat mode and the temporary prototype loadout.
 	rpc("apply_combat_mode_update", peer_id, combat_enabled, _loadout_text(peer_id))
+	_broadcast_hp_regen_active_state(peer_id)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -558,6 +585,7 @@ func request_set_ability_enabled(ability_name: String, enabled: bool) -> void:
 	_ability_enabled_by_peer[peer_id] = ability_state
 	# Server confirms final enabled state; clients display this value only after confirmation.
 	rpc_id(peer_id, "apply_ability_enabled_update", peer_id, ability_name, enabled)
+	_broadcast_hp_regen_active_state(peer_id)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -632,6 +660,9 @@ func despawn_player(peer_id: int) -> void:
 	_spawned_nodes.erase(peer_id)
 	_target_positions.erase(peer_id)
 	_target_facing_directions.erase(peer_id)
+	_combat_enabled_by_peer.erase(peer_id)
+	_ability_enabled_by_peer.erase(peer_id)
+	_player_is_down_by_peer.erase(peer_id)
 	print("Despawned player for peer %s." % peer_id)
 	spawned_player_count_changed.emit(_spawned_nodes.size())
 
@@ -643,6 +674,19 @@ func _set_peer_label(player: Node, peer_id: int, character_name: String = "") ->
 			peer_label.text = "Peer %s" % peer_id
 		else:
 			peer_label.text = "%s\nPeer %s" % [character_name, peer_id]
+
+
+func _update_hp_regen_visual(peer_id: int, active: bool) -> void:
+	if not _spawned_nodes.has(peer_id):
+		return
+
+	var player: Node3D = _spawned_nodes[peer_id] as Node3D
+	var regen_visual: Node3D = player.get_node_or_null("HPRegenVisual") as Node3D
+	if regen_visual == null:
+		return
+
+	# This is visual-only; the server confirms whether HP Regen is active.
+	regen_visual.visible = active
 
 
 func _apply_player_facing(player: Node3D, facing_direction: Vector2) -> void:

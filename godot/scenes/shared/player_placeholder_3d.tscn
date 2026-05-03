@@ -11,19 +11,22 @@ emission_enabled = true
 emission = Color(0.0, 0.45, 1, 1)
 emission_energy_multiplier = 0.6
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_marker"]
-albedo_color = Color(0.1, 1, 0.45, 1)
-shading_mode = 0
-
-[sub_resource type="BoxMesh" id="BoxMesh_marker"]
-size = Vector3(1.2, 0.08, 1.2)
-
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_facing"]
 albedo_color = Color(1, 1, 0.05, 1)
 shading_mode = 0
 
 [sub_resource type="BoxMesh" id="BoxMesh_facing"]
 size = Vector3(0.28, 0.16, 1.0)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_hp_regen"]
+albedo_color = Color(0.1, 1, 0.25, 1)
+shading_mode = 0
+emission_enabled = true
+emission = Color(0.05, 1, 0.25, 1)
+emission_energy_multiplier = 0.8
+
+[sub_resource type="BoxMesh" id="BoxMesh_hp_regen"]
+size = Vector3(1.8, 0.08, 1.8)
 
 [node name="PlayerPlaceholder3D" type="Node3D"]
 
@@ -32,14 +35,16 @@ transform = Transform3D(1.35, 0, 0, 0, 1.35, 0, 0, 0, 1.35, 0, 1.35, 0)
 mesh = SubResource("CapsuleMesh_player")
 surface_material_override/0 = SubResource("StandardMaterial3D_body")
 
-[node name="GroundMarker" type="MeshInstance3D" parent="."]
-mesh = SubResource("BoxMesh_marker")
-surface_material_override/0 = SubResource("StandardMaterial3D_marker")
-
 [node name="FacingMarker" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -0.75)
 mesh = SubResource("BoxMesh_facing")
 surface_material_override/0 = SubResource("StandardMaterial3D_facing")
+
+[node name="HPRegenVisual" type="MeshInstance3D" parent="."]
+visible = false
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.08, 0)
+mesh = SubResource("BoxMesh_hp_regen")
+surface_material_override/0 = SubResource("StandardMaterial3D_hp_regen")
 
 [node name="PeerLabel" type="Label3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.8, 0)
