@@ -10,6 +10,7 @@ extends Control
 @onready var character_name_edit: LineEdit = %CharacterNameEdit
 
 var _access_token := ""
+var _characters: Array[Dictionary] = []
 var _pending_requests: Dictionary = {}
 
 
@@ -22,6 +23,8 @@ func _ready() -> void:
 	%LoginButton.pressed.connect(_on_login_pressed)
 	%CreateCharacterButton.pressed.connect(_on_create_character_pressed)
 	%RefreshCharactersButton.pressed.connect(_on_refresh_characters_pressed)
+	%EnterGameButton.pressed.connect(_on_enter_game_pressed)
+	character_list.item_selected.connect(_on_character_selected)
 
 	_set_status("Enter an email and password, then register or log in.")
 
@@ -68,6 +71,31 @@ func _on_refresh_characters_pressed() -> void:
 	_refresh_characters()
 
 
+func _on_enter_game_pressed() -> void:
+	var selected_items := character_list.get_selected_items()
+	if selected_items.is_empty():
+		_set_status("Select a character before entering the game.")
+		return
+
+	var selected_index := selected_items[0]
+	if selected_index < 0 or selected_index >= _characters.size():
+		_set_status("Select a valid character before entering the game.")
+		return
+
+	ClientSession.access_token = _access_token
+	ClientSession.selected_character = _characters[selected_index]
+
+	var error := get_tree().change_scene_to_file("res://scenes/client/client_game.tscn")
+	if error != OK:
+		_set_status("Failed to enter game: %s" % error)
+
+
+func _on_character_selected(index: int) -> void:
+	if index >= 0 and index < _characters.size():
+		var character := _characters[index]
+		_set_status("Selected %s." % character.get("name", "character"))
+
+
 func _on_request_succeeded(request_id: int, _endpoint: String, data: Variant) -> void:
 	var action: String = _pending_requests.get(request_id, "")
 	_pending_requests.erase(request_id)
@@ -78,15 +106,20 @@ func _on_request_succeeded(request_id: int, _endpoint: String, data: Variant) ->
 		"login":
 			if data is Dictionary and data.has("access_token"):
 				_access_token = data["access_token"]
+				ClientSession.access_token = _access_token
 				_set_status("Logged in. Loading account...")
 				_track_request(api_client.get_current_user(_access_token), "current_user")
 			else:
 				_set_status("Login response did not include an access token.")
 		"current_user":
-			if data is Dictionary and data.has("email"):
-				_set_status("Logged in as %s. Loading characters..." % data["email"])
-			else:
+			if not (data is Dictionary):
 				_set_status("Logged in. Loading characters...")
+			else:
+				ClientSession.current_user = data
+				if data.has("email"):
+					_set_status("Logged in as %s. Loading characters..." % data["email"])
+				else:
+					_set_status("Logged in. Loading characters...")
 			_refresh_characters()
 		"list_characters":
 			_show_characters(data)
@@ -111,6 +144,8 @@ func _refresh_characters() -> void:
 
 func _show_characters(data: Variant) -> void:
 	character_list.clear()
+	_characters.clear()
+	ClientSession.selected_character = {}
 
 	if not (data is Array):
 		_set_status("Character response was not a list.")
@@ -123,6 +158,7 @@ func _show_characters(data: Variant) -> void:
 		var character_name: String = str(character.get("name", "Unnamed"))
 		var level: int = int(character.get("level", 1))
 		var region_id: String = str(character.get("region_id", "unknown_region"))
+		_characters.append(character)
 		character_list.add_item("%s - Level %s - %s" % [character_name, level, region_id])
 
 	if character_list.item_count == 0:

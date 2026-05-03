@@ -14,3 +14,7 @@ config/name="RPG Prototype"
 run/main_scene="res://scenes/dev/backend_api_test.tscn"
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="res://icon.svg"
+
+[autoload]
+
+ClientSession="*res://scripts/client/client_session.gd"

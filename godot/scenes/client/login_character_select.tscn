@@ -105,3 +105,8 @@ text = "Create Character"
 unique_name_in_owner = true
 layout_mode = 2
 text = "Refresh Characters"
+
+[node name="EnterGameButton" type="Button" parent="RootMargin/RootLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Enter Game"
