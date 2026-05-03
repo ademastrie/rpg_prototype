@@ -1,5 +1,8 @@
 extends Node2D
 
+@export var server_host: String = "127.0.0.1"
+@export var server_port: int = 7777
+
 @onready var status_label: Label = $StatusLabel
 
 var selected_character: Dictionary = {}
@@ -7,6 +10,7 @@ var selected_character: Dictionary = {}
 
 func _ready() -> void:
 	set_selected_character(ClientSession.selected_character)
+	_connect_to_server()
 
 
 func set_selected_character(character_data: Dictionary) -> void:
@@ -21,3 +25,30 @@ func set_selected_character(character_data: Dictionary) -> void:
 	var region_id := str(selected_character.get("region_id", "unknown_region"))
 	status_label.text = "Character: %s | Level %s | Region: %s" % [character_name, level, region_id]
 	print("Client game loaded character: %s" % selected_character)
+
+
+func _connect_to_server() -> void:
+	multiplayer.connected_to_server.connect(_on_connected_to_server)
+	multiplayer.connection_failed.connect(_on_connection_failed)
+	multiplayer.server_disconnected.connect(_on_server_disconnected)
+
+	var peer := ENetMultiplayerPeer.new()
+	var error := peer.create_client(server_host, server_port)
+	if error != OK:
+		print("Failed to start ENet client: %s" % error)
+		return
+
+	multiplayer.multiplayer_peer = peer
+	print("Connecting to game server at %s:%s" % [server_host, server_port])
+
+
+func _on_connected_to_server() -> void:
+	print("Connected to game server.")
+
+
+func _on_connection_failed() -> void:
+	print("Failed to connect to game server.")
+
+
+func _on_server_disconnected() -> void:
+	print("Disconnected from game server.")
