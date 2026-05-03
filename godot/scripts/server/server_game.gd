@@ -2,6 +2,7 @@ extends Node
 
 @export var server_port: int = 7777
 @export var backend_base_url: String = "http://127.0.0.1:8000"
+@export var server_region_id: String = "starting_region"
 
 @onready var world_spawner: Node3D = $WorldSpawner
 
@@ -135,8 +136,13 @@ func _on_join_validation_completed(
 
 	var character_id: int = int(response_data.get("character_id", 0))
 	var character_name: String = str(response_data.get("character_name", ""))
+	var region_id: String = str(response_data.get("region_id", ""))
 	if character_id <= 0 or character_name.strip_edges() == "":
 		print("Join validation failed for peer %s: missing character data." % peer_id)
+		_disconnect_peer(peer_id)
+		return
+	if region_id != server_region_id:
+		print("Rejecting join for peer %s: character region '%s' does not match server region '%s'." % [peer_id, region_id, server_region_id])
 		_disconnect_peer(peer_id)
 		return
 
@@ -145,7 +151,7 @@ func _on_join_validation_completed(
 		"user_id": int(response_data.get("user_id", 0)),
 		"character_id": character_id,
 		"character_name": character_name,
-		"region_id": str(response_data.get("region_id", "")),
+		"region_id": region_id,
 		"position_x": float(response_data.get("position_x", 0.0)),
 		"position_y": float(response_data.get("position_y", 0.0)),
 		"joined": true,
