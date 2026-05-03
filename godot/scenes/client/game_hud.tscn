@@ -9,13 +9,13 @@ script = ExtResource("1_game_hud")
 offset_left = 16.0
 offset_top = 72.0
 offset_right = 372.0
-offset_bottom = 274.0
+offset_bottom = 302.0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="Panel"]
 offset_left = 7.0
 offset_top = 7.0
 offset_right = 349.0
-offset_bottom = 195.0
+offset_bottom = 223.0
 
 [node name="HPLabel" type="Label" parent="Panel/VBoxContainer"]
 layout_mode = 2
@@ -31,7 +31,7 @@ text = "Combat: OFF"
 
 [node name="LoadoutLabel" type="Label" parent="Panel/VBoxContainer"]
 layout_mode = 2
-text = "Loadout: Slash, HP Regen, Damage Aura"
+text = "Loadout: Slash, HP Regen, Damage Aura, Firebolt"
 
 [node name="SlashCheckBox" type="CheckBox" parent="Panel/VBoxContainer"]
 layout_mode = 2
@@ -47,6 +47,11 @@ text = "HP Regen: ON | inactive"
 layout_mode = 2
 button_pressed = true
 text = "Damage Aura: ON | inactive"
+
+[node name="FireboltCheckBox" type="CheckBox" parent="Panel/VBoxContainer"]
+layout_mode = 2
+button_pressed = true
+text = "Firebolt: ON | inactive"
 
 [node name="CombatToggleButton" type="Button" parent="Panel/VBoxContainer"]
 layout_mode = 2

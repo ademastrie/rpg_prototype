@@ -10,12 +10,14 @@ signal ability_toggle_requested(ability_name: String, enabled: bool)
 @onready var slash_check_box: CheckBox = $Panel/VBoxContainer/SlashCheckBox
 @onready var hp_regen_check_box: CheckBox = $Panel/VBoxContainer/HPRegenCheckBox
 @onready var damage_aura_check_box: CheckBox = $Panel/VBoxContainer/DamageAuraCheckBox
+@onready var firebolt_check_box: CheckBox = $Panel/VBoxContainer/FireboltCheckBox
 @onready var combat_toggle_button: Button = $Panel/VBoxContainer/CombatToggleButton
 
 var _ability_enabled_by_name: Dictionary = {
 	"Slash": true,
 	"HP Regen": true,
 	"Damage Aura": true,
+	"Firebolt": true,
 }
 var _ability_state_by_name: Dictionary = {}
 
@@ -25,13 +27,15 @@ func _ready() -> void:
 	slash_check_box.toggled.connect(_on_slash_check_box_toggled)
 	hp_regen_check_box.toggled.connect(_on_hp_regen_check_box_toggled)
 	damage_aura_check_box.toggled.connect(_on_damage_aura_check_box_toggled)
+	firebolt_check_box.toggled.connect(_on_firebolt_check_box_toggled)
 	update_health(100, 100)
 	update_down_state(false)
 	update_combat_mode(false)
-	update_loadout("Slash, HP Regen, Damage Aura")
+	update_loadout("Slash, HP Regen, Damage Aura, Firebolt")
 	update_ability_enabled("Slash", true)
 	update_ability_enabled("HP Regen", true)
 	update_ability_enabled("Damage Aura", true)
+	update_ability_enabled("Firebolt", true)
 
 
 func _process(delta: float) -> void:
@@ -107,6 +111,9 @@ func _update_ability_display(ability_name: String) -> void:
 	elif ability_name == "Damage Aura":
 		damage_aura_check_box.set_pressed_no_signal(enabled)
 		damage_aura_check_box.text = display_text
+	elif ability_name == "Firebolt":
+		firebolt_check_box.set_pressed_no_signal(enabled)
+		firebolt_check_box.text = display_text
 
 
 func _on_combat_toggle_button_pressed() -> void:
@@ -126,3 +133,8 @@ func _on_hp_regen_check_box_toggled(enabled: bool) -> void:
 func _on_damage_aura_check_box_toggled(enabled: bool) -> void:
 	ability_toggle_requested.emit("Damage Aura", enabled)
 	damage_aura_check_box.set_pressed_no_signal(bool(_ability_enabled_by_name.get("Damage Aura", true)))
+
+
+func _on_firebolt_check_box_toggled(enabled: bool) -> void:
+	ability_toggle_requested.emit("Firebolt", enabled)
+	firebolt_check_box.set_pressed_no_signal(bool(_ability_enabled_by_name.get("Firebolt", true)))

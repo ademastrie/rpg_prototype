@@ -46,7 +46,7 @@ func _ready() -> void:
 	_fixed_camera_basis = active_camera.global_transform.basis
 	_on_spawned_player_count_changed(0)
 	_on_player_health_updated(multiplayer.get_unique_id(), 100, 100)
-	_on_combat_mode_updated(multiplayer.get_unique_id(), false, "Slash, HP Regen, Damage Aura")
+	_on_combat_mode_updated(multiplayer.get_unique_id(), false, "Slash, HP Regen, Damage Aura, Firebolt")
 	set_selected_character(ClientSession.selected_character)
 	_connect_to_server()
 

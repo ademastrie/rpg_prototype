@@ -161,6 +161,41 @@ func resolve_damage_aura(_attacker_peer_id: int, aura_position: Vector3, radius:
 			_despawn_enemy(enemy_id_int)
 
 
+func resolve_firebolt(_attacker_peer_id: int, firebolt_position: Vector3, aim_direction: Vector2, firebolt_range: float, firebolt_width: float, damage: int) -> void:
+	if not multiplayer.is_server() or aim_direction.length_squared() <= 0.0001 or firebolt_range <= 0.0 or firebolt_width <= 0.0 or damage <= 0:
+		return
+
+	var normalized_aim: Vector2 = aim_direction.normalized()
+	var best_enemy_id: int = 0
+	var best_distance_along: float = firebolt_range
+	for enemy_id in enemies:
+		var enemy_id_int: int = int(enemy_id)
+		var enemy_position: Vector3 = enemies[enemy_id] as Vector3
+		var offset_xz: Vector2 = Vector2(enemy_position.x - firebolt_position.x, enemy_position.z - firebolt_position.z)
+		var distance_along: float = normalized_aim.dot(offset_xz)
+		if distance_along < 0.0 or distance_along > firebolt_range:
+			continue
+
+		var closest_point: Vector2 = normalized_aim * distance_along
+		var distance_from_line: float = (offset_xz - closest_point).length()
+		if distance_from_line > firebolt_width:
+			continue
+		if distance_along < best_distance_along:
+			best_distance_along = distance_along
+			best_enemy_id = enemy_id_int
+
+	if best_enemy_id <= 0:
+		return
+
+	var current_hp: int = int(_enemy_current_hp_by_id.get(best_enemy_id, enemy_max_hp))
+	var max_hp: int = int(_enemy_max_hp_by_id.get(best_enemy_id, enemy_max_hp))
+	current_hp = max(current_hp - damage, 0)
+	_enemy_current_hp_by_id[best_enemy_id] = current_hp
+	rpc("show_enemy_hit", best_enemy_id, current_hp, max_hp)
+	if current_hp <= 0:
+		_despawn_enemy(best_enemy_id)
+
+
 func _despawn_enemy(enemy_id: int) -> void:
 	enemies.erase(enemy_id)
 	_enemy_origin_positions.erase(enemy_id)
