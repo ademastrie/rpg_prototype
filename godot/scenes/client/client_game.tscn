@@ -1,10 +1,13 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/client/client_game.gd" id="1_client_game"]
-[ext_resource type="PackedScene" path="res://scenes/shared/player_placeholder.tscn" id="2_player_placeholder"]
+[ext_resource type="PackedScene" path="res://scenes/shared/player_placeholder_3d.tscn" id="2_player_placeholder_3d"]
 [ext_resource type="Script" path="res://scripts/shared/world_spawner.gd" id="3_world_spawner"]
 
-[node name="Game" type="Node2D"]
+[sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
+size = Vector2(24, 24)
+
+[node name="Game" type="Node3D"]
 script = ExtResource("1_client_game")
 
 [node name="StatusLabel" type="Label" parent="."]
@@ -14,6 +17,18 @@ offset_right = 360.0
 offset_bottom = 40.0
 text = "Client game scene scaffold"
 
-[node name="WorldSpawner" type="Node2D" parent="."]
+[node name="WorldSpawner" type="Node3D" parent="."]
 script = ExtResource("3_world_spawner")
-player_placeholder_scene = ExtResource("2_player_placeholder")
+player_placeholder_scene = ExtResource("2_player_placeholder_3d")
+
+[node name="Ground" type="MeshInstance3D" parent="."]
+mesh = SubResource("PlaneMesh_ground")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 6, 8, 6)
+projection = 1
+size = 12.0
+current = true
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.707107, -0.5, 0.5, 0, 0.707107, 0.707107, -0.707107, -0.5, 0.5, 0, 6, 0)

@@ -2,7 +2,7 @@ extends Node
 
 @export var server_port: int = 7777
 
-@onready var world_spawner: Node2D = $WorldSpawner
+@onready var world_spawner: Node3D = $WorldSpawner
 
 var connected_peers: Array[int] = []
 

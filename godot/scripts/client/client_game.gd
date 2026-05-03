@@ -1,4 +1,4 @@
-extends Node2D
+extends Node3D
 
 @export var server_host: String = "127.0.0.1"
 @export var server_port: int = 7777

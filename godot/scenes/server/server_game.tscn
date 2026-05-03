@@ -2,11 +2,11 @@
 
 [ext_resource type="Script" path="res://scripts/server/server_game.gd" id="1_server_game"]
 [ext_resource type="Script" path="res://scripts/shared/world_spawner.gd" id="2_world_spawner"]
-[ext_resource type="PackedScene" path="res://scenes/shared/player_placeholder.tscn" id="3_player_placeholder"]
+[ext_resource type="PackedScene" path="res://scenes/shared/player_placeholder_3d.tscn" id="3_player_placeholder"]
 
 [node name="Game" type="Node"]
 script = ExtResource("1_server_game")
 
-[node name="WorldSpawner" type="Node2D" parent="."]
+[node name="WorldSpawner" type="Node3D" parent="."]
 script = ExtResource("2_world_spawner")
 player_placeholder_scene = ExtResource("3_player_placeholder")
