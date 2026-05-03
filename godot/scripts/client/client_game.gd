@@ -39,6 +39,7 @@ func _ready() -> void:
 	world_spawner.player_down_state_updated.connect(_on_player_down_state_updated)
 	world_spawner.combat_mode_updated.connect(_on_combat_mode_updated)
 	world_spawner.ability_enabled_updated.connect(_on_ability_enabled_updated)
+	world_spawner.ability_state_updated.connect(_on_ability_state_updated)
 	game_hud.connect("combat_toggle_requested", Callable(self, "_send_combat_toggle_request"))
 	game_hud.connect("ability_toggle_requested", Callable(self, "_send_ability_toggle_request"))
 	_camera_follow_offset = active_camera.global_position
@@ -187,6 +188,13 @@ func _on_ability_enabled_updated(peer_id: int, ability_name: String, enabled: bo
 		return
 
 	game_hud.call("update_ability_enabled", ability_name, enabled)
+
+
+func _on_ability_state_updated(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+
+	game_hud.call("update_ability_state", ability_name, enabled, active, cooldown_remaining)
 
 
 func _read_movement_input() -> Vector2:

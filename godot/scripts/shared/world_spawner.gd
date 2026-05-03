@@ -6,6 +6,7 @@ signal player_health_updated(peer_id: int, current_hp: int, max_hp: int)
 signal player_down_state_updated(peer_id: int, is_down: bool)
 signal combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_text: String)
 signal ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool)
+signal ability_state_updated(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float)
 signal join_requested(peer_id: int, character_id: int, character_name: String, access_token: String)
 
 @export var player_placeholder_scene: PackedScene
@@ -159,6 +160,7 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	rpc("apply_player_down_state", peer_id, false)
 	rpc("apply_combat_mode_update", peer_id, false, _loadout_text(peer_id))
 	_send_ability_enabled_states(peer_id)
+	_send_ability_states(peer_id)
 	_broadcast_hp_regen_active_state(peer_id)
 	_next_spawn_index += 1
 
@@ -237,6 +239,7 @@ func _mark_player_down(peer_id: int) -> void:
 	_player_is_down_by_peer[peer_id] = true
 	_last_input_by_peer[peer_id] = Vector2.ZERO
 	rpc("apply_player_down_state", peer_id, true)
+	_send_ability_states(peer_id)
 	_broadcast_hp_regen_active_state(peer_id)
 	print("Player peer %s is down." % peer_id)
 	_schedule_player_respawn(peer_id)
@@ -267,6 +270,7 @@ func _on_player_respawn_timer_timeout(peer_id: int, respawn_timer: Timer) -> voi
 	rpc("apply_position_snapshot", peer_id, respawn_position, _aim_direction_by_peer.get(peer_id, Vector2(0.0, -1.0)) as Vector2)
 	rpc("apply_player_health_update", peer_id, max_hp, max_hp)
 	rpc("apply_player_down_state", peer_id, false)
+	_send_ability_states(peer_id)
 	_broadcast_hp_regen_active_state(peer_id)
 	print("Player peer %s respawned." % peer_id)
 
@@ -293,9 +297,11 @@ func _process_combat_abilities() -> void:
 		var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
 		if loadout.has("Slash") and _is_ability_enabled(peer_id_int, "Slash") and _is_ability_ready(peer_id_int, "Slash", now_seconds):
 			_set_ability_used(peer_id_int, "Slash", now_seconds)
+			_send_ability_state(peer_id_int, "Slash")
 			_perform_slash(peer_id_int)
 		if loadout.has("HP Regen") and _is_ability_enabled(peer_id_int, "HP Regen") and _is_ability_ready(peer_id_int, "HP Regen", now_seconds):
 			_set_ability_used(peer_id_int, "HP Regen", now_seconds)
+			_send_ability_state(peer_id_int, "HP Regen")
 			_apply_hp_regen(peer_id_int)
 
 
@@ -329,10 +335,33 @@ func _send_ability_enabled_states(peer_id: int) -> void:
 		rpc_id(peer_id, "apply_ability_enabled_update", peer_id, str(ability_name), bool(ability_state[ability_name]))
 
 
+func _send_ability_states(peer_id: int) -> void:
+	var loadout: Array = _loadout_by_peer.get(peer_id, DEFAULT_LOADOUT) as Array
+	for ability_name in loadout:
+		_send_ability_state(peer_id, str(ability_name))
+
+
+func _send_ability_state(peer_id: int, ability_name: String) -> void:
+	if not players.has(peer_id):
+		return
+
+	var enabled: bool = _is_ability_enabled(peer_id, ability_name)
+	var active: bool = bool(_combat_enabled_by_peer.get(peer_id, false)) and enabled and not bool(_player_is_down_by_peer.get(peer_id, false))
+	var cooldown_remaining: float = _ability_cooldown_remaining(peer_id, ability_name)
+	rpc_id(peer_id, "apply_ability_state_update", peer_id, ability_name, enabled, active, cooldown_remaining)
+
+
 func _is_ability_ready(peer_id: int, ability_name: String, now_seconds: float) -> bool:
 	var ability_state: Dictionary = _last_ability_time_by_peer.get(peer_id, {}) as Dictionary
 	var last_used: float = float(ability_state.get(ability_name, -_ability_cooldown(ability_name)))
 	return now_seconds - last_used >= _ability_cooldown(ability_name)
+
+
+func _ability_cooldown_remaining(peer_id: int, ability_name: String) -> float:
+	var ability_state: Dictionary = _last_ability_time_by_peer.get(peer_id, {}) as Dictionary
+	var last_used: float = float(ability_state.get(ability_name, -_ability_cooldown(ability_name)))
+	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
+	return max(_ability_cooldown(ability_name) - (now_seconds - last_used), 0.0)
 
 
 func _set_ability_used(peer_id: int, ability_name: String, now_seconds: float) -> void:
@@ -501,6 +530,11 @@ func apply_ability_enabled_update(peer_id: int, ability_name: String, enabled: b
 
 
 @rpc("authority", "call_remote", "reliable")
+func apply_ability_state_update(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float) -> void:
+	ability_state_updated.emit(peer_id, ability_name, enabled, active, cooldown_remaining)
+
+
+@rpc("authority", "call_remote", "reliable")
 func apply_hp_regen_active_state(peer_id: int, active: bool) -> void:
 	_update_hp_regen_visual(peer_id, active)
 
@@ -562,6 +596,7 @@ func request_toggle_combat_mode() -> void:
 	_combat_enabled_by_peer[peer_id] = combat_enabled
 	# Server owns combat mode and the temporary prototype loadout.
 	rpc("apply_combat_mode_update", peer_id, combat_enabled, _loadout_text(peer_id))
+	_send_ability_states(peer_id)
 	_broadcast_hp_regen_active_state(peer_id)
 
 
@@ -585,6 +620,7 @@ func request_set_ability_enabled(ability_name: String, enabled: bool) -> void:
 	_ability_enabled_by_peer[peer_id] = ability_state
 	# Server confirms final enabled state; clients display this value only after confirmation.
 	rpc_id(peer_id, "apply_ability_enabled_update", peer_id, ability_name, enabled)
+	_send_ability_state(peer_id, ability_name)
 	_broadcast_hp_regen_active_state(peer_id)
 
 

@@ -15,6 +15,7 @@ var _ability_enabled_by_name: Dictionary = {
 	"Slash": true,
 	"HP Regen": true,
 }
+var _ability_state_by_name: Dictionary = {}
 
 
 func _ready() -> void:
@@ -27,6 +28,17 @@ func _ready() -> void:
 	update_loadout("Slash, HP Regen")
 	update_ability_enabled("Slash", true)
 	update_ability_enabled("HP Regen", true)
+
+
+func _process(delta: float) -> void:
+	var ability_names: Array = _ability_state_by_name.keys()
+	for ability_name in ability_names:
+		var state: Dictionary = _ability_state_by_name[ability_name] as Dictionary
+		var cooldown_remaining: float = float(state.get("cooldown_remaining", 0.0))
+		if cooldown_remaining > 0.0:
+			state["cooldown_remaining"] = max(cooldown_remaining - delta, 0.0)
+			_ability_state_by_name[ability_name] = state
+			_update_ability_display(str(ability_name))
 
 
 func update_health(current_hp: int, max_hp: int) -> void:
@@ -53,10 +65,41 @@ func update_loadout(loadout_text: String) -> void:
 
 func update_ability_enabled(ability_name: String, enabled: bool) -> void:
 	_ability_enabled_by_name[ability_name] = enabled
+	var state: Dictionary = _ability_state_by_name.get(ability_name, {}) as Dictionary
+	state["enabled"] = enabled
+	_ability_state_by_name[ability_name] = state
+	_update_ability_display(ability_name)
+
+
+func update_ability_state(ability_name: String, enabled: bool, active: bool, cooldown_remaining: float) -> void:
+	_ability_enabled_by_name[ability_name] = enabled
+	var state: Dictionary = {
+		"enabled": enabled,
+		"active": active,
+		"cooldown_remaining": cooldown_remaining,
+	}
+	_ability_state_by_name[ability_name] = state
+	_update_ability_display(ability_name)
+
+
+func _update_ability_display(ability_name: String) -> void:
+	var state: Dictionary = _ability_state_by_name.get(ability_name, {}) as Dictionary
+	var enabled: bool = bool(state.get("enabled", _ability_enabled_by_name.get(ability_name, true)))
+	var active: bool = bool(state.get("active", false))
+	var cooldown_remaining: float = float(state.get("cooldown_remaining", 0.0))
+	var enabled_text: String = "ON" if enabled else "OFF"
+	var active_text: String = "active" if active else "inactive"
+	var cooldown_text: String = ""
+	if cooldown_remaining > 0.05:
+		cooldown_text = " | CD %.1fs" % cooldown_remaining
+
+	var display_text: String = "%s: %s | %s%s" % [ability_name, enabled_text, active_text, cooldown_text]
 	if ability_name == "Slash":
 		slash_check_box.set_pressed_no_signal(enabled)
+		slash_check_box.text = display_text
 	elif ability_name == "HP Regen":
 		hp_regen_check_box.set_pressed_no_signal(enabled)
+		hp_regen_check_box.text = display_text
 
 
 func _on_combat_toggle_button_pressed() -> void:

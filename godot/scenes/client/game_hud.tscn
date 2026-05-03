@@ -36,12 +36,12 @@ text = "Loadout: Slash, HP Regen"
 [node name="SlashCheckBox" type="CheckBox" parent="Panel/VBoxContainer"]
 layout_mode = 2
 button_pressed = true
-text = "Slash Enabled"
+text = "Slash: ON | inactive"
 
 [node name="HPRegenCheckBox" type="CheckBox" parent="Panel/VBoxContainer"]
 layout_mode = 2
 button_pressed = true
-text = "HP Regen Enabled"
+text = "HP Regen: ON | inactive"
 
 [node name="CombatToggleButton" type="Button" parent="Panel/VBoxContainer"]
 layout_mode = 2
