@@ -59,5 +59,5 @@ func _on_server_disconnected() -> void:
 
 
 func _on_spawned_player_count_changed(count: int) -> void:
-	spawn_count_label.text = "Spawned players: %s" % count
-	print("Spawned player count: %s" % count)
+	spawn_count_label.text = "Network Players: %s" % count
+	print("Network player count: %s" % count)

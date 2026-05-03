@@ -1,0 +1,37 @@
+[gd_scene load_steps=5 format=3]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_debug"]
+radius = 0.5
+height = 2.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_debug_body"]
+albedo_color = Color(0.85, 0.15, 1, 1)
+shading_mode = 0
+emission_enabled = true
+emission = Color(0.65, 0.05, 1, 1)
+emission_energy_multiplier = 0.7
+
+[sub_resource type="BoxMesh" id="BoxMesh_debug_marker"]
+size = Vector3(1.4, 0.08, 1.4)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_debug_marker"]
+albedo_color = Color(1, 1, 1, 1)
+shading_mode = 0
+
+[node name="LocalDebugPlayer3D_NotNetworked" type="Node3D"]
+
+[node name="Body" type="MeshInstance3D" parent="."]
+transform = Transform3D(1.35, 0, 0, 0, 1.35, 0, 0, 0, 1.35, 0, 1.4, 0)
+mesh = SubResource("CapsuleMesh_debug")
+surface_material_override/0 = SubResource("StandardMaterial3D_debug_body")
+
+[node name="GroundMarker" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_debug_marker")
+surface_material_override/0 = SubResource("StandardMaterial3D_debug_marker")
+
+[node name="DebugLabel" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.9, 0)
+billboard = 1
+text = "LOCAL DEBUG\nNOT NETWORKED"
+font_size = 32
+modulate = Color(1, 1, 1, 1)
