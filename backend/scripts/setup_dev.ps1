@@ -10,7 +10,12 @@ if (-not (Test-Path $Requirements)) {
     throw "Could not find requirements.txt at $Requirements"
 }
 
-if (-not (Test-Path $PythonExe)) {
+if (Test-Path $VenvDir) {
+    if (-not (Test-Path $PythonExe)) {
+        throw "Found existing .venv, but could not find $PythonExe. Refusing to recreate developer-owned .venv."
+    }
+}
+else {
     if (Get-Command py -ErrorAction SilentlyContinue) {
         py -3 -m venv $VenvDir
     }
