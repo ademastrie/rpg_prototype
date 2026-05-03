@@ -30,6 +30,7 @@ var _has_sent_join_request := false
 var _was_attack_pressed := false
 var _was_combat_toggle_pressed := false
 var _is_local_player_down := false
+var _window_has_focus: bool = true
 
 
 func _ready() -> void:
@@ -76,13 +77,22 @@ func _process(delta: float) -> void:
 	if not _has_sent_input or input_direction != _last_sent_input or _input_heartbeat_timer >= input_heartbeat_interval:
 		_send_movement_input(input_direction)
 
-	var aim_direction: Vector2 = _read_mouse_aim_direction()
-	if aim_direction != Vector2.ZERO and _should_send_aim(aim_direction):
-		_send_aim_input(aim_direction)
+	if _window_has_focus:
+		var aim_direction: Vector2 = _read_mouse_aim_direction()
+		if aim_direction != Vector2.ZERO and _should_send_aim(aim_direction):
+			_send_aim_input(aim_direction)
 
 	_read_combat_toggle_input()
 	_read_basic_attack_input()
 	_update_camera_follow(delta)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		_window_has_focus = true
+	elif what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		# Keep the last known aim direction; do not sample mouse or send aim while unfocused.
+		_window_has_focus = false
 
 
 func _connect_to_server() -> void:
