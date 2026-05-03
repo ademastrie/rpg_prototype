@@ -9,8 +9,7 @@ extends Node3D
 
 @onready var status_label: Label = $StatusLabel
 @onready var spawn_count_label: Label = $SpawnCountLabel
-@onready var health_label: Label = $HealthLabel
-@onready var combat_label: Label = $CombatLabel
+@onready var game_hud: Node = $GameHUD
 @onready var world_spawner: Node3D = $WorldSpawner
 @onready var active_camera: Camera3D = $Camera3D
 
@@ -39,6 +38,7 @@ func _ready() -> void:
 	world_spawner.player_health_updated.connect(_on_player_health_updated)
 	world_spawner.player_down_state_updated.connect(_on_player_down_state_updated)
 	world_spawner.combat_mode_updated.connect(_on_combat_mode_updated)
+	game_hud.connect("combat_toggle_requested", Callable(self, "_send_combat_toggle_request"))
 	_camera_follow_offset = active_camera.global_position
 	_fixed_camera_basis = active_camera.global_transform.basis
 	_on_spawned_player_count_changed(0)
@@ -153,7 +153,7 @@ func _on_player_health_updated(peer_id: int, current_hp: int, max_hp: int) -> vo
 	if peer_id != multiplayer.get_unique_id():
 		return
 
-	health_label.text = "HP: %s/%s" % [current_hp, max_hp]
+	game_hud.call("update_health", current_hp, max_hp)
 	if current_hp <= 0:
 		print("Local player is down.")
 
@@ -169,16 +169,15 @@ func _on_player_down_state_updated(peer_id: int, is_down: bool) -> void:
 	else:
 		_is_local_player_down = false
 		status_label.text = _character_status_text
+	game_hud.call("update_down_state", is_down)
 
 
 func _on_combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_text: String) -> void:
 	if peer_id != multiplayer.get_unique_id():
 		return
 
-	var mode_text: String = "OFF"
-	if combat_enabled:
-		mode_text = "ON"
-	combat_label.text = "Combat: %s | Loadout: %s" % [mode_text, loadout_text]
+	game_hud.call("update_combat_mode", combat_enabled)
+	game_hud.call("update_loadout", loadout_text)
 
 
 func _read_movement_input() -> Vector2:

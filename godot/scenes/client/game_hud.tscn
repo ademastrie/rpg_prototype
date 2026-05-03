@@ -1,0 +1,38 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/client/game_hud.gd" id="1_game_hud"]
+
+[node name="GameHUD" type="CanvasLayer"]
+script = ExtResource("1_game_hud")
+
+[node name="Panel" type="PanelContainer" parent="."]
+offset_left = 16.0
+offset_top = 72.0
+offset_right = 292.0
+offset_bottom = 196.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Panel"]
+offset_left = 7.0
+offset_top = 7.0
+offset_right = 269.0
+offset_bottom = 117.0
+
+[node name="HPLabel" type="Label" parent="Panel/VBoxContainer"]
+layout_mode = 2
+text = "HP: 100/100"
+
+[node name="StatusLabel" type="Label" parent="Panel/VBoxContainer"]
+layout_mode = 2
+text = "Status: Alive"
+
+[node name="CombatLabel" type="Label" parent="Panel/VBoxContainer"]
+layout_mode = 2
+text = "Combat: OFF"
+
+[node name="LoadoutLabel" type="Label" parent="Panel/VBoxContainer"]
+layout_mode = 2
+text = "Loadout: Slash, HP Regen"
+
+[node name="CombatToggleButton" type="Button" parent="Panel/VBoxContainer"]
+layout_mode = 2
+text = "Toggle Combat"

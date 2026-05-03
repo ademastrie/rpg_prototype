@@ -1,4 +1,4 @@
-[gd_scene load_steps=18 format=3]
+[gd_scene load_steps=19 format=3]
 
 [ext_resource type="Script" path="res://scripts/client/client_game.gd" id="1_client_game"]
 [ext_resource type="PackedScene" path="res://scenes/shared/player_placeholder_3d.tscn" id="2_player_placeholder_3d"]
@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" path="res://scenes/shared/local_debug_player_3d.tscn" id="5_local_debug_player"]
 [ext_resource type="Script" path="res://scripts/shared/enemy_spawner.gd" id="6_enemy_spawner"]
 [ext_resource type="PackedScene" path="res://scenes/shared/enemy_placeholder_3d.tscn" id="7_enemy_placeholder"]
+[ext_resource type="PackedScene" path="res://scenes/client/game_hud.tscn" id="8_game_hud"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
 size = Vector2(48, 48)
@@ -63,19 +64,7 @@ offset_right = 260.0
 offset_bottom = 68.0
 text = "Network Players: 0"
 
-[node name="HealthLabel" type="Label" parent="."]
-offset_left = 16.0
-offset_top = 72.0
-offset_right = 180.0
-offset_bottom = 96.0
-text = "HP: 100/100"
-
-[node name="CombatLabel" type="Label" parent="."]
-offset_left = 16.0
-offset_top = 100.0
-offset_right = 360.0
-offset_bottom = 124.0
-text = "Combat: OFF | Loadout: Slash, HP Regen"
+[node name="GameHUD" parent="." instance=ExtResource("8_game_hud")]
 
 [node name="WorldSpawner" type="Node3D" parent="."]
 script = ExtResource("3_world_spawner")
