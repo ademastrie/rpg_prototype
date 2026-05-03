@@ -1,10 +1,12 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene load_steps=18 format=3]
 
 [ext_resource type="Script" path="res://scripts/client/client_game.gd" id="1_client_game"]
 [ext_resource type="PackedScene" path="res://scenes/shared/player_placeholder_3d.tscn" id="2_player_placeholder_3d"]
 [ext_resource type="Script" path="res://scripts/shared/world_spawner.gd" id="3_world_spawner"]
 [ext_resource type="Script" path="res://scripts/client/isometric_camera.gd" id="4_isometric_camera"]
 [ext_resource type="PackedScene" path="res://scenes/shared/local_debug_player_3d.tscn" id="5_local_debug_player"]
+[ext_resource type="Script" path="res://scripts/shared/enemy_spawner.gd" id="6_enemy_spawner"]
+[ext_resource type="PackedScene" path="res://scenes/shared/enemy_placeholder_3d.tscn" id="7_enemy_placeholder"]
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
 size = Vector2(48, 48)
@@ -64,6 +66,10 @@ text = "Network Players: 0"
 [node name="WorldSpawner" type="Node3D" parent="."]
 script = ExtResource("3_world_spawner")
 player_placeholder_scene = ExtResource("2_player_placeholder_3d")
+
+[node name="EnemySpawner" type="Node3D" parent="."]
+script = ExtResource("6_enemy_spawner")
+enemy_placeholder_scene = ExtResource("7_enemy_placeholder")
 
 [node name="LocalDebugPlayer_NotNetworked" parent="." instance=ExtResource("5_local_debug_player")]
 position = Vector3(0, 0, 0)

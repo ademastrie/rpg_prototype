@@ -5,6 +5,7 @@ extends Node
 @export var server_region_id: String = "starting_region"
 
 @onready var world_spawner: Node3D = $WorldSpawner
+@onready var enemy_spawner: Node = $EnemySpawner
 
 var connected_peers: Array[int] = []
 var peer_sessions: Dictionary = {}
@@ -29,6 +30,7 @@ func _start_server() -> void:
 
 	multiplayer.multiplayer_peer = peer
 	print("ENet server started on port %s." % server_port)
+	enemy_spawner.call("spawn_initial_enemies")
 
 
 func _on_peer_connected(peer_id: int) -> void:
@@ -171,6 +173,7 @@ func _on_join_validation_completed(
 		world_spawner.register_peer_at_position(peer_id, character_name, Vector3(position_x, 0.0, position_y))
 	else:
 		world_spawner.register_peer(peer_id, character_name)
+	enemy_spawner.call("sync_peer", peer_id)
 
 
 func _save_peer_position(peer_id: int, session: Dictionary, position: Vector3) -> void:
