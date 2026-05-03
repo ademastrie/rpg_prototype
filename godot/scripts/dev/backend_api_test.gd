@@ -20,7 +20,7 @@ func _ready() -> void:
 
 	print("Backend API test scene ready.")
 	print("Set exported email/password/character_name values in the inspector.")
-	print("Call run_login_test(), run_list_characters_test(), or run_create_character_test() from the remote inspector/console.")
+	print("Call run_login_test(), run_current_user_test(), run_list_characters_test(), or run_create_character_test() from the remote inspector/console.")
 	print("Set login_on_ready=true to run login automatically when this scene starts.")
 
 	if login_on_ready:
@@ -39,6 +39,15 @@ func run_list_characters_test() -> void:
 
 	print("GET /characters")
 	api_client.list_characters(_access_token)
+
+
+func run_current_user_test() -> void:
+	if _access_token == "":
+		print("No access token yet. Run login first.")
+		return
+
+	print("GET /auth/me")
+	api_client.get_current_user(_access_token)
 
 
 func run_create_character_test() -> void:

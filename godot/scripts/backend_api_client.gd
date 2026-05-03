@@ -36,6 +36,15 @@ func login(email: String, password: String) -> int:
 	)
 
 
+func get_current_user(access_token: String) -> int:
+	return _queue_json_request(
+		"/auth/me",
+		HTTPClient.METHOD_GET,
+		{},
+		access_token
+	)
+
+
 func list_characters(access_token: String) -> int:
 	return _queue_json_request(
 		"/characters",
