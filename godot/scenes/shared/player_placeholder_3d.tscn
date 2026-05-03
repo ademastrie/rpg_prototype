@@ -1,4 +1,4 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=7 format=3]
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_player"]
 radius = 0.45
@@ -18,6 +18,13 @@ shading_mode = 0
 [sub_resource type="BoxMesh" id="BoxMesh_marker"]
 size = Vector3(1.2, 0.08, 1.2)
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_facing"]
+albedo_color = Color(1, 1, 0.05, 1)
+shading_mode = 0
+
+[sub_resource type="BoxMesh" id="BoxMesh_facing"]
+size = Vector3(0.28, 0.16, 1.0)
+
 [node name="PlayerPlaceholder3D" type="Node3D"]
 
 [node name="Body" type="MeshInstance3D" parent="."]
@@ -28,6 +35,11 @@ surface_material_override/0 = SubResource("StandardMaterial3D_body")
 [node name="GroundMarker" type="MeshInstance3D" parent="."]
 mesh = SubResource("BoxMesh_marker")
 surface_material_override/0 = SubResource("StandardMaterial3D_marker")
+
+[node name="FacingMarker" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -0.75)
+mesh = SubResource("BoxMesh_facing")
+surface_material_override/0 = SubResource("StandardMaterial3D_facing")
 
 [node name="PeerLabel" type="Label3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.8, 0)

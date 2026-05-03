@@ -3,6 +3,9 @@ extends Node3D
 @export var server_host: String = "127.0.0.1"
 @export var server_port: int = 7777
 @export var input_heartbeat_interval: float = 0.25
+@export var aim_heartbeat_interval: float = 0.35
+@export var aim_change_threshold: float = 0.03
+@export var camera_follow_speed: float = 8.0
 
 @onready var status_label: Label = $StatusLabel
 @onready var spawn_count_label: Label = $SpawnCountLabel
@@ -10,15 +13,22 @@ extends Node3D
 @onready var active_camera: Camera3D = $Camera3D
 
 var selected_character: Dictionary = {}
+var _local_player: Node3D = null
+var _camera_follow_offset: Vector3 = Vector3.ZERO
 var _last_sent_input := Vector2.ZERO
+var _last_sent_aim := Vector2.ZERO
 var _input_heartbeat_timer := 0.0
+var _aim_heartbeat_timer := 0.0
 var _has_sent_input := false
+var _has_sent_aim := false
 var _is_connected_to_server := false
 var _has_sent_join_request := false
 
 
 func _ready() -> void:
 	world_spawner.spawned_player_count_changed.connect(_on_spawned_player_count_changed)
+	world_spawner.player_spawned.connect(_on_player_spawned)
+	_camera_follow_offset = active_camera.global_position - Vector3.ZERO
 	_on_spawned_player_count_changed(0)
 	set_selected_character(ClientSession.selected_character)
 	_connect_to_server()
@@ -43,9 +53,16 @@ func _process(delta: float) -> void:
 		return
 
 	_input_heartbeat_timer += delta
+	_aim_heartbeat_timer += delta
 	var input_direction := _read_movement_input()
 	if not _has_sent_input or input_direction != _last_sent_input or _input_heartbeat_timer >= input_heartbeat_interval:
 		_send_movement_input(input_direction)
+
+	var aim_direction: Vector2 = _read_mouse_aim_direction()
+	if aim_direction != Vector2.ZERO and _should_send_aim(aim_direction):
+		_send_aim_input(aim_direction)
+
+	_update_camera_follow(delta)
 
 
 func _connect_to_server() -> void:
@@ -85,6 +102,15 @@ func _on_spawned_player_count_changed(count: int) -> void:
 	print("Network player count: %s" % count)
 
 
+func _on_player_spawned(peer_id: int, player: Node3D) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+
+	_local_player = player
+	_camera_follow_offset = active_camera.global_position - _local_player.global_position
+	print("Camera following local player peer %s." % peer_id)
+
+
 func _read_movement_input() -> Vector2:
 	var screen_direction := Vector2.ZERO
 
@@ -121,11 +147,62 @@ func _screen_input_to_world_xz(screen_direction: Vector2) -> Vector3:
 	return world_direction
 
 
+func _read_mouse_aim_direction() -> Vector2:
+	if _local_player == null:
+		return Vector2.ZERO
+
+	var mouse_position: Vector2 = get_viewport().get_mouse_position()
+	var ray_origin: Vector3 = active_camera.project_ray_origin(mouse_position)
+	var ray_direction: Vector3 = active_camera.project_ray_normal(mouse_position)
+	if is_zero_approx(ray_direction.y):
+		return Vector2.ZERO
+
+	var distance_to_ground: float = -ray_origin.y / ray_direction.y
+	if distance_to_ground < 0.0:
+		return Vector2.ZERO
+
+	var ground_position: Vector3 = ray_origin + ray_direction * distance_to_ground
+	var aim_world_direction: Vector3 = ground_position - _local_player.global_position
+	aim_world_direction.y = 0.0
+	if aim_world_direction.length_squared() <= 0.0001:
+		return Vector2.ZERO
+
+	# Client computes mouse aim intent; the server stores and rebroadcasts facing.
+	aim_world_direction = aim_world_direction.normalized()
+	return Vector2(aim_world_direction.x, aim_world_direction.z)
+
+
+func _should_send_aim(aim_direction: Vector2) -> bool:
+	if not _has_sent_aim:
+		return true
+	if _aim_heartbeat_timer >= aim_heartbeat_interval:
+		return true
+
+	return aim_direction.distance_to(_last_sent_aim) >= aim_change_threshold
+
+
 func _send_movement_input(input_direction: Vector2) -> void:
 	world_spawner.rpc_id(1, "submit_movement_input", input_direction)
 	_last_sent_input = input_direction
 	_input_heartbeat_timer = 0.0
 	_has_sent_input = true
+
+
+func _send_aim_input(aim_direction: Vector2) -> void:
+	world_spawner.rpc_id(1, "submit_aim_input", aim_direction)
+	_last_sent_aim = aim_direction
+	_aim_heartbeat_timer = 0.0
+	_has_sent_aim = true
+
+
+func _update_camera_follow(delta: float) -> void:
+	if _local_player == null:
+		return
+
+	var target_position: Vector3 = _local_player.global_position + _camera_follow_offset
+	var weight: float = clamp(camera_follow_speed * delta, 0.0, 1.0)
+	active_camera.global_position = active_camera.global_position.lerp(target_position, weight)
+	active_camera.look_at(_local_player.global_position, Vector3.UP)
 
 
 func _send_join_request() -> void:
@@ -142,4 +219,5 @@ func _send_join_request() -> void:
 	world_spawner.send_join_request(character_id, character_name, ClientSession.access_token)
 	_has_sent_join_request = true
 	_send_movement_input(Vector2.ZERO)
+	_send_aim_input(Vector2(0.0, -1.0))
 	print("Sent join request for character %s (%s)." % [character_name, character_id])

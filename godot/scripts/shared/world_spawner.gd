@@ -1,6 +1,7 @@
 extends Node3D
 
 signal spawned_player_count_changed(count: int)
+signal player_spawned(peer_id: int, player: Node3D)
 signal join_requested(peer_id: int, character_id: int, character_name: String, access_token: String)
 
 @export var player_placeholder_scene: PackedScene
@@ -12,7 +13,9 @@ signal join_requested(peer_id: int, character_id: int, character_name: String, a
 var players: Dictionary = {}
 var _spawned_nodes: Dictionary = {}
 var _target_positions: Dictionary = {}
+var _target_facing_directions: Dictionary = {}
 var _last_input_by_peer: Dictionary = {}
+var _aim_direction_by_peer: Dictionary = {}
 var _simulation_accumulator := 0.0
 var _snapshot_accumulator := 0.0
 var _next_spawn_index := 0
@@ -60,7 +63,9 @@ func _register_peer(peer_id: int, character_name: String, use_custom_spawn: bool
 func unregister_peer(peer_id: int) -> void:
 	players.erase(peer_id)
 	_target_positions.erase(peer_id)
+	_target_facing_directions.erase(peer_id)
 	_last_input_by_peer.erase(peer_id)
+	_aim_direction_by_peer.erase(peer_id)
 	_character_names_by_peer.erase(peer_id)
 	rpc("despawn_player", peer_id)
 
@@ -72,6 +77,13 @@ func get_authoritative_position(peer_id: int) -> Vector3:
 	return players[peer_id] as Vector3
 
 
+func get_spawned_player(peer_id: int) -> Node3D:
+	if not _spawned_nodes.has(peer_id):
+		return null
+
+	return _spawned_nodes[peer_id] as Node3D
+
+
 func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn_position: Vector3 = Vector3.ZERO) -> void:
 	if use_custom_spawn:
 		players[peer_id] = custom_spawn_position
@@ -79,6 +91,7 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 		players[peer_id] = _spawn_position_for_index(_next_spawn_index)
 
 	_last_input_by_peer[peer_id] = Vector2.ZERO
+	_aim_direction_by_peer[peer_id] = Vector2(0.0, -1.0)
 	_next_spawn_index += 1
 
 
@@ -117,7 +130,8 @@ func _broadcast_position_snapshots() -> void:
 	for peer_id in players:
 		var peer_id_int: int = int(peer_id)
 		var position: Vector3 = players[peer_id] as Vector3
-		rpc("apply_position_snapshot", peer_id_int, position)
+		var facing_direction: Vector2 = _aim_direction_by_peer.get(peer_id, Vector2(0.0, -1.0)) as Vector2
+		rpc("apply_position_snapshot", peer_id_int, position, facing_direction)
 
 
 func _smooth_spawned_players(delta: float) -> void:
@@ -130,6 +144,9 @@ func _smooth_spawned_players(delta: float) -> void:
 		var target_position: Vector3 = _target_positions[peer_id] as Vector3
 		# Visual smoothing happens here; authoritative state remains on the server.
 		player.position = player.position.lerp(target_position, weight)
+		if _target_facing_directions.has(peer_id):
+			var facing_direction: Vector2 = _target_facing_directions[peer_id] as Vector2
+			_apply_player_facing(player, facing_direction)
 
 
 func _spawn_position_for_index(spawn_index: int) -> Vector3:
@@ -178,13 +195,18 @@ func spawn_player(peer_id: int, spawn_position: Vector3, character_name: String 
 	_set_peer_label(player, peer_id, character_name)
 
 	print("Network player instantiated on client: peer_id=%s position=%s node_name=%s" % [peer_id, spawn_position, player.name])
+	player_spawned.emit(peer_id, player)
 	spawned_player_count_changed.emit(_spawned_nodes.size())
 
 
 @rpc("authority", "call_remote", "unreliable")
-func apply_position_snapshot(peer_id: int, authoritative_position: Vector3) -> void:
-	# Authoritative positions are received here and stored as visual targets.
+func apply_position_snapshot(peer_id: int, authoritative_position: Vector3, facing_direction: Vector2 = Vector2(0.0, -1.0)) -> void:
+	# Authoritative positions and facing are received here and stored as visual targets.
 	_target_positions[peer_id] = authoritative_position
+	_target_facing_directions[peer_id] = facing_direction
+	if _spawned_nodes.has(peer_id):
+		var player: Node3D = _spawned_nodes[peer_id] as Node3D
+		_apply_player_facing(player, facing_direction)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -211,6 +233,24 @@ func submit_movement_input(input_direction: Vector2) -> void:
 	_last_input_by_peer[peer_id] = input_direction
 
 
+@rpc("any_peer", "call_remote", "unreliable")
+func submit_aim_input(aim_direction: Vector2) -> void:
+	if not multiplayer.is_server():
+		return
+
+	var peer_id: int = int(multiplayer.get_remote_sender_id())
+	if not players.has(peer_id):
+		return
+
+	if aim_direction.length_squared() > 1.0:
+		aim_direction = aim_direction.normalized()
+	if aim_direction.length_squared() <= 0.0001:
+		return
+
+	# The server stores authoritative facing intent for snapshots.
+	_aim_direction_by_peer[peer_id] = aim_direction
+
+
 @rpc("authority", "call_remote", "reliable")
 func despawn_player(peer_id: int) -> void:
 	if not _spawned_nodes.has(peer_id):
@@ -220,6 +260,7 @@ func despawn_player(peer_id: int) -> void:
 	player.queue_free()
 	_spawned_nodes.erase(peer_id)
 	_target_positions.erase(peer_id)
+	_target_facing_directions.erase(peer_id)
 	print("Despawned player for peer %s." % peer_id)
 	spawned_player_count_changed.emit(_spawned_nodes.size())
 
@@ -231,3 +272,11 @@ func _set_peer_label(player: Node, peer_id: int, character_name: String = "") ->
 			peer_label.text = "Peer %s" % peer_id
 		else:
 			peer_label.text = "%s\nPeer %s" % [character_name, peer_id]
+
+
+func _apply_player_facing(player: Node3D, facing_direction: Vector2) -> void:
+	if facing_direction.length_squared() <= 0.0001:
+		return
+
+	var normalized_facing: Vector2 = facing_direction.normalized()
+	player.rotation.y = atan2(-normalized_facing.x, -normalized_facing.y)
