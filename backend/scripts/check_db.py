@@ -1,28 +1,30 @@
-import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BACKEND_DIR))
+
+from app.config import settings  # noqa: E402
 
 
 def main() -> int:
-    load_dotenv(BACKEND_DIR / ".env")
-
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
+    if not settings.DATABASE_URL:
         print("Database check failed: DATABASE_URL is not set in backend/.env.")
         return 1
 
     try:
-        engine = create_engine(database_url)
+        from app.db import engine
+
         with engine.connect() as connection:
             version = connection.execute(text("SELECT version()")).scalar_one()
     except SQLAlchemyError as exc:
+        print(f"Database check failed: {exc}")
+        return 1
+    except Exception as exc:
         print(f"Database check failed: {exc}")
         return 1
 
