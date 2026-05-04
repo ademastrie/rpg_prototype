@@ -28,6 +28,7 @@ var _is_connected_to_server := false
 var _has_sent_join_request := false
 var _was_attack_pressed := false
 var _was_combat_toggle_pressed := false
+var _was_ability_panel_toggle_pressed := false
 var _is_local_player_down := false
 var _window_has_focus: bool = true
 var _confirmed_ability_names: Array[String] = []
@@ -41,8 +42,10 @@ func _ready() -> void:
 	world_spawner.combat_mode_updated.connect(_on_combat_mode_updated)
 	world_spawner.ability_enabled_updated.connect(_on_ability_enabled_updated)
 	world_spawner.ability_state_updated.connect(_on_ability_state_updated)
+	world_spawner.ability_catalog_updated.connect(_on_ability_catalog_updated)
 	game_hud.connect("combat_toggle_requested", Callable(self, "_send_combat_toggle_request"))
 	game_hud.connect("ability_toggle_requested", Callable(self, "_send_ability_toggle_request"))
+	game_hud.connect("loadout_save_requested", Callable(self, "_send_loadout_save_request"))
 	_camera_follow_offset = active_camera.global_position
 	_fixed_camera_basis = active_camera.global_transform.basis
 	_on_spawned_player_count_changed(0)
@@ -87,6 +90,7 @@ func _process(delta: float) -> void:
 			_send_aim_input(aim_direction)
 
 	_read_combat_toggle_input()
+	_read_ability_panel_toggle_input()
 	_read_basic_attack_input()
 	_update_camera_follow(delta)
 
@@ -126,6 +130,7 @@ func _on_connection_failed() -> void:
 	world_spawner.set_local_prediction_input(Vector2.ZERO)
 	_was_attack_pressed = false
 	_was_combat_toggle_pressed = false
+	_was_ability_panel_toggle_pressed = false
 	print("Failed to connect to game server.")
 
 
@@ -136,6 +141,7 @@ func _on_server_disconnected() -> void:
 	world_spawner.set_local_prediction_input(Vector2.ZERO)
 	_was_attack_pressed = false
 	_was_combat_toggle_pressed = false
+	_was_ability_panel_toggle_pressed = false
 	print("Disconnected from game server.")
 
 
@@ -206,6 +212,13 @@ func _on_ability_state_updated(peer_id: int, ability_name: String, enabled: bool
 		return
 
 	game_hud.call("update_ability_state", ability_name, enabled, active, cooldown_remaining)
+
+
+func _on_ability_catalog_updated(peer_id: int, unlocked_abilities: Array) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+
+	game_hud.call("update_unlocked_abilities", unlocked_abilities)
 
 
 func _read_movement_input() -> Vector2:
@@ -308,6 +321,14 @@ func _read_combat_toggle_input() -> void:
 	_was_combat_toggle_pressed = is_toggle_pressed
 
 
+func _read_ability_panel_toggle_input() -> void:
+	var is_toggle_pressed: bool = Input.is_key_pressed(KEY_B)
+	if is_toggle_pressed and not _was_ability_panel_toggle_pressed:
+		game_hud.call("toggle_ability_panel")
+
+	_was_ability_panel_toggle_pressed = is_toggle_pressed
+
+
 func _send_combat_toggle_request() -> void:
 	# Client only requests a toggle; the server owns the actual combat mode state.
 	world_spawner.rpc_id(1, "request_toggle_combat_mode")
@@ -319,6 +340,10 @@ func _send_ability_toggle_request(ability_name: String, enabled: bool) -> void:
 
 	# Client requests ability state; the server confirms the final enabled value.
 	world_spawner.rpc_id(1, "request_set_ability_enabled", ability_name, enabled)
+
+
+func _send_loadout_save_request(loadout_entries: Array) -> void:
+	world_spawner.rpc_id(1, "request_update_ability_loadout", loadout_entries)
 
 
 func _send_basic_attack_intent() -> void:
