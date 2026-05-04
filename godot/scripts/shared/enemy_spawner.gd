@@ -11,8 +11,8 @@ class_name EnemySpawner
 @export var basic_attack_range: float = 4.0
 @export var basic_attack_cone_dot: float = 0.65
 @export var respawn_delay_seconds: float = 5.0
-@export var debug_enemy_return_logs: bool = true
-@export var debug_enemy_snap_logs: bool = true
+@export var debug_enemy_return_logs: bool = false
+@export var debug_enemy_snap_logs: bool = false
 @export var enemy_snap_log_threshold: float = 5.0
 
 var enemies: Dictionary = {}
@@ -393,7 +393,6 @@ func _proximity_aggro_target(enemy_id: int, enemy_position: Vector3, alive_playe
 	if now_seconds > aggro_until:
 		_proximity_aggro_peer_by_enemy.erase(enemy_id)
 		_proximity_aggro_until_by_enemy.erase(enemy_id)
-		print("Enemy %s proximity engagement expired for peer %s." % [enemy_id, peer_id])
 		return {"has_target": false, "position": Vector3.ZERO}
 
 	return {
@@ -434,7 +433,6 @@ func _set_proximity_aggro(enemy_id: int, peer_id: int) -> void:
 	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
 	_proximity_aggro_peer_by_enemy[enemy_id] = peer_id
 	_proximity_aggro_until_by_enemy[enemy_id] = now_seconds + _enemy_definition_float("proximity_aggro_seconds", 11.0)
-	print("Enemy %s proximity aggro acquired peer %s." % [enemy_id, peer_id])
 
 
 func _set_forced_aggro(enemy_id: int, attacker_peer_id: int) -> void:
@@ -444,7 +442,6 @@ func _set_forced_aggro(enemy_id: int, attacker_peer_id: int) -> void:
 	if _returning_enemy_ids.has(enemy_id) and _is_enemy_beyond_emergency_failsafe(enemy_id):
 		return
 
-	var was_returning: bool = _returning_enemy_ids.has(enemy_id)
 	_returning_enemy_ids.erase(enemy_id)
 	_enemy_return_regen_progress.erase(enemy_id)
 	_proximity_aggro_peer_by_enemy.erase(enemy_id)
@@ -452,10 +449,6 @@ func _set_forced_aggro(enemy_id: int, attacker_peer_id: int) -> void:
 	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
 	_forced_aggro_peer_by_enemy[enemy_id] = attacker_peer_id
 	_forced_aggro_until_by_enemy[enemy_id] = now_seconds + _enemy_definition_float("forced_aggro_seconds", 16.0)
-	if was_returning:
-		print("Enemy %s re-engaged by damage from peer %s." % [enemy_id, attacker_peer_id])
-	else:
-		print("Enemy %s forced aggro on peer %s from damage." % [enemy_id, attacker_peer_id])
 
 
 func _is_peer_alive(peer_id: int) -> bool:
