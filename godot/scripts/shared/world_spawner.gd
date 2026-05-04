@@ -93,18 +93,18 @@ func set_local_prediction_input(input_direction: Vector2) -> void:
 	_local_prediction_input = input_direction
 
 
-func register_peer(peer_id: int, character_name: String = "") -> void:
-	_register_peer(peer_id, character_name, false, Vector3.ZERO)
+func register_peer(peer_id: int, character_name: String = "", loadout: Array = [], ability_enabled: Dictionary = {}) -> void:
+	_register_peer(peer_id, character_name, false, Vector3.ZERO, loadout, ability_enabled)
 
 
-func register_peer_at_position(peer_id: int, character_name: String, spawn_position: Vector3) -> void:
-	_register_peer(peer_id, character_name, true, spawn_position)
+func register_peer_at_position(peer_id: int, character_name: String, spawn_position: Vector3, loadout: Array = [], ability_enabled: Dictionary = {}) -> void:
+	_register_peer(peer_id, character_name, true, spawn_position, loadout, ability_enabled)
 
 
-func _register_peer(peer_id: int, character_name: String, use_custom_spawn: bool, custom_spawn_position: Vector3) -> void:
+func _register_peer(peer_id: int, character_name: String, use_custom_spawn: bool, custom_spawn_position: Vector3, loadout: Array, ability_enabled: Dictionary) -> void:
 	_sync_existing_players_to_peer(peer_id)
 
-	_register_player(peer_id, use_custom_spawn, custom_spawn_position)
+	_register_player(peer_id, use_custom_spawn, custom_spawn_position, loadout, ability_enabled)
 	_character_names_by_peer[peer_id] = character_name
 	var peer_position: Vector3 = players[peer_id] as Vector3
 	rpc("spawn_player", peer_id, peer_position, character_name)
@@ -180,7 +180,7 @@ func get_spawned_player(peer_id: int) -> Node3D:
 	return _spawned_nodes[peer_id] as Node3D
 
 
-func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn_position: Vector3 = Vector3.ZERO) -> void:
+func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn_position: Vector3 = Vector3.ZERO, loadout: Array = [], ability_enabled: Dictionary = {}) -> void:
 	if use_custom_spawn:
 		players[peer_id] = custom_spawn_position
 	else:
@@ -193,8 +193,11 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_player_is_down_by_peer[peer_id] = false
 	_player_respawn_positions[peer_id] = players[peer_id]
 	_combat_enabled_by_peer[peer_id] = false
-	_loadout_by_peer[peer_id] = DEFAULT_LOADOUT.duplicate()
-	_ability_enabled_by_peer[peer_id] = _default_ability_enabled_state()
+	var effective_loadout: Array = loadout.duplicate()
+	if effective_loadout.is_empty():
+		effective_loadout = DEFAULT_LOADOUT.duplicate()
+	_loadout_by_peer[peer_id] = effective_loadout
+	_ability_enabled_by_peer[peer_id] = _ability_enabled_state_for_loadout(effective_loadout, ability_enabled)
 	_last_ability_time_by_peer[peer_id] = {}
 	rpc("apply_player_health_update", peer_id, player_max_hp, player_max_hp)
 	rpc("apply_player_down_state", peer_id, false)
@@ -357,6 +360,16 @@ func _default_ability_enabled_state() -> Dictionary:
 	var ability_state: Dictionary = {}
 	for ability_name in DEFAULT_LOADOUT:
 		ability_state[ability_name] = true
+
+	return ability_state
+
+
+func _ability_enabled_state_for_loadout(loadout: Array, ability_enabled: Dictionary) -> Dictionary:
+	var ability_state: Dictionary = {}
+	for ability_name in ABILITY_DEFINITIONS.keys():
+		ability_state[str(ability_name)] = false
+	for ability_name in loadout:
+		ability_state[ability_name] = bool(ability_enabled.get(ability_name, true))
 
 	return ability_state
 
@@ -729,7 +742,7 @@ func request_toggle_combat_mode() -> void:
 
 	var combat_enabled: bool = not bool(_combat_enabled_by_peer.get(peer_id, false))
 	_combat_enabled_by_peer[peer_id] = combat_enabled
-	# Server owns combat mode and the temporary prototype loadout.
+	# Server owns combat mode and the validated loadout.
 	rpc("apply_combat_mode_update", peer_id, combat_enabled, _loadout_text(peer_id))
 	_send_ability_states(peer_id)
 	_broadcast_hp_regen_active_state(peer_id)

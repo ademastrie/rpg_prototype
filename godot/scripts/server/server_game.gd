@@ -11,6 +11,13 @@ var connected_peers: Array[int] = []
 var peer_sessions: Dictionary = {}
 var _pending_join_validations: Dictionary = {}
 
+const BACKEND_ABILITY_NAME_BY_KEY: Dictionary = {
+	"slash": "Slash",
+	"hp_regen": "HP Regen",
+	"damage_aura": "Damage Aura",
+	"firebolt": "Firebolt",
+}
+
 
 func _ready() -> void:
 	print("Server game scene ready.")
@@ -168,13 +175,181 @@ func _on_join_validation_completed(
 		"position_y": position_y,
 		"joined": true,
 	}
+	_fetch_character_abilities_with_backend(peer_id, access_token, session)
+
+
+func _fetch_character_abilities_with_backend(peer_id: int, access_token: String, session: Dictionary) -> void:
+	var character_id: int = int(session.get("character_id", 0))
+	if character_id <= 0:
+		print("Rejecting join for peer %s: missing character id before ability loadout fetch." % peer_id)
+		_disconnect_peer(peer_id)
+		return
+
+	var request: HTTPRequest = HTTPRequest.new()
+	add_child(request)
+	_pending_join_validations[peer_id] = request
+
+	request.request_completed.connect(_on_character_abilities_completed.bind(peer_id, access_token, session, request))
+
+	var headers: PackedStringArray = PackedStringArray([
+		"Content-Type: application/json",
+		"Authorization: Bearer %s" % access_token,
+	])
+	var url: String = "%s/characters/%s/abilities" % [_normalized_backend_base_url(), character_id]
+	var error: Error = request.request(url, headers, HTTPClient.METHOD_GET)
+	if error != OK:
+		print("Rejecting join for peer %s: failed to start backend ability loadout fetch: %s" % [peer_id, error])
+		_pending_join_validations.erase(peer_id)
+		request.queue_free()
+		_disconnect_peer(peer_id)
+
+
+func _on_character_abilities_completed(
+	result: int,
+	response_code: int,
+	_headers: PackedStringArray,
+	body: PackedByteArray,
+	peer_id: int,
+	_access_token: String,
+	session: Dictionary,
+	request: HTTPRequest
+) -> void:
+	_pending_join_validations.erase(peer_id)
+	request.queue_free()
+
+	if not connected_peers.has(peer_id):
+		return
+
+	if result != HTTPRequest.RESULT_SUCCESS:
+		print("Rejecting join for peer %s: ability loadout fetch failed with HTTPRequest result %s." % [peer_id, result])
+		_disconnect_peer(peer_id)
+		return
+
+	var response_text: String = body.get_string_from_utf8()
+	var json: JSON = JSON.new()
+	var parse_error: Error = json.parse(response_text)
+	if parse_error != OK:
+		print("Rejecting join for peer %s: invalid ability loadout JSON. status=%s response=%s" % [peer_id, response_code, response_text])
+		_disconnect_peer(peer_id)
+		return
+
+	if not json.data is Dictionary:
+		print("Rejecting join for peer %s: expected ability loadout JSON object. status=%s response=%s" % [peer_id, response_code, response_text])
+		_disconnect_peer(peer_id)
+		return
+
+	var response_data: Dictionary = json.data as Dictionary
+	if response_code < 200 or response_code >= 300:
+		print("Rejecting join for peer %s: backend ability loadout request failed. status=%s response=%s" % [peer_id, response_code, response_data])
+		_disconnect_peer(peer_id)
+		return
+
+	var loadout_data: Dictionary = _parse_backend_ability_loadout(peer_id, int(session.get("character_id", 0)), response_data)
+	if loadout_data.is_empty():
+		_disconnect_peer(peer_id)
+		return
+
+	_complete_validated_join(peer_id, session, loadout_data)
+
+
+func _complete_validated_join(peer_id: int, session: Dictionary, loadout_data: Dictionary) -> void:
+	var character_id: int = int(session.get("character_id", 0))
+	var character_name: String = str(session.get("character_name", ""))
+	var position_x: float = float(session.get("position_x", 0.0))
+	var position_y: float = float(session.get("position_y", 0.0))
+	var raw_loadout: Array = loadout_data.get("loadout", []) as Array
+	var loadout: Array[String] = []
+	var loadout_names: PackedStringArray = PackedStringArray()
+	for ability_name in raw_loadout:
+		var ability_name_text: String = str(ability_name)
+		loadout.append(ability_name_text)
+		loadout_names.append(ability_name_text)
+	var ability_enabled: Dictionary = loadout_data.get("ability_enabled", {}) as Dictionary
+
 	peer_sessions[peer_id] = session
-	print("Peer %s accepted as character %s (%s)." % [peer_id, character_name, character_id])
+	print("Peer %s accepted as character %s (%s) with backend loadout: %s." % [peer_id, character_name, character_id, ", ".join(loadout_names)])
 	if _has_saved_position(position_x, position_y):
-		world_spawner.register_peer_at_position(peer_id, character_name, Vector3(position_x, 0.0, position_y))
+		world_spawner.register_peer_at_position(peer_id, character_name, Vector3(position_x, 0.0, position_y), loadout, ability_enabled)
 	else:
-		world_spawner.register_peer(peer_id, character_name)
+		world_spawner.register_peer(peer_id, character_name, loadout, ability_enabled)
 	enemy_spawner.call("sync_peer", peer_id)
+
+
+func _parse_backend_ability_loadout(peer_id: int, character_id: int, response_data: Dictionary) -> Dictionary:
+	if int(response_data.get("character_id", 0)) != character_id:
+		print("Rejecting join for peer %s: ability response character id mismatch." % peer_id)
+		return {}
+
+	var raw_loadout: Variant = response_data.get("loadout", [])
+	if not raw_loadout is Array:
+		print("Rejecting join for peer %s: ability response loadout is not an array." % peer_id)
+		return {}
+
+	var display_names_by_key: Dictionary = _backend_ability_display_names(response_data)
+	var loadout_entries: Array = (raw_loadout as Array).duplicate()
+	for entry_variant in loadout_entries:
+		if not entry_variant is Dictionary:
+			print("Rejecting join for peer %s: ability loadout entry is not an object." % peer_id)
+			return {}
+
+	loadout_entries.sort_custom(func(left: Variant, right: Variant) -> bool:
+		var left_entry: Dictionary = left as Dictionary
+		var right_entry: Dictionary = right as Dictionary
+		return int(left_entry.get("slot_index", 0)) < int(right_entry.get("slot_index", 0))
+	)
+
+	var loadout: Array[String] = []
+	var ability_enabled: Dictionary = {}
+	for entry_variant in loadout_entries:
+		var entry: Dictionary = entry_variant as Dictionary
+		var ability_key: String = str(entry.get("ability_key", "")).strip_edges()
+		var ability_name: String = str(BACKEND_ABILITY_NAME_BY_KEY.get(ability_key, display_names_by_key.get(ability_key, "")))
+		if ability_name == "" or not _is_supported_godot_ability(ability_name):
+			print("Rejecting join for peer %s: unsupported backend ability '%s'." % [peer_id, ability_key])
+			return {}
+		if loadout.has(ability_name):
+			print("Rejecting join for peer %s: duplicate backend ability '%s'." % [peer_id, ability_key])
+			return {}
+
+		loadout.append(ability_name)
+		ability_enabled[ability_name] = bool(entry.get("enabled", true))
+
+	if loadout.is_empty():
+		print("Rejecting join for peer %s: backend ability loadout is empty." % peer_id)
+		return {}
+
+	return {
+		"loadout": loadout,
+		"ability_enabled": ability_enabled,
+	}
+
+
+func _backend_ability_display_names(response_data: Dictionary) -> Dictionary:
+	var display_names_by_key: Dictionary = {}
+	var raw_abilities: Variant = response_data.get("unlocked_abilities", [])
+	if not raw_abilities is Array:
+		return display_names_by_key
+
+	var abilities: Array = raw_abilities as Array
+	for ability_variant in abilities:
+		if not ability_variant is Dictionary:
+			continue
+
+		var ability: Dictionary = ability_variant as Dictionary
+		var ability_key: String = str(ability.get("ability_key", "")).strip_edges()
+		var definition: Variant = ability.get("definition", {})
+		if ability_key == "" or not definition is Dictionary:
+			continue
+
+		var display_name: String = str((definition as Dictionary).get("display_name", "")).strip_edges()
+		if display_name != "":
+			display_names_by_key[ability_key] = display_name
+
+	return display_names_by_key
+
+
+func _is_supported_godot_ability(ability_name: String) -> bool:
+	return ability_name == "Slash" or ability_name == "HP Regen" or ability_name == "Damage Aura" or ability_name == "Firebolt"
 
 
 func _save_peer_position(peer_id: int, session: Dictionary, position: Vector3) -> void:
