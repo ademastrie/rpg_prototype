@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from app.models.ability import CharacterAbility, CharacterAbilityLoadout
     from app.models.user import User
 
 
@@ -39,3 +40,11 @@ class Character(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="characters")
+    abilities: Mapped[list["CharacterAbility"]] = relationship(
+        back_populates="character",
+        cascade="all, delete-orphan",
+    )
+    ability_loadout: Mapped[list["CharacterAbilityLoadout"]] = relationship(
+        back_populates="character",
+        cascade="all, delete-orphan",
+    )
