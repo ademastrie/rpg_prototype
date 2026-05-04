@@ -54,11 +54,11 @@ func list_characters(access_token: String) -> int:
 	)
 
 
-func create_character(access_token: String, name: String) -> int:
+func create_character(access_token: String, name: String, starter_ability_key: String = "slash") -> int:
 	return _queue_json_request(
 		"/characters",
 		HTTPClient.METHOD_POST,
-		{"name": name},
+		{"name": name, "starter_ability_key": starter_ability_key},
 		access_token
 	)
 

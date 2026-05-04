@@ -8,6 +8,7 @@ extends Control
 @onready var status_label: Label = %StatusLabel
 @onready var character_list: ItemList = %CharacterList
 @onready var character_name_edit: LineEdit = %CharacterNameEdit
+@onready var starter_ability_option: OptionButton = %StarterAbilityOption
 
 var _access_token := ""
 var _characters: Array[Dictionary] = []
@@ -26,6 +27,7 @@ func _ready() -> void:
 	%EnterGameButton.pressed.connect(_on_enter_game_pressed)
 	character_list.item_selected.connect(_on_character_selected)
 
+	_setup_starter_ability_options()
 	_set_status("Enter an email and password, then register or log in.")
 
 
@@ -60,7 +62,8 @@ func _on_create_character_pressed() -> void:
 		_set_status("Character name is required.")
 		return
 
-	_track_request(api_client.create_character(_access_token, character_name), "create_character")
+	var starter_ability_key := _selected_starter_ability_key()
+	_track_request(api_client.create_character(_access_token, character_name, starter_ability_key), "create_character")
 	_set_status("Creating character...")
 
 
@@ -163,6 +166,23 @@ func _show_characters(data: Variant) -> void:
 
 	if character_list.item_count == 0:
 		character_list.add_item("No characters yet.")
+
+
+func _setup_starter_ability_options() -> void:
+	starter_ability_option.clear()
+	starter_ability_option.add_item("Slash")
+	starter_ability_option.set_item_metadata(0, "slash")
+	starter_ability_option.add_item("Firebolt")
+	starter_ability_option.set_item_metadata(1, "firebolt")
+	starter_ability_option.select(0)
+
+
+func _selected_starter_ability_key() -> String:
+	var selected_index := starter_ability_option.selected
+	if selected_index < 0:
+		return "slash"
+
+	return str(starter_ability_option.get_item_metadata(selected_index))
 
 
 func _track_request(request_id: int, action: String) -> void:

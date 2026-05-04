@@ -19,6 +19,8 @@ from app.models.user import User
 
 router = APIRouter(prefix="/characters", tags=["characters"])
 MAX_LOADOUT_ENTRIES = 5
+DEFAULT_STARTER_ABILITY_KEY = "slash"
+STARTER_ABILITY_KEYS = {"slash", "firebolt"}
 
 
 def _get_owned_character(character_id: int, user_id: int, db: Session) -> Character:
@@ -47,6 +49,90 @@ def _active_ability_definitions(db: Session) -> list[AbilityDefinition]:
     )
 
 
+def _get_starter_ability_definition(ability_key: str, db: Session) -> AbilityDefinition:
+    starter_ability_key = ability_key.strip()
+    if starter_ability_key not in STARTER_ABILITY_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Selected starter ability is not allowed.",
+        )
+
+    ability_definition = db.scalar(
+        select(AbilityDefinition).where(
+            AbilityDefinition.ability_key == starter_ability_key,
+            AbilityDefinition.is_active.is_(True),
+        )
+    )
+    if ability_definition is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Selected starter ability is not available.",
+        )
+
+    return ability_definition
+
+
+def _get_ability_definition(ability_key: str, db: Session) -> AbilityDefinition:
+    ability_key_text = ability_key.strip()
+    ability_definition = db.scalar(
+        select(AbilityDefinition).where(
+            AbilityDefinition.ability_key == ability_key_text,
+        )
+    )
+    if ability_definition is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown ability_key: {ability_key_text}.",
+        )
+
+    return ability_definition
+
+
+def _grant_starter_ability(
+    character_id: int,
+    ability_definition: AbilityDefinition,
+    db: Session,
+) -> None:
+    db.add(
+        CharacterAbility(
+            character_id=character_id,
+            ability_key=ability_definition.ability_key,
+        )
+    )
+    db.add(
+        CharacterAbilityLoadout(
+            character_id=character_id,
+            slot_index=0,
+            ability_key=ability_definition.ability_key,
+            enabled=True,
+        )
+    )
+
+
+def _unlock_character_ability(
+    character_id: int,
+    ability_definition: AbilityDefinition,
+    db: Session,
+) -> None:
+    character_ability = db.scalar(
+        select(CharacterAbility).where(
+            CharacterAbility.character_id == character_id,
+            CharacterAbility.ability_key == ability_definition.ability_key,
+        )
+    )
+    if character_ability is None:
+        db.add(
+            CharacterAbility(
+                character_id=character_id,
+                ability_key=ability_definition.ability_key,
+                unlocked=True,
+            )
+        )
+        return
+
+    character_ability.unlocked = True
+
+
 def _ensure_starter_abilities(character_id: int, db: Session) -> None:
     has_abilities = db.scalar(
         select(CharacterAbility.id)
@@ -65,22 +151,40 @@ def _ensure_starter_abilities(character_id: int, db: Session) -> None:
     ability_definitions = _active_ability_definitions(db)
 
     if has_abilities is None:
-        for ability_definition in ability_definitions:
+        starter_ability = next(
+            (
+                ability_definition
+                for ability_definition in ability_definitions
+                if ability_definition.ability_key == DEFAULT_STARTER_ABILITY_KEY
+            ),
+            None,
+        )
+        if starter_ability is not None:
             db.add(
                 CharacterAbility(
                     character_id=character_id,
-                    ability_key=ability_definition.ability_key,
+                    ability_key=starter_ability.ability_key,
                 )
             )
 
     if has_loadout is None:
-        default_loadout = ability_definitions[:MAX_LOADOUT_ENTRIES]
-        for slot_index, ability_definition in enumerate(default_loadout):
+        unlocked_abilities = list(
+            db.scalars(
+                select(CharacterAbility)
+                .join(CharacterAbility.ability)
+                .where(
+                    CharacterAbility.character_id == character_id,
+                    CharacterAbility.unlocked.is_(True),
+                )
+                .order_by(AbilityDefinition.id)
+            ).all()
+        )
+        for slot_index, ability in enumerate(unlocked_abilities[:MAX_LOADOUT_ENTRIES]):
             db.add(
                 CharacterAbilityLoadout(
                     character_id=character_id,
                     slot_index=slot_index,
-                    ability_key=ability_definition.ability_key,
+                    ability_key=ability.ability_key,
                     enabled=True,
                 )
             )
@@ -204,11 +308,13 @@ def create_character(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Character:
+    starter_ability = _get_starter_ability_definition(payload.starter_ability_key, db)
     character = Character(name=payload.name, user_id=current_user.id)
     db.add(character)
+    db.flush()
+    _grant_starter_ability(character.id, starter_ability, db)
     db.commit()
     db.refresh(character)
-    _ensure_starter_abilities(character.id, db)
     return character
 
 
@@ -241,6 +347,21 @@ def get_character_abilities(
 ) -> CharacterAbilitiesResponse:
     character = _get_owned_character(character_id, current_user.id, db)
     _ensure_starter_abilities(character.id, db)
+
+    return _character_abilities_response(character.id, db)
+
+
+@router.post("/{character_id}/abilities/{ability_key}/unlock", response_model=CharacterAbilitiesResponse)
+def unlock_character_ability(
+    character_id: int,
+    ability_key: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CharacterAbilitiesResponse:
+    character = _get_owned_character(character_id, current_user.id, db)
+    ability_definition = _get_ability_definition(ability_key, db)
+    _unlock_character_ability(character.id, ability_definition, db)
+    db.commit()
 
     return _character_abilities_response(character.id, db)
 

@@ -13,15 +13,22 @@ alembic current
 ### Character abilities and loadout
 
 The ability endpoints use the same bearer token auth as the other character endpoints.
-For characters without ability rows yet, the backend seeds the active prototype ability
-definitions as starter abilities and fills the initial loadout in slots `0` through `4`
-in ability definition order.
+For characters without ability rows yet, the backend seeds a safe starter ability and
+fills the initial loadout from unlocked abilities. New character creation accepts a
+starter ability choice and puts that ability in loadout slot `0`.
 
 Swagger:
 
 ```powershell
 Start-Process http://127.0.0.1:8000/docs
 ```
+
+In Swagger, log in through `POST /auth/login`, use the returned bearer token with
+Authorize, then try:
+
+- `GET /characters/{character_id}/abilities`
+- `POST /characters/{character_id}/abilities/{ability_key}/unlock`
+- `PUT /characters/{character_id}/ability-loadout`
 
 PowerShell:
 
@@ -34,6 +41,12 @@ $Characters = Invoke-RestMethod -Method Get "$BaseUrl/characters" -Headers $Head
 $CharacterId = $Characters[0].id
 
 Invoke-RestMethod -Method Get "$BaseUrl/characters/$CharacterId/abilities" -Headers $Headers
+
+# Unlock is idempotent. Re-running this should still return success.
+Invoke-RestMethod -Method Post "$BaseUrl/characters/$CharacterId/abilities/firebolt/unlock" -Headers $Headers
+
+# Unknown abilities should be rejected.
+Invoke-RestMethod -Method Post "$BaseUrl/characters/$CharacterId/abilities/not_real/unlock" -Headers $Headers
 
 $Body = @{
     loadout = @(

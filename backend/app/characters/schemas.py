@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 class CharacterCreate(BaseModel):
     name: str
+    starter_ability_key: str = "slash"
 
 
 class CharacterResponse(BaseModel):
