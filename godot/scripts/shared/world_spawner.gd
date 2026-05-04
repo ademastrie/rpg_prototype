@@ -4,7 +4,7 @@ signal spawned_player_count_changed(count: int)
 signal player_spawned(peer_id: int, player: Node3D)
 signal player_health_updated(peer_id: int, current_hp: int, max_hp: int)
 signal player_down_state_updated(peer_id: int, is_down: bool)
-signal combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_text: String)
+signal combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries: Array)
 signal ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool)
 signal ability_state_updated(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float)
 signal join_requested(peer_id: int, character_id: int, character_name: String, access_token: String)
@@ -39,6 +39,7 @@ var _player_respawn_positions: Dictionary = {}
 var _last_contact_damage_time_by_peer: Dictionary = {}
 var _combat_enabled_by_peer: Dictionary = {}
 var _loadout_by_peer: Dictionary = {}
+var _ability_display_names_by_peer: Dictionary = {}
 var _ability_enabled_by_peer: Dictionary = {}
 var _last_ability_time_by_peer: Dictionary = {}
 var _local_prediction_input: Vector2 = Vector2.ZERO
@@ -93,18 +94,18 @@ func set_local_prediction_input(input_direction: Vector2) -> void:
 	_local_prediction_input = input_direction
 
 
-func register_peer(peer_id: int, character_name: String = "", loadout: Array = [], ability_enabled: Dictionary = {}) -> void:
-	_register_peer(peer_id, character_name, false, Vector3.ZERO, loadout, ability_enabled)
+func register_peer(peer_id: int, character_name: String = "", loadout: Array = [], ability_enabled: Dictionary = {}, ability_display_names: Dictionary = {}) -> void:
+	_register_peer(peer_id, character_name, false, Vector3.ZERO, loadout, ability_enabled, ability_display_names)
 
 
-func register_peer_at_position(peer_id: int, character_name: String, spawn_position: Vector3, loadout: Array = [], ability_enabled: Dictionary = {}) -> void:
-	_register_peer(peer_id, character_name, true, spawn_position, loadout, ability_enabled)
+func register_peer_at_position(peer_id: int, character_name: String, spawn_position: Vector3, loadout: Array = [], ability_enabled: Dictionary = {}, ability_display_names: Dictionary = {}) -> void:
+	_register_peer(peer_id, character_name, true, spawn_position, loadout, ability_enabled, ability_display_names)
 
 
-func _register_peer(peer_id: int, character_name: String, use_custom_spawn: bool, custom_spawn_position: Vector3, loadout: Array, ability_enabled: Dictionary) -> void:
+func _register_peer(peer_id: int, character_name: String, use_custom_spawn: bool, custom_spawn_position: Vector3, loadout: Array, ability_enabled: Dictionary, ability_display_names: Dictionary) -> void:
 	_sync_existing_players_to_peer(peer_id)
 
-	_register_player(peer_id, use_custom_spawn, custom_spawn_position, loadout, ability_enabled)
+	_register_player(peer_id, use_custom_spawn, custom_spawn_position, loadout, ability_enabled, ability_display_names)
 	_character_names_by_peer[peer_id] = character_name
 	var peer_position: Vector3 = players[peer_id] as Vector3
 	rpc("spawn_player", peer_id, peer_position, character_name)
@@ -144,6 +145,7 @@ func unregister_peer(peer_id: int) -> void:
 	_last_contact_damage_time_by_peer.erase(peer_id)
 	_combat_enabled_by_peer.erase(peer_id)
 	_loadout_by_peer.erase(peer_id)
+	_ability_display_names_by_peer.erase(peer_id)
 	_ability_enabled_by_peer.erase(peer_id)
 	_last_ability_time_by_peer.erase(peer_id)
 	_character_names_by_peer.erase(peer_id)
@@ -180,7 +182,7 @@ func get_spawned_player(peer_id: int) -> Node3D:
 	return _spawned_nodes[peer_id] as Node3D
 
 
-func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn_position: Vector3 = Vector3.ZERO, loadout: Array = [], ability_enabled: Dictionary = {}) -> void:
+func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn_position: Vector3 = Vector3.ZERO, loadout: Array = [], ability_enabled: Dictionary = {}, ability_display_names: Dictionary = {}) -> void:
 	if use_custom_spawn:
 		players[peer_id] = custom_spawn_position
 	else:
@@ -197,11 +199,12 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	if effective_loadout.is_empty():
 		effective_loadout = DEFAULT_LOADOUT.duplicate()
 	_loadout_by_peer[peer_id] = effective_loadout
+	_ability_display_names_by_peer[peer_id] = _ability_display_names_for_loadout(effective_loadout, ability_display_names)
 	_ability_enabled_by_peer[peer_id] = _ability_enabled_state_for_loadout(effective_loadout, ability_enabled)
 	_last_ability_time_by_peer[peer_id] = {}
 	rpc("apply_player_health_update", peer_id, player_max_hp, player_max_hp)
 	rpc("apply_player_down_state", peer_id, false)
-	rpc("apply_combat_mode_update", peer_id, false, _loadout_text(peer_id))
+	rpc("apply_combat_mode_update", peer_id, false, _loadout_entries(peer_id))
 	_send_ability_enabled_states(peer_id)
 	_send_ability_states(peer_id)
 	_broadcast_hp_regen_active_state(peer_id)
@@ -366,17 +369,24 @@ func _default_ability_enabled_state() -> Dictionary:
 
 func _ability_enabled_state_for_loadout(loadout: Array, ability_enabled: Dictionary) -> Dictionary:
 	var ability_state: Dictionary = {}
-	for ability_name in ABILITY_DEFINITIONS.keys():
-		ability_state[str(ability_name)] = false
 	for ability_name in loadout:
 		ability_state[ability_name] = bool(ability_enabled.get(ability_name, true))
 
 	return ability_state
 
 
+func _ability_display_names_for_loadout(loadout: Array, ability_display_names: Dictionary) -> Dictionary:
+	var display_names: Dictionary = {}
+	for ability_name in loadout:
+		var ability_name_text: String = str(ability_name)
+		display_names[ability_name_text] = str(ability_display_names.get(ability_name_text, ability_name_text))
+
+	return display_names
+
+
 func _is_ability_enabled(peer_id: int, ability_name: String) -> bool:
 	var ability_state: Dictionary = _ability_enabled_by_peer.get(peer_id, {}) as Dictionary
-	return bool(ability_state.get(ability_name, true))
+	return bool(ability_state.get(ability_name, false))
 
 
 func _is_hp_regen_active(peer_id: int) -> bool:
@@ -391,9 +401,11 @@ func _broadcast_hp_regen_active_state(peer_id: int) -> void:
 
 
 func _send_ability_enabled_states(peer_id: int) -> void:
+	var loadout: Array = _loadout_by_peer.get(peer_id, DEFAULT_LOADOUT) as Array
 	var ability_state: Dictionary = _ability_enabled_by_peer.get(peer_id, {}) as Dictionary
-	for ability_name in ability_state:
-		rpc_id(peer_id, "apply_ability_enabled_update", peer_id, str(ability_name), bool(ability_state[ability_name]))
+	for ability_name in loadout:
+		var ability_name_text: String = str(ability_name)
+		rpc_id(peer_id, "apply_ability_enabled_update", peer_id, ability_name_text, bool(ability_state.get(ability_name_text, true)))
 
 
 func _send_ability_states(peer_id: int) -> void:
@@ -504,13 +516,18 @@ func _perform_firebolt(peer_id: int) -> void:
 		enemy_spawner.call("resolve_firebolt", peer_id, firebolt_position, normalized_aim, firebolt_range, firebolt_width, damage)
 
 
-func _loadout_text(peer_id: int) -> String:
+func _loadout_entries(peer_id: int) -> Array:
 	var loadout: Array = _loadout_by_peer.get(peer_id, DEFAULT_LOADOUT) as Array
-	var names: PackedStringArray = PackedStringArray()
+	var display_names: Dictionary = _ability_display_names_by_peer.get(peer_id, {}) as Dictionary
+	var entries: Array = []
 	for ability_name in loadout:
-		names.append(str(ability_name))
+		var ability_name_text: String = str(ability_name)
+		entries.append({
+			"ability_name": ability_name_text,
+			"display_name": str(display_names.get(ability_name_text, ability_name_text)),
+		})
 
-	return ", ".join(names)
+	return entries
 
 
 func _broadcast_position_snapshots() -> void:
@@ -664,9 +681,19 @@ func apply_player_down_state(peer_id: int, is_down: bool) -> void:
 
 
 @rpc("authority", "call_remote", "reliable")
-func apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_text: String) -> void:
+func apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_entries: Array) -> void:
 	_combat_enabled_by_peer[peer_id] = combat_enabled
-	combat_mode_updated.emit(peer_id, combat_enabled, loadout_text)
+	var loadout: Array = []
+	for entry_variant in loadout_entries:
+		if not (entry_variant is Dictionary):
+			continue
+
+		var entry: Dictionary = entry_variant as Dictionary
+		var ability_name: String = str(entry.get("ability_name", "")).strip_edges()
+		if ability_name != "":
+			loadout.append(ability_name)
+	_loadout_by_peer[peer_id] = loadout
+	combat_mode_updated.emit(peer_id, combat_enabled, loadout_entries)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -743,7 +770,7 @@ func request_toggle_combat_mode() -> void:
 	var combat_enabled: bool = not bool(_combat_enabled_by_peer.get(peer_id, false))
 	_combat_enabled_by_peer[peer_id] = combat_enabled
 	# Server owns combat mode and the validated loadout.
-	rpc("apply_combat_mode_update", peer_id, combat_enabled, _loadout_text(peer_id))
+	rpc("apply_combat_mode_update", peer_id, combat_enabled, _loadout_entries(peer_id))
 	_send_ability_states(peer_id)
 	_broadcast_hp_regen_active_state(peer_id)
 
@@ -903,6 +930,8 @@ func despawn_player(peer_id: int) -> void:
 	_target_positions.erase(peer_id)
 	_target_facing_directions.erase(peer_id)
 	_combat_enabled_by_peer.erase(peer_id)
+	_loadout_by_peer.erase(peer_id)
+	_ability_display_names_by_peer.erase(peer_id)
 	_ability_enabled_by_peer.erase(peer_id)
 	_player_is_down_by_peer.erase(peer_id)
 	print("Despawned player for peer %s." % peer_id)

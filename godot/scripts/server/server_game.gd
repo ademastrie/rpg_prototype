@@ -265,13 +265,14 @@ func _complete_validated_join(peer_id: int, session: Dictionary, loadout_data: D
 		loadout.append(ability_name_text)
 		loadout_names.append(ability_name_text)
 	var ability_enabled: Dictionary = loadout_data.get("ability_enabled", {}) as Dictionary
+	var ability_display_names: Dictionary = loadout_data.get("ability_display_names", {}) as Dictionary
 
 	peer_sessions[peer_id] = session
 	print("Peer %s accepted as character %s (%s) with backend loadout: %s." % [peer_id, character_name, character_id, ", ".join(loadout_names)])
 	if _has_saved_position(position_x, position_y):
-		world_spawner.register_peer_at_position(peer_id, character_name, Vector3(position_x, 0.0, position_y), loadout, ability_enabled)
+		world_spawner.register_peer_at_position(peer_id, character_name, Vector3(position_x, 0.0, position_y), loadout, ability_enabled, ability_display_names)
 	else:
-		world_spawner.register_peer(peer_id, character_name, loadout, ability_enabled)
+		world_spawner.register_peer(peer_id, character_name, loadout, ability_enabled, ability_display_names)
 	enemy_spawner.call("sync_peer", peer_id)
 
 
@@ -300,10 +301,12 @@ func _parse_backend_ability_loadout(peer_id: int, character_id: int, response_da
 
 	var loadout: Array[String] = []
 	var ability_enabled: Dictionary = {}
+	var ability_display_names: Dictionary = {}
 	for entry_variant in loadout_entries:
 		var entry: Dictionary = entry_variant as Dictionary
 		var ability_key: String = str(entry.get("ability_key", "")).strip_edges()
 		var ability_name: String = str(BACKEND_ABILITY_NAME_BY_KEY.get(ability_key, display_names_by_key.get(ability_key, "")))
+		var display_name: String = str(display_names_by_key.get(ability_key, ability_key)).strip_edges()
 		if ability_name == "" or not _is_supported_godot_ability(ability_name):
 			print("Rejecting join for peer %s: unsupported backend ability '%s'." % [peer_id, ability_key])
 			return {}
@@ -313,6 +316,7 @@ func _parse_backend_ability_loadout(peer_id: int, character_id: int, response_da
 
 		loadout.append(ability_name)
 		ability_enabled[ability_name] = bool(entry.get("enabled", true))
+		ability_display_names[ability_name] = display_name if display_name != "" else ability_name
 
 	if loadout.is_empty():
 		print("Rejecting join for peer %s: backend ability loadout is empty." % peer_id)
@@ -321,6 +325,7 @@ func _parse_backend_ability_loadout(peer_id: int, character_id: int, response_da
 	return {
 		"loadout": loadout,
 		"ability_enabled": ability_enabled,
+		"ability_display_names": ability_display_names,
 	}
 
 

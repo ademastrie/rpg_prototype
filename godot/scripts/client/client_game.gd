@@ -30,6 +30,7 @@ var _was_attack_pressed := false
 var _was_combat_toggle_pressed := false
 var _is_local_player_down := false
 var _window_has_focus: bool = true
+var _confirmed_ability_names: Array[String] = []
 
 
 func _ready() -> void:
@@ -46,7 +47,7 @@ func _ready() -> void:
 	_fixed_camera_basis = active_camera.global_transform.basis
 	_on_spawned_player_count_changed(0)
 	_on_player_health_updated(multiplayer.get_unique_id(), 100, 100)
-	_on_combat_mode_updated(multiplayer.get_unique_id(), false, "Slash, HP Regen, Damage Aura, Firebolt")
+	_on_combat_mode_updated(multiplayer.get_unique_id(), false, [])
 	set_selected_character(ClientSession.selected_character)
 	_connect_to_server()
 
@@ -175,12 +176,22 @@ func _on_player_down_state_updated(peer_id: int, is_down: bool) -> void:
 	game_hud.call("update_down_state", is_down)
 
 
-func _on_combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_text: String) -> void:
+func _on_combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries: Array) -> void:
 	if peer_id != multiplayer.get_unique_id():
 		return
 
+	_confirmed_ability_names.clear()
+	for entry_variant in loadout_entries:
+		if not (entry_variant is Dictionary):
+			continue
+
+		var entry: Dictionary = entry_variant as Dictionary
+		var ability_name: String = str(entry.get("ability_name", "")).strip_edges()
+		if ability_name != "":
+			_confirmed_ability_names.append(ability_name)
+
 	game_hud.call("update_combat_mode", combat_enabled)
-	game_hud.call("update_loadout", loadout_text)
+	game_hud.call("update_loadout", loadout_entries)
 
 
 func _on_ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool) -> void:
@@ -303,6 +314,9 @@ func _send_combat_toggle_request() -> void:
 
 
 func _send_ability_toggle_request(ability_name: String, enabled: bool) -> void:
+	if not _confirmed_ability_names.has(ability_name):
+		return
+
 	# Client requests ability state; the server confirms the final enabled value.
 	world_spawner.rpc_id(1, "request_set_ability_enabled", ability_name, enabled)
 

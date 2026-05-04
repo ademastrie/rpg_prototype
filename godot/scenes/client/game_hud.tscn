@@ -31,27 +31,10 @@ text = "Combat: OFF"
 
 [node name="LoadoutLabel" type="Label" parent="Panel/VBoxContainer"]
 layout_mode = 2
-text = "Loadout: Slash, HP Regen, Damage Aura, Firebolt"
+text = "Loadout: waiting for server"
 
-[node name="SlashCheckBox" type="CheckBox" parent="Panel/VBoxContainer"]
+[node name="AbilityList" type="VBoxContainer" parent="Panel/VBoxContainer"]
 layout_mode = 2
-button_pressed = true
-text = "Slash: ON | inactive"
-
-[node name="HPRegenCheckBox" type="CheckBox" parent="Panel/VBoxContainer"]
-layout_mode = 2
-button_pressed = true
-text = "HP Regen: ON | inactive"
-
-[node name="DamageAuraCheckBox" type="CheckBox" parent="Panel/VBoxContainer"]
-layout_mode = 2
-button_pressed = true
-text = "Damage Aura: ON | inactive"
-
-[node name="FireboltCheckBox" type="CheckBox" parent="Panel/VBoxContainer"]
-layout_mode = 2
-button_pressed = true
-text = "Firebolt: ON | inactive"
 
 [node name="CombatToggleButton" type="Button" parent="Panel/VBoxContainer"]
 layout_mode = 2
