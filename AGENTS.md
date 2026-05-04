@@ -17,6 +17,10 @@ This is a learning prototype for a persistent-feeling online action RPG in Godot
 - Targeted sync to a joining peer must not broadcast full world state to existing peers.
 - Client display RPCs should no-op on the server or otherwise avoid mutating server simulation.
 - Current hardcoded Godot ability/enemy definitions are temporary prototype structures that should eventually be backend/database-backed.
+- Planned persistent gameplay data includes ability definitions/effects, character ability unlocks, character ability loadout, enabled ability state, player/character stats, enemy definitions, region spawn rules, loot tables, gear/items, inventory, and equipment.
+- Ability model: ability = trigger + targeting shape + one or more effects. Auras may apply damage, healing, regeneration, defense, movement speed, or other stat effects.
+- First persistent gameplay implementation target: ability definitions/effects, character ability unlocks, and character ability loadout/enabled state.
+- Godot server still owns live simulation: current HP during the session, cooldowns, active effects, enemy simulation, hit detection, and damage/healing resolution.
 - Regions may be capped, channeled, or transferred behind transitions.
 - Make small, reviewable changes.
 - Do not rewrite the project architecture without explicit approval.

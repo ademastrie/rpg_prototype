@@ -14,6 +14,19 @@
 - Enemy and ability definitions that are currently hardcoded in Godot are temporary prototype structures.
 - Those definitions should eventually be loaded from backend/database-backed durable definitions.
 
+## Planned Persistent Gameplay Data
+
+- Backend/PostgreSQL will eventually own durable gameplay definitions and persistent character state.
+- Current Godot hardcoded ability definitions are temporary prototype definitions.
+- Ability model: an ability is a trigger, a targeting shape, and one or more effects.
+- Trigger examples: cooldown, periodic, continuous, passive.
+- Targeting examples: self, aimed cone, aimed line, radius around self, ground area.
+- Effect examples: damage, healing, health regen, defense boost, speed boost, stat modifier, aura effect.
+- Auras are not only damage; aura-style abilities may apply damage, healing, regeneration, defense, movement speed, or other stat effects.
+- Likely future tables: `ability_definitions`, `ability_effects`, `character_abilities`, `character_ability_loadout`, player/character stats, enemy definitions, region spawn rules, loot tables, gear/items, inventory/equipment.
+- First implementation target: ability definitions/effects, character ability unlocks, and character ability loadout/enabled state.
+- The Godot dedicated server still owns live simulation during a session: current HP, cooldowns, active effects, enemy simulation, hit detection, and damage/healing resolution.
+
 ## Join Sync
 
 - Join sync must be read-only serialization of current server state.
