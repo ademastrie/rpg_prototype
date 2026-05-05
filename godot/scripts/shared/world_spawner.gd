@@ -4,6 +4,7 @@ signal spawned_player_count_changed(count: int)
 signal player_spawned(peer_id: int, player: Node3D)
 signal player_health_updated(peer_id: int, current_hp: int, max_hp: int)
 signal player_down_state_updated(peer_id: int, is_down: bool)
+signal player_combat_stats_updated(peer_id: int, combat_stats: Dictionary)
 signal combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries: Array)
 signal ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool)
 signal ability_state_updated(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float)
@@ -40,6 +41,7 @@ var _last_attack_time_by_peer: Dictionary = {}
 var _player_max_hp_by_peer: Dictionary = {}
 var _player_current_hp_by_peer: Dictionary = {}
 var _player_is_down_by_peer: Dictionary = {}
+var _player_combat_stats_by_peer: Dictionary = {}
 var _player_respawn_positions: Dictionary = {}
 var _last_contact_damage_time_by_peer: Dictionary = {}
 var _combat_enabled_by_peer: Dictionary = {}
@@ -150,6 +152,7 @@ func unregister_peer(peer_id: int) -> void:
 	_player_max_hp_by_peer.erase(peer_id)
 	_player_current_hp_by_peer.erase(peer_id)
 	_player_is_down_by_peer.erase(peer_id)
+	_player_combat_stats_by_peer.erase(peer_id)
 	_player_respawn_positions.erase(peer_id)
 	_last_contact_damage_time_by_peer.erase(peer_id)
 	_combat_enabled_by_peer.erase(peer_id)
@@ -217,6 +220,7 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_unlocked_abilities_by_peer[peer_id] = unlocked_abilities.duplicate()
 	_ability_enabled_by_peer[peer_id] = _ability_enabled_state_for_loadout(effective_loadout, ability_enabled)
 	_last_ability_time_by_peer[peer_id] = {}
+	_recalculate_player_combat_stats(peer_id)
 	rpc("apply_player_health_update", peer_id, player_max_hp, player_max_hp)
 	rpc("apply_player_down_state", peer_id, false)
 	rpc_id(peer_id, "apply_ability_catalog_update", peer_id, _unlocked_abilities_by_peer[peer_id] as Array)
@@ -288,12 +292,16 @@ func _apply_enemy_contact_damage(_delta: float) -> void:
 
 		var player_position: Vector3 = players[peer_id] as Vector3
 		if _is_enemy_in_contact_range(player_position, enemy_positions):
-			if apply_enemy_melee_damage(peer_id_int, enemy_contact_damage):
+			if apply_enemy_damage_to_player(peer_id_int, enemy_contact_damage):
 				_last_contact_damage_time_by_peer[peer_id] = now_seconds
 
 
 func apply_enemy_melee_damage(peer_id: int, damage: int) -> bool:
-	if not multiplayer.is_server() or damage <= 0 or not players.has(peer_id):
+	return apply_enemy_damage_to_player(peer_id, damage)
+
+
+func apply_enemy_damage_to_player(peer_id: int, raw_damage: int) -> bool:
+	if not multiplayer.is_server() or raw_damage <= 0 or not players.has(peer_id):
 		return false
 	if bool(_player_is_down_by_peer.get(peer_id, false)):
 		return false
@@ -302,7 +310,8 @@ func apply_enemy_melee_damage(peer_id: int, damage: int) -> bool:
 	if current_hp <= 0:
 		return false
 
-	current_hp = max(current_hp - damage, 0)
+	var final_damage: int = _modified_player_damage_taken(peer_id, raw_damage)
+	current_hp = max(current_hp - final_damage, 0)
 	_player_current_hp_by_peer[peer_id] = current_hp
 	var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
 	rpc("apply_player_health_update", peer_id, current_hp, max_hp)
@@ -310,6 +319,33 @@ func apply_enemy_melee_damage(peer_id: int, damage: int) -> bool:
 		_mark_player_down(peer_id)
 
 	return true
+
+
+func _modified_player_damage_taken(peer_id: int, raw_damage: int) -> int:
+	var combat_stats: Dictionary = _player_combat_stats_by_peer.get(peer_id, _default_player_combat_stats()) as Dictionary
+	var damage_reduction: float = clamp(float(combat_stats.get("damage_reduction", 0.0)), 0.0, 0.95)
+	return max(int(round(float(raw_damage) * (1.0 - damage_reduction))), 1)
+
+
+func _default_player_combat_stats() -> Dictionary:
+	return {
+		"damage_reduction": 0.0,
+	}
+
+
+func _recalculate_player_combat_stats(peer_id: int) -> void:
+	if not multiplayer.is_server() or not players.has(peer_id):
+		return
+
+	var combat_stats: Dictionary = _default_player_combat_stats()
+	var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
+	# Temporary prototype modifier: Slash grants damage reduction while slotted.
+	# Future modifiers should come from backend ability effects, gear, buffs/debuffs.
+	if loadout.has("Slash"):
+		combat_stats["damage_reduction"] = 0.20
+
+	_player_combat_stats_by_peer[peer_id] = combat_stats
+	rpc_id(peer_id, "apply_player_combat_stats_update", peer_id, combat_stats)
 
 
 func _mark_player_down(peer_id: int) -> void:
@@ -346,6 +382,7 @@ func _on_player_respawn_timer_timeout(peer_id: int, respawn_timer: Timer) -> voi
 	_player_current_hp_by_peer[peer_id] = max_hp
 	_player_is_down_by_peer[peer_id] = false
 	_last_contact_damage_time_by_peer[peer_id] = float(Time.get_ticks_msec()) / 1000.0
+	_recalculate_player_combat_stats(peer_id)
 	rpc("spawn_player", peer_id, respawn_position, str(_character_names_by_peer.get(peer_id, "")))
 	rpc("apply_position_snapshot", peer_id, respawn_position, _aim_direction_by_peer.get(peer_id, Vector2(0.0, -1.0)) as Vector2)
 	rpc("apply_player_health_update", peer_id, max_hp, max_hp)
@@ -477,6 +514,7 @@ func apply_confirmed_ability_data(peer_id: int, loadout: Array, ability_enabled:
 	_unlocked_abilities_by_peer[peer_id] = unlocked_abilities.duplicate()
 	_ability_enabled_by_peer[peer_id] = _ability_enabled_state_for_loadout(loadout, ability_enabled)
 	_last_ability_time_by_peer[peer_id] = {}
+	_recalculate_player_combat_stats(peer_id)
 	rpc_id(peer_id, "apply_ability_catalog_update", peer_id, _unlocked_abilities_by_peer[peer_id] as Array)
 	rpc("apply_combat_mode_update", peer_id, bool(_combat_enabled_by_peer.get(peer_id, false)), _loadout_entries(peer_id))
 	_send_ability_enabled_states(peer_id)
@@ -756,6 +794,12 @@ func apply_player_health_update(peer_id: int, current_hp: int, max_hp: int) -> v
 func apply_player_down_state(peer_id: int, is_down: bool) -> void:
 	_player_is_down_by_peer[peer_id] = is_down
 	player_down_state_updated.emit(peer_id, is_down)
+
+
+@rpc("authority", "call_remote", "reliable")
+func apply_player_combat_stats_update(peer_id: int, combat_stats: Dictionary) -> void:
+	_player_combat_stats_by_peer[peer_id] = combat_stats.duplicate()
+	player_combat_stats_updated.emit(peer_id, combat_stats)
 
 
 @rpc("authority", "call_remote", "reliable")

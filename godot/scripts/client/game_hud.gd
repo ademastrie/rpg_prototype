@@ -22,6 +22,7 @@ var _unlocked_abilities: Array = []
 var _ability_panel: PanelContainer = null
 var _ability_panel_button: Button = null
 var _ability_slot_rows: Array = []
+var _combat_stats_label: Label = null
 var _ability_panel_status: Label = null
 var _message_label: Label = null
 var _message_timer: SceneTreeTimer = null
@@ -33,6 +34,8 @@ func _ready() -> void:
 	update_health(100, 100)
 	update_down_state(false)
 	update_combat_mode(false)
+	_build_combat_stats_label()
+	update_combat_stats({})
 	update_loadout([])
 
 
@@ -63,6 +66,14 @@ func update_combat_mode(combat_enabled: bool) -> void:
 		combat_label.text = "Combat: ON"
 	else:
 		combat_label.text = "Combat: OFF"
+
+
+func update_combat_stats(combat_stats: Dictionary) -> void:
+	if _combat_stats_label == null:
+		return
+
+	var damage_reduction: float = float(combat_stats.get("damage_reduction", 0.0))
+	_combat_stats_label.text = "Damage Reduction: %s%%" % int(round(damage_reduction * 100.0))
 
 
 func update_loadout(loadout_entries: Array) -> void:
@@ -215,6 +226,12 @@ func _build_ability_panel() -> void:
 	hud_vbox.add_child(_message_label)
 
 	_refresh_ability_panel_options()
+
+
+func _build_combat_stats_label() -> void:
+	_combat_stats_label = Label.new()
+	hud_vbox.add_child(_combat_stats_label)
+	hud_vbox.move_child(_combat_stats_label, loadout_label.get_index() + 1)
 
 
 func _refresh_ability_panel_options() -> void:

@@ -47,6 +47,7 @@ func _ready() -> void:
 	world_spawner.player_spawned.connect(_on_player_spawned)
 	world_spawner.player_health_updated.connect(_on_player_health_updated)
 	world_spawner.player_down_state_updated.connect(_on_player_down_state_updated)
+	world_spawner.player_combat_stats_updated.connect(_on_player_combat_stats_updated)
 	world_spawner.combat_mode_updated.connect(_on_combat_mode_updated)
 	world_spawner.ability_enabled_updated.connect(_on_ability_enabled_updated)
 	world_spawner.ability_state_updated.connect(_on_ability_state_updated)
@@ -182,6 +183,13 @@ func _on_player_health_updated(peer_id: int, current_hp: int, max_hp: int) -> vo
 	game_hud.call("update_health", current_hp, max_hp)
 	if current_hp <= 0:
 		print("Local player is down.")
+
+
+func _on_player_combat_stats_updated(peer_id: int, combat_stats: Dictionary) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+
+	game_hud.call("update_combat_stats", combat_stats)
 
 
 func _on_player_down_state_updated(peer_id: int, is_down: bool) -> void:
