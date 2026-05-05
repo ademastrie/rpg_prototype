@@ -220,8 +220,9 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_unlocked_abilities_by_peer[peer_id] = unlocked_abilities.duplicate()
 	_ability_enabled_by_peer[peer_id] = _ability_enabled_state_for_loadout(effective_loadout, ability_enabled)
 	_last_ability_time_by_peer[peer_id] = {}
-	_recalculate_player_combat_stats(peer_id)
-	rpc("apply_player_health_update", peer_id, player_max_hp, player_max_hp)
+	_recalculate_player_combat_stats(peer_id, true)
+	var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
+	rpc("apply_player_health_update", peer_id, max_hp, max_hp)
 	rpc("apply_player_down_state", peer_id, false)
 	rpc_id(peer_id, "apply_ability_catalog_update", peer_id, _unlocked_abilities_by_peer[peer_id] as Array)
 	rpc("apply_combat_mode_update", peer_id, false, _loadout_entries(peer_id))
@@ -329,23 +330,45 @@ func _modified_player_damage_taken(peer_id: int, raw_damage: int) -> int:
 
 func _default_player_combat_stats() -> Dictionary:
 	return {
+		"max_hp": player_max_hp,
 		"damage_reduction": 0.0,
 	}
 
 
-func _recalculate_player_combat_stats(peer_id: int) -> void:
+func _recalculate_player_combat_stats(peer_id: int, restore_current_hp_to_max: bool = false) -> void:
 	if not multiplayer.is_server() or not players.has(peer_id):
 		return
 
 	var combat_stats: Dictionary = _default_player_combat_stats()
 	var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
-	# Temporary prototype modifier: Slash grants damage reduction while slotted.
+	# Temporary prototype modifiers: Slash grants damage reduction and max HP while slotted.
 	# Future modifiers should come from backend ability effects, gear, buffs/debuffs.
 	if loadout.has("Slash"):
 		combat_stats["damage_reduction"] = 0.20
+		combat_stats["max_hp"] = int(combat_stats["max_hp"]) + 25
 
 	_player_combat_stats_by_peer[peer_id] = combat_stats
+	_apply_computed_player_max_hp(peer_id, int(combat_stats.get("max_hp", player_max_hp)), restore_current_hp_to_max)
 	rpc_id(peer_id, "apply_player_combat_stats_update", peer_id, combat_stats)
+
+
+func _apply_computed_player_max_hp(peer_id: int, computed_max_hp: int, restore_current_hp_to_max: bool = false) -> void:
+	if not players.has(peer_id):
+		return
+
+	var new_max_hp: int = max(computed_max_hp, 1)
+	var old_max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
+	var current_hp: int = int(_player_current_hp_by_peer.get(peer_id, old_max_hp))
+	var old_current_hp: int = current_hp
+	if restore_current_hp_to_max:
+		current_hp = new_max_hp
+	else:
+		current_hp = min(current_hp, new_max_hp)
+
+	_player_max_hp_by_peer[peer_id] = new_max_hp
+	_player_current_hp_by_peer[peer_id] = current_hp
+	if new_max_hp != old_max_hp or current_hp != old_current_hp:
+		rpc("apply_player_health_update", peer_id, current_hp, new_max_hp)
 
 
 func _mark_player_down(peer_id: int) -> void:
@@ -376,13 +399,13 @@ func _on_player_respawn_timer_timeout(peer_id: int, respawn_timer: Timer) -> voi
 		return
 
 	var respawn_position: Vector3 = _player_respawn_positions.get(peer_id, Vector3.ZERO) as Vector3
+	_recalculate_player_combat_stats(peer_id, true)
 	var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
 	players[peer_id] = respawn_position
 	_last_input_by_peer[peer_id] = Vector2.ZERO
 	_player_current_hp_by_peer[peer_id] = max_hp
 	_player_is_down_by_peer[peer_id] = false
 	_last_contact_damage_time_by_peer[peer_id] = float(Time.get_ticks_msec()) / 1000.0
-	_recalculate_player_combat_stats(peer_id)
 	rpc("spawn_player", peer_id, respawn_position, str(_character_names_by_peer.get(peer_id, "")))
 	rpc("apply_position_snapshot", peer_id, respawn_position, _aim_direction_by_peer.get(peer_id, Vector2(0.0, -1.0)) as Vector2)
 	rpc("apply_player_health_update", peer_id, max_hp, max_hp)

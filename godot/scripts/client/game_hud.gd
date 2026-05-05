@@ -73,7 +73,8 @@ func update_combat_stats(combat_stats: Dictionary) -> void:
 		return
 
 	var damage_reduction: float = float(combat_stats.get("damage_reduction", 0.0))
-	_combat_stats_label.text = "Damage Reduction: %s%%" % int(round(damage_reduction * 100.0))
+	var max_hp: int = int(combat_stats.get("max_hp", 100))
+	_combat_stats_label.text = "Max HP: %s | Damage Reduction: %s%%" % [max_hp, int(round(damage_reduction * 100.0))]
 
 
 func update_loadout(loadout_entries: Array) -> void:
