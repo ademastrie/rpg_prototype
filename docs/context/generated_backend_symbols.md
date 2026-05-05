@@ -95,6 +95,7 @@
 - `_xp_to_next_level(level: int) -> int:`
 - `_get_owned_character(character_id: int, user_id: int, db: Session) -> Character:`
 - `_character_progression_response(character: Character) -> CharacterProgressionResponse:`
+- `_character_currency_response(character: Character) -> CharacterCurrencyResponse:`
 - `_active_ability_definitions(db: Session) -> list[AbilityDefinition]:`
 - `_get_starter_ability_definition(ability_key: str, db: Session) -> AbilityDefinition:`
 - `_get_ability_definition(ability_key: str, db: Session) -> AbilityDefinition:`
@@ -107,6 +108,7 @@
 - `create_character(`
 - `get_character(`
 - `award_character_xp(`
+- `award_character_currency(`
 - `get_character_abilities(`
 - `unlock_character_ability(`
 - `update_character_ability_loadout(`
@@ -116,6 +118,7 @@
 - `POST "", response_model=CharacterResponse, status_code=status.HTTP_201_CREATED`
 - `GET "/{character_id}", response_model=CharacterResponse`
 - `POST "/{character_id}/xp", response_model=CharacterProgressionResponse`
+- `POST "/{character_id}/currency", response_model=CharacterCurrencyResponse`
 - `GET "/{character_id}/abilities", response_model=CharacterAbilitiesResponse`
 - `POST "/{character_id}/abilities/{ability_key}/unlock", response_model=CharacterAbilitiesResponse`
 - `PUT "/{character_id}/ability-loadout", response_model=CharacterAbilitiesResponse`
@@ -126,7 +129,9 @@
 - `CharacterCreate`
 - `CharacterResponse`
 - `CharacterXpAward`
+- `CharacterCurrencyAward`
 - `CharacterProgressionResponse`
+- `CharacterCurrencyResponse`
 - `AbilityEffectResponse`
 - `AbilityDefinitionResponse`
 - `CharacterAbilityResponse`

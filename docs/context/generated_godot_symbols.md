@@ -69,6 +69,7 @@
 - `_on_player_health_updated(peer_id: int, current_hp: int, max_hp: int) -> void:`
 - `_on_player_combat_stats_updated(peer_id: int, combat_stats: Dictionary) -> void:`
 - `_on_character_progression_updated(peer_id: int, progression: Dictionary) -> void:`
+- `_on_character_gold_updated(peer_id: int, gold: int) -> void:`
 - `_on_player_down_state_updated(peer_id: int, is_down: bool) -> void:`
 - `_on_combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries: Array) -> void:`
 - `_on_ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool) -> void:`
@@ -76,6 +77,7 @@
 - `_on_ability_catalog_updated(peer_id: int, unlocked_abilities: Array) -> void:`
 - `_on_initial_enemy_batch_received(enemy_count: int) -> void:`
 - `_on_ability_unlock_message_received(peer_id: int, display_name: String) -> void:`
+- `_on_status_message_received(peer_id: int, message: String) -> void:`
 - `_read_movement_input() -> Vector2:`
 - `_screen_input_to_world_xz(screen_direction: Vector2) -> Vector3:`
 - `_read_mouse_aim_direction() -> Vector2:`
@@ -138,6 +140,7 @@
 - `_process(delta: float) -> void:`
 - `update_health(current_hp: int, max_hp: int) -> void:`
 - `update_progression(level: int, xp: int, xp_to_next: int) -> void:`
+- `update_gold(gold: int) -> void:`
 - `update_down_state(is_down: bool) -> void:`
 - `update_combat_mode(combat_enabled: bool) -> void:`
 - `update_combat_stats(combat_stats: Dictionary) -> void:`
@@ -150,6 +153,7 @@
 - `_rebuild_ability_controls() -> void:`
 - `_build_ability_panel() -> void:`
 - `_build_combat_stats_label() -> void:`
+- `_build_gold_label() -> void:`
 - `_refresh_ability_panel_options() -> void:`
 - `_refresh_ability_panel_rows() -> void:`
 - `_select_ability_option(option: OptionButton, ability_key: String) -> void:`
@@ -288,6 +292,9 @@
 - `_on_ability_loadout_update_requested(peer_id: int, loadout_entries: Array) -> void:`
 - `_on_ability_loadout_update_completed(`
 - `_on_enemy_killed(attacker_peer_id: int, enemy_id: int) -> void:`
+- `_on_loot_reward_pickup_requested(peer_id: int, loot_orb_id: int, reward_payload: Dictionary) -> void:`
+- `_award_loot_currency(peer_id: int, loot_orb_id: int, reward_payload: Dictionary) -> void:`
+- `_on_loot_currency_award_completed(`
 - `_award_kill_xp(peer_id: int, enemy_id: int) -> void:`
 - `_on_award_xp_completed(`
 - `_request_level_unlocks(peer_id: int, confirmed_level: int) -> void:`
@@ -340,6 +347,8 @@
 - `spawn_initial_enemies() -> void:`
 - `sync_peer(peer_id: int) -> void:`
 - `get_active_enemy_positions() -> Dictionary:`
+- `get_enemy_xp_reward(enemy_id: int) -> int:`
+- `get_authoritative_enemy_position(enemy_id: int) -> Vector3:`
 - `_process(delta: float) -> void:`
 - `_spawn_enemy(spawn_position: Vector3, enemy_type: String = DEFAULT_ENEMY_TYPE) -> void:`
 - `resolve_basic_attack(_attacker_peer_id: int, attack_position: Vector3, facing_direction: Vector2) -> void:`
@@ -438,13 +447,16 @@
 - `player_down_state_updated(peer_id: int, is_down: bool)`
 - `player_combat_stats_updated(peer_id: int, combat_stats: Dictionary)`
 - `character_progression_updated(peer_id: int, progression: Dictionary)`
+- `character_gold_updated(peer_id: int, gold: int)`
 - `combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries: Array)`
 - `ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool)`
 - `ability_state_updated(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float)`
 - `ability_catalog_updated(peer_id: int, unlocked_abilities: Array)`
 - `ability_unlock_message_received(peer_id: int, display_name: String)`
+- `status_message_received(peer_id: int, message: String)`
 - `join_requested(peer_id: int, character_id: int, character_name: String, access_token: String)`
 - `ability_loadout_update_requested(peer_id: int, loadout_entries: Array)`
+- `loot_reward_pickup_requested(peer_id: int, loot_orb_id: int, reward_payload: Dictionary)`
 
 ### Exports
 - `player_placeholder_scene: PackedScene`
@@ -463,6 +475,9 @@
 - `enemy_contact_damage: int = 10`
 - `enemy_contact_damage_interval: float = 1.0`
 - `player_respawn_delay_seconds: float = 3.0`
+- `prototype_loot_drop_chance: float = 1.0`
+- `prototype_loot_pickup_radius: float = 1.5`
+- `prototype_loot_gold_amount: int = 3`
 - `debug_join_sync_logs: bool = false`
 
 ### Functions
@@ -478,6 +493,8 @@
 - `get_spawned_player(peer_id: int) -> Node3D:`
 - `_register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn_position: Vector3 = Vector3.ZERO, loadout: Array = [], ability_enabled: Dictionary = {}, ability_display_names: Dictionary = {}, ability_keys: Dictionary = {}, unlocked_abilities: Array = [], ability_slot_indexes: Dictionary = {}) -> void:`
 - `apply_confirmed_character_progression(peer_id: int, progression: Dictionary) -> void:`
+- `apply_confirmed_character_gold(peer_id: int, gold: int) -> void:`
+- `spawn_prototype_loot_drop(drop_position: Vector3) -> void:`
 - `_process(delta: float) -> void:`
 - `_simulate(delta: float) -> void:`
 - `_apply_enemy_contact_damage(_delta: float) -> void:`
@@ -491,6 +508,11 @@
 - `_schedule_player_respawn(peer_id: int) -> void:`
 - `_on_player_respawn_timer_timeout(peer_id: int, respawn_timer: Timer) -> void:`
 - `_is_enemy_in_contact_range(player_position: Vector3, enemy_positions: Dictionary) -> bool:`
+- `_process_prototype_loot_pickups() -> void:`
+- `_validate_prototype_loot_pickup(peer_id: int, loot_orb_id: int) -> bool:`
+- `_complete_prototype_loot_pickup(peer_id: int, loot_orb_id: int) -> void:`
+- `confirm_loot_pickup(loot_orb_id: int) -> void:`
+- `reject_loot_pickup(loot_orb_id: int) -> void:`
 - `_process_combat_abilities() -> void:`
 - `_default_ability_enabled_state() -> Dictionary:`
 - `_ability_enabled_state_for_loadout(loadout: Array, ability_enabled: Dictionary) -> Dictionary:`
@@ -519,6 +541,7 @@
 - `_loadout_entries(peer_id: int) -> Array:`
 - `_broadcast_position_snapshots() -> void:`
 - `_send_position_snapshots(target_peer_id: int) -> void:`
+- `_sync_loot_orbs_to_peer(peer_id: int) -> void:`
 - `_smooth_spawned_players(delta: float) -> void:`
 - `_predict_and_reconcile_local_player(player: Node3D, peer_id: int, delta: float) -> void:`
 - `_spawn_position_for_index(spawn_index: int) -> Vector3:`
@@ -530,9 +553,11 @@
 - `apply_player_down_state(peer_id: int, is_down: bool) -> void:`
 - `apply_player_combat_stats_update(peer_id: int, combat_stats: Dictionary) -> void:`
 - `apply_character_progression_update(peer_id: int, progression: Dictionary) -> void:`
+- `apply_character_gold_update(peer_id: int, gold: int) -> void:`
 - `apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_entries: Array) -> void:`
 - `apply_ability_catalog_update(peer_id: int, unlocked_abilities: Array) -> void:`
 - `apply_ability_unlock_message(peer_id: int, display_name: String) -> void:`
+- `apply_status_message(peer_id: int, message: String) -> void:`
 - `apply_ability_enabled_update(peer_id: int, ability_name: String, enabled: bool) -> void:`
 - `apply_ability_state_update(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float) -> void:`
 - `apply_hp_regen_active_state(peer_id: int, active: bool) -> void:`
@@ -548,10 +573,13 @@
 - `show_basic_attack(peer_id: int, attack_position: Vector3, facing_direction: Vector2) -> void:`
 - `show_damage_aura(peer_id: int, aura_position: Vector3, radius: float) -> void:`
 - `show_firebolt(peer_id: int, firebolt_position: Vector3, aim_direction: Vector2, firebolt_range: float) -> void:`
+- `spawn_loot_orb(loot_orb_id: int, loot_position: Vector3) -> void:`
+- `despawn_loot_orb(loot_orb_id: int) -> void:`
 - `despawn_player(peer_id: int) -> void:`
 - `_set_peer_label(player: Node, peer_id: int, character_name: String = "") -> void:`
 - `_update_hp_regen_visual(peer_id: int, active: bool) -> void:`
 - `_apply_player_facing(player: Node3D, facing_direction: Vector2) -> void:`
+- `_distance_xz(a: Vector3, b: Vector3) -> float:`
 - `_is_local_player_peer(peer_id: int) -> bool:`
 
 ### Rpcs
@@ -562,9 +590,11 @@
 - `@rpc("authority", "call_remote", "reliable") func apply_player_down_state(peer_id: int, is_down: bool) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func apply_player_combat_stats_update(peer_id: int, combat_stats: Dictionary) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func apply_character_progression_update(peer_id: int, progression: Dictionary) -> void:`
+- `@rpc("authority", "call_remote", "reliable") func apply_character_gold_update(peer_id: int, gold: int) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_entries: Array) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func apply_ability_catalog_update(peer_id: int, unlocked_abilities: Array) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func apply_ability_unlock_message(peer_id: int, display_name: String) -> void:`
+- `@rpc("authority", "call_remote", "reliable") func apply_status_message(peer_id: int, message: String) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func apply_ability_enabled_update(peer_id: int, ability_name: String, enabled: bool) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func apply_ability_state_update(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func apply_hp_regen_active_state(peer_id: int, active: bool) -> void:`
@@ -578,5 +608,7 @@
 - `@rpc("authority", "call_remote", "reliable") func show_basic_attack(peer_id: int, attack_position: Vector3, facing_direction: Vector2) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func show_damage_aura(peer_id: int, aura_position: Vector3, radius: float) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func show_firebolt(peer_id: int, firebolt_position: Vector3, aim_direction: Vector2, firebolt_range: float) -> void:`
+- `@rpc("authority", "call_remote", "reliable") func spawn_loot_orb(loot_orb_id: int, loot_position: Vector3) -> void:`
+- `@rpc("authority", "call_remote", "reliable") func despawn_loot_orb(loot_orb_id: int) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func despawn_player(peer_id: int) -> void:`
 
