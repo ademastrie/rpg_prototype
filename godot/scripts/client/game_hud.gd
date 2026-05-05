@@ -23,6 +23,8 @@ var _ability_panel: PanelContainer = null
 var _ability_panel_button: Button = null
 var _ability_slot_rows: Array = []
 var _ability_panel_status: Label = null
+var _message_label: Label = null
+var _message_timer: SceneTreeTimer = null
 
 
 func _ready() -> void:
@@ -98,6 +100,17 @@ func update_unlocked_abilities(unlocked_abilities: Array) -> void:
 	_unlocked_abilities = unlocked_abilities.duplicate()
 	_refresh_ability_panel_options()
 	_refresh_ability_panel_rows()
+
+
+func show_status_message(message: String) -> void:
+	if _message_label == null:
+		return
+
+	_message_label.text = message
+	_message_label.visible = message.strip_edges() != ""
+	if _message_label.visible:
+		_message_timer = get_tree().create_timer(4.0)
+		_message_timer.timeout.connect(_on_message_timer_timeout.bind(_message_timer))
 
 
 func toggle_ability_panel() -> void:
@@ -196,6 +209,10 @@ func _build_ability_panel() -> void:
 	_ability_panel_status = Label.new()
 	_ability_panel_status.text = ""
 	panel_vbox.add_child(_ability_panel_status)
+
+	_message_label = Label.new()
+	_message_label.visible = false
+	hud_vbox.add_child(_message_label)
 
 	_refresh_ability_panel_options()
 
@@ -343,3 +360,11 @@ func _on_save_loadout_pressed() -> void:
 
 	_ability_panel_status.text = "Saving..."
 	loadout_save_requested.emit(loadout_entries)
+
+
+func _on_message_timer_timeout(timer: SceneTreeTimer) -> void:
+	if timer != _message_timer or _message_label == null:
+		return
+
+	_message_label.text = ""
+	_message_label.visible = false

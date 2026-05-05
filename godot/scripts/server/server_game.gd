@@ -10,6 +10,7 @@ extends Node
 var connected_peers: Array[int] = []
 var peer_sessions: Dictionary = {}
 var _pending_join_validations: Dictionary = {}
+var _session_kill_counts_by_peer: Dictionary = {}
 
 const BACKEND_ABILITY_NAME_BY_KEY: Dictionary = {
 	"slash": "Slash",
@@ -17,6 +18,10 @@ const BACKEND_ABILITY_NAME_BY_KEY: Dictionary = {
 	"damage_aura": "Damage Aura",
 	"firebolt": "Firebolt",
 }
+const KILL_UNLOCK_REWARDS: Array[Dictionary] = [
+	{"kills": 1, "ability_key": "hp_regen"},
+	{"kills": 3, "ability_key": "damage_aura"},
+]
 
 
 func _ready() -> void:
@@ -29,6 +34,7 @@ func _start_server() -> void:
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	world_spawner.join_requested.connect(_on_join_requested)
 	world_spawner.ability_loadout_update_requested.connect(_on_ability_loadout_update_requested)
+	enemy_spawner.connect("enemy_killed", Callable(self, "_on_enemy_killed"))
 
 	var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
 	var error: Error = peer.create_server(server_port)
@@ -63,6 +69,7 @@ func _on_peer_disconnected(peer_id: int) -> void:
 	connected_peers.erase(peer_id)
 	peer_sessions.erase(peer_id)
 	_pending_join_validations.erase(peer_id)
+	_session_kill_counts_by_peer.erase(peer_id)
 	world_spawner.unregister_peer(peer_id)
 
 
@@ -271,6 +278,8 @@ func _complete_validated_join(peer_id: int, session: Dictionary, loadout_data: D
 	var ability_slot_indexes: Dictionary = loadout_data.get("ability_slot_indexes", {}) as Dictionary
 	var unlocked_abilities: Array = loadout_data.get("unlocked_abilities", []) as Array
 
+	session["unlocked_ability_keys"] = _unlocked_ability_keys(unlocked_abilities)
+	session["unlock_attempted_ability_keys"] = []
 	peer_sessions[peer_id] = session
 	print("Peer %s accepted as character %s (%s) with backend loadout: %s." % [peer_id, character_name, character_id, ", ".join(loadout_names)])
 	if _has_saved_position(position_x, position_y):
@@ -479,6 +488,199 @@ func _on_ability_loadout_update_completed(
 		loadout_data.get("unlocked_abilities", []),
 		loadout_data.get("ability_slot_indexes", {})
 	)
+	session["unlocked_ability_keys"] = _unlocked_ability_keys(loadout_data.get("unlocked_abilities", []) as Array)
+	peer_sessions[peer_id] = session
+
+
+func _on_enemy_killed(attacker_peer_id: int, enemy_id: int) -> void:
+	if not connected_peers.has(attacker_peer_id):
+		return
+
+	var session: Dictionary = peer_sessions.get(attacker_peer_id, {}) as Dictionary
+	if not bool(session.get("joined", false)):
+		return
+
+	var kill_count: int = int(_session_kill_counts_by_peer.get(attacker_peer_id, 0)) + 1
+	_session_kill_counts_by_peer[attacker_peer_id] = kill_count
+	print("Peer %s earned kill credit for enemy %s. Session kills=%s." % [attacker_peer_id, enemy_id, kill_count])
+	for reward_variant in KILL_UNLOCK_REWARDS:
+		var reward: Dictionary = reward_variant as Dictionary
+		var required_kills: int = int(reward.get("kills", 0))
+		var ability_key: String = str(reward.get("ability_key", "")).strip_edges()
+		if required_kills <= 0 or ability_key == "":
+			continue
+		if kill_count >= required_kills:
+			_request_session_unlock(attacker_peer_id, ability_key)
+
+
+func _request_session_unlock(peer_id: int, ability_key: String) -> void:
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	if not bool(session.get("joined", false)):
+		return
+
+	var attempted_keys: Array = session.get("unlock_attempted_ability_keys", []) as Array
+	if attempted_keys.has(ability_key):
+		return
+
+	attempted_keys.append(ability_key)
+	session["unlock_attempted_ability_keys"] = attempted_keys
+	peer_sessions[peer_id] = session
+
+	var access_token: String = str(session.get("access_token", ""))
+	var character_id: int = int(session.get("character_id", 0))
+	if access_token.strip_edges() == "" or character_id <= 0:
+		print("Cannot unlock ability '%s' for peer %s: missing validated session data." % [ability_key, peer_id])
+		return
+
+	var was_already_unlocked: bool = (session.get("unlocked_ability_keys", []) as Array).has(ability_key)
+	var request: HTTPRequest = HTTPRequest.new()
+	add_child(request)
+	request.request_completed.connect(_on_ability_unlock_completed.bind(peer_id, ability_key, was_already_unlocked, request))
+
+	var headers: PackedStringArray = PackedStringArray([
+		"Content-Type: application/json",
+		"Authorization: Bearer %s" % access_token,
+	])
+	var url: String = "%s/characters/%s/abilities/%s/unlock" % [_normalized_backend_base_url(), character_id, ability_key]
+	var error: Error = request.request(url, headers, HTTPClient.METHOD_POST, "")
+	if error != OK:
+		print("Failed to start ability unlock for peer %s ability '%s': %s" % [peer_id, ability_key, error])
+		request.queue_free()
+
+
+func _on_ability_unlock_completed(
+	result: int,
+	response_code: int,
+	_headers: PackedStringArray,
+	body: PackedByteArray,
+	peer_id: int,
+	ability_key: String,
+	was_already_unlocked: bool,
+	request: HTTPRequest
+) -> void:
+	request.queue_free()
+	if not connected_peers.has(peer_id):
+		return
+
+	var response_text: String = body.get_string_from_utf8()
+	if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+		print("Ability unlock failed for peer %s ability '%s': result=%s status=%s response=%s" % [peer_id, ability_key, result, response_code, response_text])
+		return
+
+	print("Ability unlock confirmed by backend for peer %s ability '%s'." % [peer_id, ability_key])
+	_reload_character_abilities_after_unlock(peer_id, ability_key, was_already_unlocked)
+
+
+func _reload_character_abilities_after_unlock(peer_id: int, ability_key: String, was_already_unlocked: bool) -> void:
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	var access_token: String = str(session.get("access_token", ""))
+	var character_id: int = int(session.get("character_id", 0))
+	if access_token.strip_edges() == "" or character_id <= 0:
+		print("Cannot reload abilities after unlock for peer %s: missing validated session data." % peer_id)
+		return
+
+	var request: HTTPRequest = HTTPRequest.new()
+	add_child(request)
+	request.request_completed.connect(_on_unlock_ability_reload_completed.bind(peer_id, ability_key, was_already_unlocked, request))
+
+	var headers: PackedStringArray = PackedStringArray([
+		"Content-Type: application/json",
+		"Authorization: Bearer %s" % access_token,
+	])
+	var url: String = "%s/characters/%s/abilities" % [_normalized_backend_base_url(), character_id]
+	var error: Error = request.request(url, headers, HTTPClient.METHOD_GET)
+	if error != OK:
+		print("Failed to start ability reload after unlock for peer %s ability '%s': %s" % [peer_id, ability_key, error])
+		request.queue_free()
+
+
+func _on_unlock_ability_reload_completed(
+	result: int,
+	response_code: int,
+	_headers: PackedStringArray,
+	body: PackedByteArray,
+	peer_id: int,
+	ability_key: String,
+	was_already_unlocked: bool,
+	request: HTTPRequest
+) -> void:
+	request.queue_free()
+	if not connected_peers.has(peer_id):
+		return
+
+	var response_text: String = body.get_string_from_utf8()
+	if result != HTTPRequest.RESULT_SUCCESS:
+		print("Ability reload after unlock failed for peer %s: HTTPRequest result %s." % [peer_id, result])
+		return
+
+	var json: JSON = JSON.new()
+	var parse_error: Error = json.parse(response_text)
+	if parse_error != OK or not (json.data is Dictionary):
+		print("Ability reload after unlock returned invalid JSON for peer %s. status=%s response=%s" % [peer_id, response_code, response_text])
+		return
+
+	var response_data: Dictionary = json.data as Dictionary
+	if response_code < 200 or response_code >= 300:
+		print("Ability reload after unlock rejected peer %s: status=%s response=%s" % [peer_id, response_code, response_data])
+		return
+
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	var loadout_data: Dictionary = _parse_backend_ability_loadout(peer_id, int(session.get("character_id", 0)), response_data)
+	if loadout_data.is_empty():
+		return
+
+	var unlocked_abilities: Array = loadout_data.get("unlocked_abilities", []) as Array
+	world_spawner.call(
+		"apply_confirmed_ability_data",
+		peer_id,
+		loadout_data.get("loadout", []),
+		loadout_data.get("ability_enabled", {}),
+		loadout_data.get("ability_display_names", {}),
+		loadout_data.get("ability_keys", {}),
+		unlocked_abilities,
+		loadout_data.get("ability_slot_indexes", {})
+	)
+	session["unlocked_ability_keys"] = _unlocked_ability_keys(unlocked_abilities)
+	peer_sessions[peer_id] = session
+
+	if not was_already_unlocked and _has_unlocked_ability(unlocked_abilities, ability_key):
+		var display_name: String = _display_name_for_unlocked_ability(unlocked_abilities, ability_key)
+		world_spawner.rpc_id(peer_id, "apply_ability_unlock_message", peer_id, display_name)
+
+
+func _unlocked_ability_keys(unlocked_abilities: Array) -> Array[String]:
+	var ability_keys: Array[String] = []
+	for ability_variant in unlocked_abilities:
+		if not (ability_variant is Dictionary):
+			continue
+
+		var ability: Dictionary = ability_variant as Dictionary
+		var ability_key: String = str(ability.get("ability_key", "")).strip_edges()
+		if ability_key != "":
+			ability_keys.append(ability_key)
+
+	return ability_keys
+
+
+func _has_unlocked_ability(unlocked_abilities: Array, ability_key: String) -> bool:
+	return _display_name_for_unlocked_ability(unlocked_abilities, ability_key) != ""
+
+
+func _display_name_for_unlocked_ability(unlocked_abilities: Array, ability_key: String) -> String:
+	for ability_variant in unlocked_abilities:
+		if not (ability_variant is Dictionary):
+			continue
+
+		var ability: Dictionary = ability_variant as Dictionary
+		if str(ability.get("ability_key", "")).strip_edges() != ability_key:
+			continue
+
+		var display_name: String = str(ability.get("display_name", "")).strip_edges()
+		if display_name != "":
+			return display_name
+		return str(BACKEND_ABILITY_NAME_BY_KEY.get(ability_key, ability_key))
+
+	return ""
 
 
 func _save_peer_position(peer_id: int, session: Dictionary, position: Vector3) -> void:

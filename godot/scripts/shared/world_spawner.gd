@@ -8,6 +8,7 @@ signal combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries: 
 signal ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool)
 signal ability_state_updated(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float)
 signal ability_catalog_updated(peer_id: int, unlocked_abilities: Array)
+signal ability_unlock_message_received(peer_id: int, display_name: String)
 signal join_requested(peer_id: int, character_id: int, character_name: String, access_token: String)
 signal ability_loadout_update_requested(peer_id: int, loadout_entries: Array)
 
@@ -764,6 +765,11 @@ func apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_entrie
 func apply_ability_catalog_update(peer_id: int, unlocked_abilities: Array) -> void:
 	_unlocked_abilities_by_peer[peer_id] = unlocked_abilities.duplicate()
 	ability_catalog_updated.emit(peer_id, unlocked_abilities)
+
+
+@rpc("authority", "call_remote", "reliable")
+func apply_ability_unlock_message(peer_id: int, display_name: String) -> void:
+	ability_unlock_message_received.emit(peer_id, display_name)
 
 
 @rpc("authority", "call_remote", "reliable")

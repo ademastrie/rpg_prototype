@@ -1,6 +1,8 @@
 extends Node3D
 class_name EnemySpawner
 
+signal enemy_killed(attacker_peer_id: int, enemy_id: int)
+
 @export var enemy_placeholder_scene: PackedScene
 @export var idle_radius: float = 1.2
 @export var idle_speed: float = 0.6
@@ -212,6 +214,7 @@ func _apply_damage_to_enemy(enemy_id: int, attacker_peer_id: int, damage: int) -
 	rpc("show_enemy_hit", enemy_id, current_hp, max_hp)
 
 	if current_hp <= 0:
+		enemy_killed.emit(attacker_peer_id, enemy_id)
 		_despawn_enemy(enemy_id)
 		return
 

@@ -43,6 +43,7 @@ func _ready() -> void:
 	world_spawner.ability_enabled_updated.connect(_on_ability_enabled_updated)
 	world_spawner.ability_state_updated.connect(_on_ability_state_updated)
 	world_spawner.ability_catalog_updated.connect(_on_ability_catalog_updated)
+	world_spawner.ability_unlock_message_received.connect(_on_ability_unlock_message_received)
 	game_hud.connect("combat_toggle_requested", Callable(self, "_send_combat_toggle_request"))
 	game_hud.connect("ability_toggle_requested", Callable(self, "_send_ability_toggle_request"))
 	game_hud.connect("loadout_save_requested", Callable(self, "_send_loadout_save_request"))
@@ -219,6 +220,14 @@ func _on_ability_catalog_updated(peer_id: int, unlocked_abilities: Array) -> voi
 		return
 
 	game_hud.call("update_unlocked_abilities", unlocked_abilities)
+
+
+func _on_ability_unlock_message_received(peer_id: int, display_name: String) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+
+	game_hud.call("show_status_message", "Unlocked ability: %s" % display_name)
+	print("Unlocked ability: %s" % display_name)
 
 
 func _read_movement_input() -> Vector2:
