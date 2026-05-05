@@ -12,7 +12,6 @@ extends Node
 var connected_peers: Array[int] = []
 var peer_sessions: Dictionary = {}
 var _pending_join_validations: Dictionary = {}
-var _session_kill_counts_by_peer: Dictionary = {}
 var _join_timing_start_msec_by_peer: Dictionary = {}
 
 const XP_PER_ENEMY_KILL: int = 25
@@ -22,9 +21,9 @@ const BACKEND_ABILITY_NAME_BY_KEY: Dictionary = {
 	"damage_aura": "Damage Aura",
 	"firebolt": "Firebolt",
 }
-const KILL_UNLOCK_REWARDS: Array[Dictionary] = [
-	{"kills": 1, "ability_key": "hp_regen"},
-	{"kills": 3, "ability_key": "damage_aura"},
+const LEVEL_UNLOCK_REWARDS: Array[Dictionary] = [
+	{"level": 2, "ability_key": "hp_regen"},
+	{"level": 3, "ability_key": "damage_aura"},
 ]
 
 
@@ -76,7 +75,6 @@ func _on_peer_disconnected(peer_id: int) -> void:
 	connected_peers.erase(peer_id)
 	peer_sessions.erase(peer_id)
 	_pending_join_validations.erase(peer_id)
-	_session_kill_counts_by_peer.erase(peer_id)
 	_join_timing_start_msec_by_peer.erase(peer_id)
 	world_spawner.unregister_peer(peer_id)
 
@@ -528,18 +526,8 @@ func _on_enemy_killed(attacker_peer_id: int, enemy_id: int) -> void:
 	if not bool(session.get("joined", false)):
 		return
 
-	var kill_count: int = int(_session_kill_counts_by_peer.get(attacker_peer_id, 0)) + 1
-	_session_kill_counts_by_peer[attacker_peer_id] = kill_count
-	print("Peer %s earned kill credit for enemy %s. Session kills=%s." % [attacker_peer_id, enemy_id, kill_count])
+	print("Peer %s earned kill credit for enemy %s." % [attacker_peer_id, enemy_id])
 	_award_kill_xp(attacker_peer_id, enemy_id)
-	for reward_variant in KILL_UNLOCK_REWARDS:
-		var reward: Dictionary = reward_variant as Dictionary
-		var required_kills: int = int(reward.get("kills", 0))
-		var ability_key: String = str(reward.get("ability_key", "")).strip_edges()
-		if required_kills <= 0 or ability_key == "":
-			continue
-		if kill_count >= required_kills:
-			_request_session_unlock(attacker_peer_id, ability_key)
 
 
 func _award_kill_xp(peer_id: int, enemy_id: int) -> void:
@@ -609,6 +597,26 @@ func _on_award_xp_completed(
 	session["xp_to_next"] = int(progression.get("xp_to_next", int(session["level"]) * 100))
 	peer_sessions[peer_id] = session
 	world_spawner.call("apply_confirmed_character_progression", peer_id, progression)
+	_request_level_unlocks(peer_id, int(session["level"]))
+
+
+func _request_level_unlocks(peer_id: int, confirmed_level: int) -> void:
+	if confirmed_level <= 0:
+		return
+
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	var unlocked_keys: Array = session.get("unlocked_ability_keys", []) as Array
+	# Prototype-only rules. Future unlock rules may come from backend quest,
+	# achievement, or level progression data instead of hardcoded Godot data.
+	for reward_variant in LEVEL_UNLOCK_REWARDS:
+		var reward: Dictionary = reward_variant as Dictionary
+		var required_level: int = int(reward.get("level", 0))
+		var ability_key: String = str(reward.get("ability_key", "")).strip_edges()
+		if required_level <= 0 or required_level > confirmed_level or ability_key == "":
+			continue
+		if unlocked_keys.has(ability_key):
+			continue
+		_request_session_unlock(peer_id, ability_key)
 
 
 func _request_session_unlock(peer_id: int, ability_key: String) -> void:
