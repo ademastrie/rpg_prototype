@@ -6,6 +6,7 @@ signal player_health_updated(peer_id: int, current_hp: int, max_hp: int)
 signal player_down_state_updated(peer_id: int, is_down: bool)
 signal player_combat_stats_updated(peer_id: int, combat_stats: Dictionary)
 signal character_progression_updated(peer_id: int, progression: Dictionary)
+signal character_gold_updated(peer_id: int, gold: int)
 signal combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries: Array)
 signal ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool)
 signal ability_state_updated(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float)
@@ -14,6 +15,7 @@ signal ability_unlock_message_received(peer_id: int, display_name: String)
 signal status_message_received(peer_id: int, message: String)
 signal join_requested(peer_id: int, character_id: int, character_name: String, access_token: String)
 signal ability_loadout_update_requested(peer_id: int, loadout_entries: Array)
+signal loot_reward_pickup_requested(peer_id: int, loot_orb_id: int, reward_payload: Dictionary)
 
 @export var player_placeholder_scene: PackedScene
 @export var movement_speed: float = 4.0
@@ -33,6 +35,7 @@ signal ability_loadout_update_requested(peer_id: int, loadout_entries: Array)
 @export var player_respawn_delay_seconds: float = 3.0
 @export var prototype_loot_drop_chance: float = 1.0
 @export var prototype_loot_pickup_radius: float = 1.5
+@export var prototype_loot_gold_amount: int = 3
 @export var debug_join_sync_logs: bool = false
 
 var players: Dictionary = {}
@@ -47,6 +50,7 @@ var _player_current_hp_by_peer: Dictionary = {}
 var _player_is_down_by_peer: Dictionary = {}
 var _player_combat_stats_by_peer: Dictionary = {}
 var _character_progression_by_peer: Dictionary = {}
+var _character_gold_by_peer: Dictionary = {}
 var _player_respawn_positions: Dictionary = {}
 var _last_contact_damage_time_by_peer: Dictionary = {}
 var _combat_enabled_by_peer: Dictionary = {}
@@ -163,6 +167,7 @@ func unregister_peer(peer_id: int) -> void:
 	_player_is_down_by_peer.erase(peer_id)
 	_player_combat_stats_by_peer.erase(peer_id)
 	_character_progression_by_peer.erase(peer_id)
+	_character_gold_by_peer.erase(peer_id)
 	_player_respawn_positions.erase(peer_id)
 	_last_contact_damage_time_by_peer.erase(peer_id)
 	_combat_enabled_by_peer.erase(peer_id)
@@ -232,6 +237,7 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_last_ability_time_by_peer[peer_id] = {}
 	_recalculate_player_combat_stats(peer_id, true)
 	_character_progression_by_peer[peer_id] = {"level": 1, "xp": 0, "xp_to_next": 100}
+	_character_gold_by_peer[peer_id] = 0
 	var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
 	rpc("apply_player_health_update", peer_id, max_hp, max_hp)
 	rpc("apply_player_down_state", peer_id, false)
@@ -256,6 +262,15 @@ func apply_confirmed_character_progression(peer_id: int, progression: Dictionary
 	rpc_id(peer_id, "apply_character_progression_update", peer_id, confirmed_progression)
 
 
+func apply_confirmed_character_gold(peer_id: int, gold: int) -> void:
+	if not multiplayer.is_server() or not players.has(peer_id):
+		return
+
+	var confirmed_gold: int = max(gold, 0)
+	_character_gold_by_peer[peer_id] = confirmed_gold
+	rpc_id(peer_id, "apply_character_gold_update", peer_id, confirmed_gold)
+
+
 func spawn_prototype_loot_drop(drop_position: Vector3) -> void:
 	if not multiplayer.is_server():
 		return
@@ -266,12 +281,18 @@ func spawn_prototype_loot_drop(drop_position: Vector3) -> void:
 
 	var loot_orb_id: int = _next_loot_orb_id
 	_next_loot_orb_id += 1
-	# Prototype world-drop flow only: future loot should use backend item
-	# definitions, inventory, loot tables, and durable ownership/rewards.
+	# Prototype world-drop flow only. The pickup stays generic: future reward
+	# payloads may include items, materials, quest objects, mixed reward bundles,
+	# and player/party ownership metadata.
+	var reward_payload: Dictionary = {
+		"type": "currency",
+		"gold_amount": max(prototype_loot_gold_amount, 0),
+	}
 	var loot_data: Dictionary = {
 		"loot_orb_id": loot_orb_id,
 		"position": drop_position,
 		"active": true,
+		"reward_payload": reward_payload,
 	}
 	_loot_orbs[loot_orb_id] = loot_data
 	rpc("spawn_loot_orb", loot_orb_id, drop_position)
@@ -512,9 +533,29 @@ func _complete_prototype_loot_pickup(peer_id: int, loot_orb_id: int) -> void:
 	var loot_data: Dictionary = _loot_orbs[loot_orb_id] as Dictionary
 	loot_data["active"] = false
 	_loot_orbs[loot_orb_id] = loot_data
+	var reward_payload: Dictionary = loot_data.get("reward_payload", {}) as Dictionary
+	loot_reward_pickup_requested.emit(peer_id, loot_orb_id, reward_payload.duplicate(true))
+
+
+func confirm_loot_pickup(loot_orb_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	if not _loot_orbs.has(loot_orb_id):
+		return
+
 	_loot_orbs.erase(loot_orb_id)
 	rpc("despawn_loot_orb", loot_orb_id)
-	rpc_id(peer_id, "apply_status_message", peer_id, "Picked up loot")
+
+
+func reject_loot_pickup(loot_orb_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	if not _loot_orbs.has(loot_orb_id):
+		return
+
+	var loot_data: Dictionary = _loot_orbs[loot_orb_id] as Dictionary
+	loot_data["active"] = true
+	_loot_orbs[loot_orb_id] = loot_data
 
 
 func _process_combat_abilities() -> void:
@@ -937,6 +978,12 @@ func apply_character_progression_update(peer_id: int, progression: Dictionary) -
 
 
 @rpc("authority", "call_remote", "reliable")
+func apply_character_gold_update(peer_id: int, gold: int) -> void:
+	_character_gold_by_peer[peer_id] = max(gold, 0)
+	character_gold_updated.emit(peer_id, max(gold, 0))
+
+
+@rpc("authority", "call_remote", "reliable")
 func apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_entries: Array) -> void:
 	_combat_enabled_by_peer[peer_id] = combat_enabled
 	var loadout: Array = []
@@ -1307,6 +1354,7 @@ func despawn_player(peer_id: int) -> void:
 	_unlocked_abilities_by_peer.erase(peer_id)
 	_ability_enabled_by_peer.erase(peer_id)
 	_character_progression_by_peer.erase(peer_id)
+	_character_gold_by_peer.erase(peer_id)
 	_player_is_down_by_peer.erase(peer_id)
 	print("Despawned player for peer %s." % peer_id)
 	spawned_player_count_changed.emit(_spawned_nodes.size())

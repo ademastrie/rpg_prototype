@@ -27,6 +27,7 @@ var _combat_stats_label: Label = null
 var _ability_panel_status: Label = null
 var _message_label: Label = null
 var _message_timer: SceneTreeTimer = null
+var _gold_label: Label = null
 
 
 func _ready() -> void:
@@ -34,6 +35,8 @@ func _ready() -> void:
 	_build_ability_panel()
 	update_health(100, 100)
 	update_progression(1, 0, 100)
+	_build_gold_label()
+	update_gold(0)
 	update_down_state(false)
 	update_combat_mode(false)
 	_build_combat_stats_label()
@@ -58,6 +61,13 @@ func update_health(current_hp: int, max_hp: int) -> void:
 
 func update_progression(level: int, xp: int, xp_to_next: int) -> void:
 	progression_label.text = "Level: %s | XP: %s/%s" % [level, xp, max(xp_to_next, 1)]
+
+
+func update_gold(gold: int) -> void:
+	if _gold_label == null:
+		return
+
+	_gold_label.text = "Gold: %s" % max(gold, 0)
 
 
 func update_down_state(is_down: bool) -> void:
@@ -239,6 +249,13 @@ func _build_combat_stats_label() -> void:
 	_combat_stats_label = Label.new()
 	hud_vbox.add_child(_combat_stats_label)
 	hud_vbox.move_child(_combat_stats_label, loadout_label.get_index() + 1)
+
+
+func _build_gold_label() -> void:
+	_gold_label = Label.new()
+	_gold_label.name = "GoldLabel"
+	hud_vbox.add_child(_gold_label)
+	hud_vbox.move_child(_gold_label, progression_label.get_index() + 1)
 
 
 func _refresh_ability_panel_options() -> void:

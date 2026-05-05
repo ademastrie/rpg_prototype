@@ -56,6 +56,57 @@ Invoke-RestMethod -Method Post "$BaseUrl/characters/$CharacterId/xp" -Headers $H
 # The expected result is 404 Character not found.
 ```
 
+### Character currency
+
+The character gold migration is:
+
+```powershell
+alembic upgrade head
+alembic current
+```
+
+Swagger:
+
+```powershell
+Start-Process http://127.0.0.1:8000/docs
+```
+
+In Swagger, log in through `POST /auth/login`, use the returned bearer token with
+Authorize, then try `POST /characters/{character_id}/currency` with:
+
+```json
+{
+  "gold_amount": 3
+}
+```
+
+The response should include `character_id` and the updated `gold` total.
+Negative `gold_amount` values should return 422.
+
+PowerShell:
+
+```powershell
+$BaseUrl = "http://127.0.0.1:8000"
+$Auth = Invoke-RestMethod -Method Post "$BaseUrl/auth/login" -ContentType "application/json" -Body '{"email":"dev@example.com","password":"password"}'
+$Headers = @{ Authorization = "Bearer $($Auth.access_token)" }
+
+$Characters = Invoke-RestMethod -Method Get "$BaseUrl/characters" -Headers $Headers
+$CharacterId = $Characters[0].id
+
+$GoldBody = @{ gold_amount = 3 } | ConvertTo-Json
+Invoke-RestMethod -Method Post "$BaseUrl/characters/$CharacterId/currency" -Headers $Headers -ContentType "application/json" -Body $GoldBody
+
+$NegativeGoldBody = @{ gold_amount = -1 } | ConvertTo-Json
+try {
+    Invoke-RestMethod -Method Post "$BaseUrl/characters/$CharacterId/currency" -Headers $Headers -ContentType "application/json" -Body $NegativeGoldBody
+} catch {
+    $_.Exception.Response.StatusCode.value__
+}
+
+# Ownership check: repeat the request with another user's token and the same character id.
+# The expected result is 404 Character not found.
+```
+
 ### Character abilities and loadout
 
 The ability endpoints use the same bearer token auth as the other character endpoints.

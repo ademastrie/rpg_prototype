@@ -37,6 +37,7 @@ func _start_server() -> void:
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	world_spawner.join_requested.connect(_on_join_requested)
 	world_spawner.ability_loadout_update_requested.connect(_on_ability_loadout_update_requested)
+	world_spawner.loot_reward_pickup_requested.connect(_on_loot_reward_pickup_requested)
 	enemy_spawner.connect("enemy_killed", Callable(self, "_on_enemy_killed"))
 
 	var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
@@ -170,6 +171,7 @@ func _on_join_validation_completed(
 	var character_name: String = str(response_data.get("character_name", ""))
 	var level: int = int(response_data.get("level", 1))
 	var xp: int = int(response_data.get("xp", 0))
+	var gold: int = int(response_data.get("gold", 0))
 	var region_id: String = str(response_data.get("region_id", ""))
 	var position_x: float = float(response_data.get("position_x", 0.0))
 	var position_y: float = float(response_data.get("position_y", 0.0))
@@ -191,6 +193,7 @@ func _on_join_validation_completed(
 		"level": level,
 		"xp": xp,
 		"xp_to_next": level * 100,
+		"gold": gold,
 		"region_id": region_id,
 		"position_x": position_x,
 		"position_y": position_y,
@@ -307,6 +310,7 @@ func _complete_validated_join(peer_id: int, session: Dictionary, loadout_data: D
 		"xp": int(session.get("xp", 0)),
 		"xp_to_next": int(session.get("xp_to_next", int(session.get("level", 1)) * 100)),
 	})
+	world_spawner.call("apply_confirmed_character_gold", peer_id, int(session.get("gold", 0)))
 	_log_join_timing(peer_id, "initial player sync sent")
 	enemy_spawner.call("sync_peer", peer_id)
 	_log_join_timing(peer_id, "initial enemy sync sent")
@@ -529,6 +533,102 @@ func _on_enemy_killed(attacker_peer_id: int, enemy_id: int) -> void:
 	var enemy_position: Vector3 = enemy_spawner.call("get_authoritative_enemy_position", enemy_id) as Vector3
 	world_spawner.call("spawn_prototype_loot_drop", enemy_position)
 	_award_kill_xp(attacker_peer_id, enemy_id)
+
+
+func _on_loot_reward_pickup_requested(peer_id: int, loot_orb_id: int, reward_payload: Dictionary) -> void:
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	if not bool(session.get("joined", false)):
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+		return
+
+	# Pickup reward payloads are server-owned and intentionally generic. Future
+	# payloads may include items, materials, quest objects, mixed reward bundles,
+	# and player/party ownership rules.
+	var reward_type: String = str(reward_payload.get("type", "")).strip_edges()
+	if reward_type == "currency":
+		_award_loot_currency(peer_id, loot_orb_id, reward_payload)
+		return
+
+	print("Rejecting unsupported loot reward for peer %s orb %s: %s" % [peer_id, loot_orb_id, reward_payload])
+	world_spawner.call("reject_loot_pickup", loot_orb_id)
+
+
+func _award_loot_currency(peer_id: int, loot_orb_id: int, reward_payload: Dictionary) -> void:
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	if not bool(session.get("joined", false)):
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+		return
+
+	var access_token: String = str(session.get("access_token", ""))
+	var character_id: int = int(session.get("character_id", 0))
+	var gold_amount: int = int(reward_payload.get("gold_amount", 0))
+	if access_token.strip_edges() == "" or character_id <= 0:
+		print("Cannot award loot currency for peer %s orb %s: missing validated session data." % [peer_id, loot_orb_id])
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+		return
+	if gold_amount < 0:
+		print("Cannot award loot currency for peer %s orb %s: negative gold amount." % [peer_id, loot_orb_id])
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+		return
+
+	var request: HTTPRequest = HTTPRequest.new()
+	add_child(request)
+	request.request_completed.connect(_on_loot_currency_award_completed.bind(peer_id, loot_orb_id, gold_amount, request))
+
+	var headers: PackedStringArray = PackedStringArray([
+		"Content-Type: application/json",
+		"Authorization: Bearer %s" % access_token,
+	])
+	var body: String = JSON.stringify({"gold_amount": gold_amount})
+	var url: String = "%s/characters/%s/currency" % [_normalized_backend_base_url(), character_id]
+	var error: Error = request.request(url, headers, HTTPClient.METHOD_POST, body)
+	if error != OK:
+		print("Failed to start loot currency award for peer %s orb %s: %s" % [peer_id, loot_orb_id, error])
+		request.queue_free()
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+
+
+func _on_loot_currency_award_completed(
+	result: int,
+	response_code: int,
+	_headers: PackedStringArray,
+	body: PackedByteArray,
+	peer_id: int,
+	loot_orb_id: int,
+	gold_amount: int,
+	request: HTTPRequest
+) -> void:
+	request.queue_free()
+	if not connected_peers.has(peer_id):
+		world_spawner.call("confirm_loot_pickup", loot_orb_id)
+		return
+
+	var response_text: String = body.get_string_from_utf8()
+	if result != HTTPRequest.RESULT_SUCCESS:
+		print("Loot currency award failed for peer %s orb %s: HTTPRequest result %s." % [peer_id, loot_orb_id, result])
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+		return
+
+	var json: JSON = JSON.new()
+	var parse_error: Error = json.parse(response_text)
+	if parse_error != OK or not (json.data is Dictionary):
+		print("Loot currency award returned invalid JSON for peer %s orb %s. status=%s response=%s" % [peer_id, loot_orb_id, response_code, response_text])
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+		return
+
+	var response_data: Dictionary = json.data as Dictionary
+	if response_code < 200 or response_code >= 300:
+		print("Loot currency award rejected peer %s orb %s: status=%s response=%s" % [peer_id, loot_orb_id, response_code, response_data])
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+		return
+
+	var confirmed_gold: int = int(response_data.get("gold", 0))
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	session["gold"] = confirmed_gold
+	peer_sessions[peer_id] = session
+	world_spawner.call("apply_confirmed_character_gold", peer_id, confirmed_gold)
+	world_spawner.call("confirm_loot_pickup", loot_orb_id)
+	world_spawner.rpc_id(peer_id, "apply_status_message", peer_id, "Picked up %s gold" % gold_amount)
 
 
 func _award_kill_xp(peer_id: int, enemy_id: int) -> void:

@@ -14,6 +14,7 @@ class CharacterResponse(BaseModel):
     name: str
     level: int
     xp: int
+    gold: int
     region_id: str
     position_x: float
     position_y: float
@@ -27,11 +28,20 @@ class CharacterXpAward(BaseModel):
     xp_amount: int
 
 
+class CharacterCurrencyAward(BaseModel):
+    gold_amount: int
+
+
 class CharacterProgressionResponse(BaseModel):
     character_id: int
     level: int
     xp: int
     xp_to_next: int
+
+
+class CharacterCurrencyResponse(BaseModel):
+    character_id: int
+    gold: int
 
 
 class AbilityEffectResponse(BaseModel):

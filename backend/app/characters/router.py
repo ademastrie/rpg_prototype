@@ -9,6 +9,8 @@ from app.characters.schemas import (
     CharacterAbilitiesResponse,
     CharacterAbilityResponse,
     CharacterCreate,
+    CharacterCurrencyAward,
+    CharacterCurrencyResponse,
     CharacterProgressionResponse,
     CharacterResponse,
     CharacterXpAward,
@@ -51,6 +53,13 @@ def _character_progression_response(character: Character) -> CharacterProgressio
         level=character.level,
         xp=character.xp,
         xp_to_next=_xp_to_next_level(character.level),
+    )
+
+
+def _character_currency_response(character: Character) -> CharacterCurrencyResponse:
+    return CharacterCurrencyResponse(
+        character_id=character.id,
+        gold=character.gold,
     )
 
 
@@ -377,6 +386,28 @@ def award_character_xp(
     db.refresh(character)
 
     return _character_progression_response(character)
+
+
+@router.post("/{character_id}/currency", response_model=CharacterCurrencyResponse)
+def award_character_currency(
+    character_id: int,
+    payload: CharacterCurrencyAward,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CharacterCurrencyResponse:
+    if payload.gold_amount < 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="gold_amount cannot be negative.",
+        )
+
+    character = _get_owned_character(character_id, current_user.id, db)
+    character.gold += payload.gold_amount
+
+    db.commit()
+    db.refresh(character)
+
+    return _character_currency_response(character)
 
 
 @router.get("/{character_id}/abilities", response_model=CharacterAbilitiesResponse)

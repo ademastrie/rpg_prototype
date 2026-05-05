@@ -19,6 +19,7 @@ class Character(Base):
     name: Mapped[str] = mapped_column(String(64), nullable=False)
     level: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     xp: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    gold: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     region_id: Mapped[str] = mapped_column(
         String(100),
         default="starting_region",
