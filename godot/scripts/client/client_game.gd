@@ -9,8 +9,6 @@ extends Node3D
 @export var debug_client_startup_logs: bool = false
 @export var debug_client_startup_timing: bool = false
 
-@onready var status_label: Label = $StatusLabel
-@onready var spawn_count_label: Label = $SpawnCountLabel
 @onready var game_hud: Node = $GameHUD
 @onready var world_spawner: Node3D = $WorldSpawner
 @onready var enemy_spawner: Node = $EnemySpawner
@@ -29,8 +27,8 @@ var _has_sent_input := false
 var _has_sent_aim := false
 var _is_connected_to_server := false
 var _has_sent_join_request := false
-var _was_attack_pressed := false
 var _was_combat_toggle_pressed := false
+var _was_character_panel_toggle_pressed := false
 var _was_ability_panel_toggle_pressed := false
 var _is_local_player_down := false
 var _window_has_focus: bool = true
@@ -72,7 +70,7 @@ func _ready() -> void:
 func set_selected_character(character_data: Dictionary) -> void:
 	selected_character = character_data
 	if selected_character.is_empty():
-		status_label.text = "No character selected."
+		game_hud.call("show_status_message", "No character selected.")
 		print("Client game loaded without selected character data.")
 		return
 
@@ -82,7 +80,6 @@ func set_selected_character(character_data: Dictionary) -> void:
 	var gold := int(selected_character.get("gold", 0))
 	var region_id := str(selected_character.get("region_id", "unknown_region"))
 	_character_status_text = "Character: %s | Level %s | Region: %s" % [character_name, level, region_id]
-	status_label.text = _character_status_text
 	game_hud.call("update_progression", level, xp, level * 100)
 	game_hud.call("update_gold", gold)
 	if debug_client_startup_logs:
@@ -109,8 +106,8 @@ func _process(delta: float) -> void:
 			_send_aim_input(aim_direction)
 
 	_read_combat_toggle_input()
+	_read_character_panel_toggle_input()
 	_read_ability_panel_toggle_input()
-	_read_basic_attack_input()
 	_update_camera_follow(delta)
 
 
@@ -149,9 +146,10 @@ func _on_connection_failed() -> void:
 	_is_connected_to_server = false
 	_is_local_player_down = false
 	world_spawner.set_local_prediction_input(Vector2.ZERO)
-	_was_attack_pressed = false
 	_was_combat_toggle_pressed = false
+	_was_character_panel_toggle_pressed = false
 	_was_ability_panel_toggle_pressed = false
+	game_hud.call("show_status_message", "Failed to connect to game server.")
 	print("Failed to connect to game server.")
 
 
@@ -160,14 +158,14 @@ func _on_server_disconnected() -> void:
 	_has_sent_join_request = false
 	_is_local_player_down = false
 	world_spawner.set_local_prediction_input(Vector2.ZERO)
-	_was_attack_pressed = false
 	_was_combat_toggle_pressed = false
+	_was_character_panel_toggle_pressed = false
 	_was_ability_panel_toggle_pressed = false
+	game_hud.call("show_status_message", "Disconnected from game server.")
 	print("Disconnected from game server.")
 
 
 func _on_spawned_player_count_changed(count: int) -> void:
-	spawn_count_label.text = "Network Players: %s" % count
 	if debug_client_startup_logs:
 		print("Network player count: %s" % count)
 
@@ -216,8 +214,6 @@ func _on_character_progression_updated(peer_id: int, progression: Dictionary) ->
 		level,
 		str(selected_character.get("region_id", "unknown_region")),
 	]
-	if not _is_local_player_down:
-		status_label.text = _character_status_text
 
 
 func _on_character_gold_updated(peer_id: int, gold: int) -> void:
@@ -237,10 +233,8 @@ func _on_player_down_state_updated(peer_id: int, is_down: bool) -> void:
 	if is_down:
 		_is_local_player_down = true
 		world_spawner.set_local_prediction_input(Vector2.ZERO)
-		status_label.text = "%s | DOWN" % _character_status_text
 	else:
 		_is_local_player_down = false
-		status_label.text = _character_status_text
 	game_hud.call("update_down_state", is_down)
 
 
@@ -393,20 +387,20 @@ func _send_aim_input(aim_direction: Vector2) -> void:
 	_has_sent_aim = true
 
 
-func _read_basic_attack_input() -> void:
-	var is_attack_pressed: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) or Input.is_key_pressed(KEY_SPACE)
-	if is_attack_pressed and not _was_attack_pressed:
-		_send_basic_attack_intent()
-
-	_was_attack_pressed = is_attack_pressed
-
-
 func _read_combat_toggle_input() -> void:
 	var is_toggle_pressed: bool = Input.is_key_pressed(KEY_Q)
 	if is_toggle_pressed and not _was_combat_toggle_pressed:
 		_send_combat_toggle_request()
 
 	_was_combat_toggle_pressed = is_toggle_pressed
+
+
+func _read_character_panel_toggle_input() -> void:
+	var is_toggle_pressed: bool = Input.is_key_pressed(KEY_C)
+	if is_toggle_pressed and not _was_character_panel_toggle_pressed:
+		game_hud.call("toggle_character_panel")
+
+	_was_character_panel_toggle_pressed = is_toggle_pressed
 
 
 func _read_ability_panel_toggle_input() -> void:
@@ -432,14 +426,6 @@ func _send_ability_toggle_request(ability_name: String, enabled: bool) -> void:
 
 func _send_loadout_save_request(loadout_entries: Array) -> void:
 	world_spawner.rpc_id(1, "request_update_ability_loadout", loadout_entries)
-
-
-func _send_basic_attack_intent() -> void:
-	if _is_local_player_down:
-		return
-
-	# Client sends attack intent only; the server decides cooldown and visual event timing.
-	world_spawner.rpc_id(1, "submit_basic_attack")
 
 
 func _update_camera_follow(delta: float) -> void:

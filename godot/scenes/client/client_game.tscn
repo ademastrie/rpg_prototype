@@ -1,10 +1,9 @@
-[gd_scene load_steps=19 format=3]
+[gd_scene load_steps=18 format=3]
 
 [ext_resource type="Script" path="res://scripts/client/client_game.gd" id="1_client_game"]
 [ext_resource type="PackedScene" path="res://scenes/shared/player_placeholder_3d.tscn" id="2_player_placeholder_3d"]
 [ext_resource type="Script" path="res://scripts/shared/world_spawner.gd" id="3_world_spawner"]
 [ext_resource type="Script" path="res://scripts/client/isometric_camera.gd" id="4_isometric_camera"]
-[ext_resource type="PackedScene" path="res://scenes/shared/local_debug_player_3d.tscn" id="5_local_debug_player"]
 [ext_resource type="Script" path="res://scripts/shared/enemy_spawner.gd" id="6_enemy_spawner"]
 [ext_resource type="PackedScene" path="res://scenes/shared/enemy_placeholder_3d.tscn" id="7_enemy_placeholder"]
 [ext_resource type="PackedScene" path="res://scenes/client/game_hud.tscn" id="8_game_hud"]
@@ -50,20 +49,6 @@ shading_mode = 0
 [node name="Game" type="Node3D"]
 script = ExtResource("1_client_game")
 
-[node name="StatusLabel" type="Label" parent="."]
-offset_left = 16.0
-offset_top = 16.0
-offset_right = 360.0
-offset_bottom = 40.0
-text = "Client game scene scaffold"
-
-[node name="SpawnCountLabel" type="Label" parent="."]
-offset_left = 16.0
-offset_top = 44.0
-offset_right = 260.0
-offset_bottom = 68.0
-text = "Network Players: 0"
-
 [node name="GameHUD" parent="." instance=ExtResource("8_game_hud")]
 
 [node name="WorldSpawner" type="Node3D" parent="."]
@@ -73,9 +58,6 @@ player_placeholder_scene = ExtResource("2_player_placeholder_3d")
 [node name="EnemySpawner" type="Node3D" parent="."]
 script = ExtResource("6_enemy_spawner")
 enemy_placeholder_scene = ExtResource("7_enemy_placeholder")
-
-[node name="LocalDebugPlayer_NotNetworked" parent="." instance=ExtResource("5_local_debug_player")]
-position = Vector3(0, 0, 0)
 
 [node name="Ground" type="MeshInstance3D" parent="."]
 mesh = SubResource("PlaneMesh_ground")
