@@ -48,6 +48,7 @@ func _ready() -> void:
 	world_spawner.player_health_updated.connect(_on_player_health_updated)
 	world_spawner.player_down_state_updated.connect(_on_player_down_state_updated)
 	world_spawner.player_combat_stats_updated.connect(_on_player_combat_stats_updated)
+	world_spawner.character_progression_updated.connect(_on_character_progression_updated)
 	world_spawner.combat_mode_updated.connect(_on_combat_mode_updated)
 	world_spawner.ability_enabled_updated.connect(_on_ability_enabled_updated)
 	world_spawner.ability_state_updated.connect(_on_ability_state_updated)
@@ -75,9 +76,11 @@ func set_selected_character(character_data: Dictionary) -> void:
 
 	var character_name := str(selected_character.get("name", "Unnamed"))
 	var level := int(selected_character.get("level", 1))
+	var xp := int(selected_character.get("xp", 0))
 	var region_id := str(selected_character.get("region_id", "unknown_region"))
 	_character_status_text = "Character: %s | Level %s | Region: %s" % [character_name, level, region_id]
 	status_label.text = _character_status_text
+	game_hud.call("update_progression", level, xp, level * 100)
 	if debug_client_startup_logs:
 		print("Client game loaded character: %s" % selected_character)
 
@@ -190,6 +193,27 @@ func _on_player_combat_stats_updated(peer_id: int, combat_stats: Dictionary) -> 
 		return
 
 	game_hud.call("update_combat_stats", combat_stats)
+
+
+func _on_character_progression_updated(peer_id: int, progression: Dictionary) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+
+	var level: int = int(progression.get("level", 1))
+	var xp: int = int(progression.get("xp", 0))
+	var xp_to_next: int = int(progression.get("xp_to_next", level * 100))
+	game_hud.call("update_progression", level, xp, xp_to_next)
+	selected_character["level"] = level
+	selected_character["xp"] = xp
+	ClientSession.selected_character["level"] = level
+	ClientSession.selected_character["xp"] = xp
+	_character_status_text = "Character: %s | Level %s | Region: %s" % [
+		str(selected_character.get("name", "Unnamed")),
+		level,
+		str(selected_character.get("region_id", "unknown_region")),
+	]
+	if not _is_local_player_down:
+		status_label.text = _character_status_text
 
 
 func _on_player_down_state_updated(peer_id: int, is_down: bool) -> void:

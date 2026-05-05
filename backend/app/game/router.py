@@ -20,6 +20,8 @@ class ValidateJoinResponse(BaseModel):
     user_id: int
     character_id: int
     character_name: str
+    level: int
+    xp: int
     region_id: str
     position_x: float
     position_y: float
@@ -61,6 +63,8 @@ def validate_join(
         user_id=current_user.id,
         character_id=character.id,
         character_name=character.name,
+        level=character.level,
+        xp=character.xp,
         region_id=character.region_id,
         position_x=character.position_x,
         position_y=character.position_y,

@@ -21,6 +21,10 @@ offset_bottom = 223.0
 layout_mode = 2
 text = "HP: 100/100"
 
+[node name="ProgressionLabel" type="Label" parent="Panel/VBoxContainer"]
+layout_mode = 2
+text = "Level: 1 | XP: 0/100"
+
 [node name="StatusLabel" type="Label" parent="Panel/VBoxContainer"]
 layout_mode = 2
 text = "Status: Alive"

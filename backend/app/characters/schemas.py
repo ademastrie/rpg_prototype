@@ -23,6 +23,17 @@ class CharacterResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CharacterXpAward(BaseModel):
+    xp_amount: int
+
+
+class CharacterProgressionResponse(BaseModel):
+    character_id: int
+    level: int
+    xp: int
+    xp_to_next: int
+
+
 class AbilityEffectResponse(BaseModel):
     effect_type: str
     target_team: str

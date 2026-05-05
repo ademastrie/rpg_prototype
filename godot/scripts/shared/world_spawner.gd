@@ -5,6 +5,7 @@ signal player_spawned(peer_id: int, player: Node3D)
 signal player_health_updated(peer_id: int, current_hp: int, max_hp: int)
 signal player_down_state_updated(peer_id: int, is_down: bool)
 signal player_combat_stats_updated(peer_id: int, combat_stats: Dictionary)
+signal character_progression_updated(peer_id: int, progression: Dictionary)
 signal combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries: Array)
 signal ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool)
 signal ability_state_updated(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float)
@@ -42,6 +43,7 @@ var _player_max_hp_by_peer: Dictionary = {}
 var _player_current_hp_by_peer: Dictionary = {}
 var _player_is_down_by_peer: Dictionary = {}
 var _player_combat_stats_by_peer: Dictionary = {}
+var _character_progression_by_peer: Dictionary = {}
 var _player_respawn_positions: Dictionary = {}
 var _last_contact_damage_time_by_peer: Dictionary = {}
 var _combat_enabled_by_peer: Dictionary = {}
@@ -153,6 +155,7 @@ func unregister_peer(peer_id: int) -> void:
 	_player_current_hp_by_peer.erase(peer_id)
 	_player_is_down_by_peer.erase(peer_id)
 	_player_combat_stats_by_peer.erase(peer_id)
+	_character_progression_by_peer.erase(peer_id)
 	_player_respawn_positions.erase(peer_id)
 	_last_contact_damage_time_by_peer.erase(peer_id)
 	_combat_enabled_by_peer.erase(peer_id)
@@ -221,6 +224,7 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_ability_enabled_by_peer[peer_id] = _ability_enabled_state_for_loadout(effective_loadout, ability_enabled)
 	_last_ability_time_by_peer[peer_id] = {}
 	_recalculate_player_combat_stats(peer_id, true)
+	_character_progression_by_peer[peer_id] = {"level": 1, "xp": 0, "xp_to_next": 100}
 	var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
 	rpc("apply_player_health_update", peer_id, max_hp, max_hp)
 	rpc("apply_player_down_state", peer_id, false)
@@ -230,6 +234,19 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_send_ability_states(peer_id)
 	_broadcast_hp_regen_active_state(peer_id)
 	_next_spawn_index += 1
+
+
+func apply_confirmed_character_progression(peer_id: int, progression: Dictionary) -> void:
+	if not multiplayer.is_server() or not players.has(peer_id):
+		return
+
+	var confirmed_progression: Dictionary = {
+		"level": int(progression.get("level", 1)),
+		"xp": int(progression.get("xp", 0)),
+		"xp_to_next": int(progression.get("xp_to_next", int(progression.get("level", 1)) * 100)),
+	}
+	_character_progression_by_peer[peer_id] = confirmed_progression
+	rpc_id(peer_id, "apply_character_progression_update", peer_id, confirmed_progression)
 
 
 func _process(delta: float) -> void:
@@ -826,6 +843,12 @@ func apply_player_combat_stats_update(peer_id: int, combat_stats: Dictionary) ->
 
 
 @rpc("authority", "call_remote", "reliable")
+func apply_character_progression_update(peer_id: int, progression: Dictionary) -> void:
+	_character_progression_by_peer[peer_id] = progression.duplicate()
+	character_progression_updated.emit(peer_id, progression)
+
+
+@rpc("authority", "call_remote", "reliable")
 func apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_entries: Array) -> void:
 	_combat_enabled_by_peer[peer_id] = combat_enabled
 	var loadout: Array = []
@@ -1152,6 +1175,7 @@ func despawn_player(peer_id: int) -> void:
 	_ability_display_names_by_peer.erase(peer_id)
 	_unlocked_abilities_by_peer.erase(peer_id)
 	_ability_enabled_by_peer.erase(peer_id)
+	_character_progression_by_peer.erase(peer_id)
 	_player_is_down_by_peer.erase(peer_id)
 	print("Despawned player for peer %s." % peer_id)
 	spawned_player_count_changed.emit(_spawned_nodes.size())

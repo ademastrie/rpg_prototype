@@ -35,8 +35,6 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("name", sa.String(length=64), nullable=False),
-        sa.Column("level", sa.Integer(), server_default="1", nullable=False),
-        sa.Column("xp", sa.Integer(), server_default="0", nullable=False),
         sa.Column("region_id", sa.String(length=100), server_default="starting_region", nullable=False),
         sa.Column("position_x", sa.Float(), server_default="0", nullable=False),
         sa.Column("position_y", sa.Float(), server_default="0", nullable=False),

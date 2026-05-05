@@ -9,7 +9,9 @@ from app.characters.schemas import (
     CharacterAbilitiesResponse,
     CharacterAbilityResponse,
     CharacterCreate,
+    CharacterProgressionResponse,
     CharacterResponse,
+    CharacterXpAward,
 )
 from app.db import get_db
 from app.models.ability import AbilityDefinition, CharacterAbility, CharacterAbilityLoadout
@@ -21,6 +23,10 @@ router = APIRouter(prefix="/characters", tags=["characters"])
 MAX_LOADOUT_ENTRIES = 5
 DEFAULT_STARTER_ABILITY_KEY = "slash"
 STARTER_ABILITY_KEYS = {"slash", "firebolt"}
+
+
+def _xp_to_next_level(level: int) -> int:
+    return max(level, 1) * 100
 
 
 def _get_owned_character(character_id: int, user_id: int, db: Session) -> Character:
@@ -37,6 +43,15 @@ def _get_owned_character(character_id: int, user_id: int, db: Session) -> Charac
         )
 
     return character
+
+
+def _character_progression_response(character: Character) -> CharacterProgressionResponse:
+    return CharacterProgressionResponse(
+        character_id=character.id,
+        level=character.level,
+        xp=character.xp,
+        xp_to_next=_xp_to_next_level(character.level),
+    )
 
 
 def _active_ability_definitions(db: Session) -> list[AbilityDefinition]:
@@ -337,6 +352,31 @@ def get_character(
         )
 
     return character
+
+
+@router.post("/{character_id}/xp", response_model=CharacterProgressionResponse)
+def award_character_xp(
+    character_id: int,
+    payload: CharacterXpAward,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CharacterProgressionResponse:
+    if payload.xp_amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="xp_amount must be greater than 0.",
+        )
+
+    character = _get_owned_character(character_id, current_user.id, db)
+    character.xp += payload.xp_amount
+    while character.xp >= _xp_to_next_level(character.level):
+        character.xp -= _xp_to_next_level(character.level)
+        character.level += 1
+
+    db.commit()
+    db.refresh(character)
+
+    return _character_progression_response(character)
 
 
 @router.get("/{character_id}/abilities", response_model=CharacterAbilitiesResponse)

@@ -8,6 +8,52 @@ From `backend/`:
 .\.venv\Scripts\activate
 uvicorn app.main:app --reload
 alembic current
+alembic upgrade head
+```
+
+### Character progression
+
+The character progression migration is:
+
+```powershell
+alembic upgrade head
+alembic current
+```
+
+Swagger:
+
+```powershell
+Start-Process http://127.0.0.1:8000/docs
+```
+
+In Swagger, log in through `POST /auth/login`, use the returned bearer token with
+Authorize, then try `POST /characters/{character_id}/xp` with:
+
+```json
+{
+  "xp_amount": 25
+}
+```
+
+The response should include `character_id`, `level`, `xp`, and `xp_to_next`.
+With the temporary formula, XP to next level is `level * 100`, and extra XP
+rolls into the next level after a level-up.
+
+PowerShell:
+
+```powershell
+$BaseUrl = "http://127.0.0.1:8000"
+$Auth = Invoke-RestMethod -Method Post "$BaseUrl/auth/login" -ContentType "application/json" -Body '{"email":"dev@example.com","password":"password"}'
+$Headers = @{ Authorization = "Bearer $($Auth.access_token)" }
+
+$Characters = Invoke-RestMethod -Method Get "$BaseUrl/characters" -Headers $Headers
+$CharacterId = $Characters[0].id
+
+$XpBody = @{ xp_amount = 25 } | ConvertTo-Json
+Invoke-RestMethod -Method Post "$BaseUrl/characters/$CharacterId/xp" -Headers $Headers -ContentType "application/json" -Body $XpBody
+
+# Ownership check: repeat the request with another user's token and the same character id.
+# The expected result is 404 Character not found.
 ```
 
 ### Character abilities and loadout

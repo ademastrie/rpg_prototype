@@ -6,6 +6,7 @@ signal loadout_save_requested(loadout_entries: Array)
 
 @onready var hud_vbox: VBoxContainer = $Panel/VBoxContainer
 @onready var hp_label: Label = $Panel/VBoxContainer/HPLabel
+@onready var progression_label: Label = $Panel/VBoxContainer/ProgressionLabel
 @onready var status_label: Label = $Panel/VBoxContainer/StatusLabel
 @onready var combat_label: Label = $Panel/VBoxContainer/CombatLabel
 @onready var loadout_label: Label = $Panel/VBoxContainer/LoadoutLabel
@@ -32,6 +33,7 @@ func _ready() -> void:
 	combat_toggle_button.pressed.connect(_on_combat_toggle_button_pressed)
 	_build_ability_panel()
 	update_health(100, 100)
+	update_progression(1, 0, 100)
 	update_down_state(false)
 	update_combat_mode(false)
 	_build_combat_stats_label()
@@ -52,6 +54,10 @@ func _process(delta: float) -> void:
 
 func update_health(current_hp: int, max_hp: int) -> void:
 	hp_label.text = "HP: %s/%s" % [current_hp, max_hp]
+
+
+func update_progression(level: int, xp: int, xp_to_next: int) -> void:
+	progression_label.text = "Level: %s | XP: %s/%s" % [level, xp, max(xp_to_next, 1)]
 
 
 func update_down_state(is_down: bool) -> void:
