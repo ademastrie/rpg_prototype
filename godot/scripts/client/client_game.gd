@@ -6,7 +6,8 @@ extends Node3D
 @export var aim_heartbeat_interval: float = 0.35
 @export var aim_change_threshold: float = 0.03
 @export var camera_follow_speed: float = 8.0
-@export var debug_client_startup_timing: bool = true
+@export var debug_client_startup_logs: bool = false
+@export var debug_client_startup_timing: bool = false
 
 @onready var status_label: Label = $StatusLabel
 @onready var spawn_count_label: Label = $SpawnCountLabel
@@ -76,7 +77,8 @@ func set_selected_character(character_data: Dictionary) -> void:
 	var region_id := str(selected_character.get("region_id", "unknown_region"))
 	_character_status_text = "Character: %s | Level %s | Region: %s" % [character_name, level, region_id]
 	status_label.text = _character_status_text
-	print("Client game loaded character: %s" % selected_character)
+	if debug_client_startup_logs:
+		print("Client game loaded character: %s" % selected_character)
 
 
 func _process(delta: float) -> void:
@@ -124,12 +126,14 @@ func _connect_to_server() -> void:
 		return
 
 	multiplayer.multiplayer_peer = peer
-	print("Connecting to game server at %s:%s" % [server_host, server_port])
+	if debug_client_startup_logs:
+		print("Connecting to game server at %s:%s" % [server_host, server_port])
 
 
 func _on_connected_to_server() -> void:
 	_is_connected_to_server = true
-	print("Connected to game server.")
+	if debug_client_startup_logs:
+		print("Connected to game server.")
 	_send_join_request()
 
 
@@ -156,7 +160,8 @@ func _on_server_disconnected() -> void:
 
 func _on_spawned_player_count_changed(count: int) -> void:
 	spawn_count_label.text = "Network Players: %s" % count
-	print("Network player count: %s" % count)
+	if debug_client_startup_logs:
+		print("Network player count: %s" % count)
 
 
 func _on_player_spawned(peer_id: int, player: Node3D) -> void:
@@ -166,7 +171,8 @@ func _on_player_spawned(peer_id: int, player: Node3D) -> void:
 	_local_player = player
 	_snap_camera_to_local_player()
 	_log_client_startup_timing("local player spawn received")
-	print("Camera following local player peer %s." % peer_id)
+	if debug_client_startup_logs:
+		print("Camera following local player peer %s." % peer_id)
 
 
 func _on_player_health_updated(peer_id: int, current_hp: int, max_hp: int) -> void:
@@ -424,7 +430,8 @@ func _send_join_request() -> void:
 	_has_sent_join_request = true
 	_send_movement_input(Vector2.ZERO)
 	_send_aim_input(Vector2(0.0, -1.0))
-	print("Sent join request for character %s (%s)." % [character_name, character_id])
+	if debug_client_startup_logs:
+		print("Sent join request for character %s (%s)." % [character_name, character_id])
 
 
 func _log_client_startup_timing(event_name: String, counts: Dictionary = {}) -> void:

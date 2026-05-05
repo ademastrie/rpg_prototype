@@ -3,7 +3,8 @@ extends Node
 @export var server_port: int = 7777
 @export var backend_base_url: String = "http://127.0.0.1:8000"
 @export var server_region_id: String = "starting_region"
-@export var debug_join_timing: bool = true
+@export var debug_server_startup_logs: bool = false
+@export var debug_join_timing: bool = false
 
 @onready var world_spawner: Node3D = $WorldSpawner
 @onready var enemy_spawner: Node = $EnemySpawner
@@ -27,7 +28,8 @@ const KILL_UNLOCK_REWARDS: Array[Dictionary] = [
 
 
 func _ready() -> void:
-	print("Server game scene ready.")
+	if debug_server_startup_logs:
+		print("Server game scene ready.")
 	_start_server()
 
 
@@ -45,13 +47,15 @@ func _start_server() -> void:
 		return
 
 	multiplayer.multiplayer_peer = peer
-	print("ENet server started on port %s." % server_port)
+	if debug_server_startup_logs:
+		print("ENet server started on port %s." % server_port)
 	enemy_spawner.call("spawn_initial_enemies")
 
 
 func _on_peer_connected(peer_id: int) -> void:
-	print("Peer connected: %s" % peer_id)
-	print("Peer joined pending validation: %s." % peer_id)
+	if debug_join_timing:
+		print("Peer connected: %s" % peer_id)
+		print("Peer joined pending validation: %s." % peer_id)
 	connected_peers.append(peer_id)
 	peer_sessions[peer_id] = {
 		"peer_id": peer_id,
@@ -289,7 +293,8 @@ func _complete_validated_join(peer_id: int, session: Dictionary, loadout_data: D
 	session["unlock_attempted_ability_keys"] = []
 	peer_sessions[peer_id] = session
 	_log_join_timing(peer_id, "player session initialized")
-	print("Peer %s accepted as character %s (%s) with backend loadout: %s." % [peer_id, character_name, character_id, ", ".join(loadout_names)])
+	if debug_join_timing:
+		print("Peer %s accepted as character %s (%s) with backend loadout: %s." % [peer_id, character_name, character_id, ", ".join(loadout_names)])
 	if _has_saved_position(position_x, position_y):
 		world_spawner.register_peer_at_position(peer_id, character_name, Vector3(position_x, 0.0, position_y), loadout, ability_enabled, ability_display_names, ability_keys, unlocked_abilities, ability_slot_indexes)
 	else:

@@ -28,6 +28,7 @@ signal ability_loadout_update_requested(peer_id: int, loadout_entries: Array)
 @export var enemy_contact_damage: int = 10
 @export var enemy_contact_damage_interval: float = 1.0
 @export var player_respawn_delay_seconds: float = 3.0
+@export var debug_join_sync_logs: bool = false
 
 var players: Dictionary = {}
 var _spawned_nodes: Dictionary = {}
@@ -135,7 +136,8 @@ func _sync_existing_players_to_peer(peer_id: int) -> void:
 
 	if not player_snapshots.is_empty():
 		rpc_id(peer_id, "spawn_players", player_snapshots)
-	print("Join sync targeted to peer %s: players=%s broadcast=false." % [peer_id, player_snapshots.size()])
+	if debug_join_sync_logs:
+		print("Join sync targeted to peer %s: players=%s broadcast=false." % [peer_id, player_snapshots.size()])
 
 
 func unregister_peer(peer_id: int) -> void:
@@ -709,7 +711,7 @@ func _spawn_player_visual(peer_id: int, spawn_position: Vector3, character_name:
 	_target_positions[peer_id] = initial_position
 	_set_peer_label(player, peer_id, character_name)
 
-	if print_spawn:
+	if print_spawn and debug_join_sync_logs:
 		print("Network player instantiated on client: peer_id=%s position=%s node_name=%s" % [peer_id, spawn_position, player.name])
 	player_spawned.emit(peer_id, player)
 	spawned_player_count_changed.emit(_spawned_nodes.size())
@@ -731,7 +733,8 @@ func spawn_players(player_snapshots: Array) -> void:
 
 		_spawn_player_visual(peer_id, spawn_position, character_name, false)
 		_update_hp_regen_visual(peer_id, hp_regen_active)
-	print("Received targeted player sync: players=%s broadcast=false." % player_snapshots.size())
+	if debug_join_sync_logs:
+		print("Received targeted player sync: players=%s broadcast=false." % player_snapshots.size())
 
 
 @rpc("authority", "call_remote", "unreliable")

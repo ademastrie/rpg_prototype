@@ -13,6 +13,8 @@ signal initial_enemy_batch_received(count: int)
 @export var basic_attack_range: float = 4.0
 @export var basic_attack_cone_dot: float = 0.65
 @export var respawn_delay_seconds: float = 5.0
+@export var debug_enemy_lifecycle_logs: bool = false
+@export var debug_enemy_join_sync_logs: bool = false
 @export var debug_enemy_return_logs: bool = false
 @export var debug_enemy_snap_logs: bool = false
 @export var enemy_snap_log_threshold: float = 5.0
@@ -145,8 +147,9 @@ func sync_peer(peer_id: int) -> void:
 
 	if not enemy_snapshots.is_empty():
 		rpc_id(peer_id, "spawn_enemies", enemy_snapshots)
-	print("Join sync targeted to peer %s: enemies=%s broadcast=false." % [peer_id, enemy_snapshots.size()])
-	print("Enemy aggro accepted/alive players considered after peer %s join: %s." % [peer_id, alive_player_count])
+	if debug_enemy_join_sync_logs:
+		print("Join sync targeted to peer %s: enemies=%s broadcast=false." % [peer_id, enemy_snapshots.size()])
+		print("Enemy aggro accepted/alive players considered after peer %s join: %s." % [peer_id, alive_player_count])
 
 
 func get_active_enemy_positions() -> Dictionary:
@@ -185,7 +188,8 @@ func _spawn_enemy(spawn_position: Vector3, enemy_type: String = DEFAULT_ENEMY_TY
 	_enemy_max_hp_by_id[enemy_id] = max_hp
 	_enemy_current_hp_by_id[enemy_id] = max_hp
 	rpc("spawn_enemy", enemy_id, spawn_position, max_hp, max_hp, resolved_enemy_type, _enemy_display_name(enemy_id), _enemy_visual_color(enemy_id))
-	print("Spawned enemy %s type=%s at %s." % [enemy_id, resolved_enemy_type, spawn_position])
+	if debug_enemy_lifecycle_logs:
+		print("Spawned enemy %s type=%s at %s." % [enemy_id, resolved_enemy_type, spawn_position])
 
 
 func resolve_basic_attack(_attacker_peer_id: int, attack_position: Vector3, facing_direction: Vector2) -> void:
@@ -339,7 +343,8 @@ func _respawn_enemy(enemy_id: int, spawn_position: Vector3) -> void:
 	_enemy_return_log_last_seconds.erase(enemy_id)
 	_dead_enemy_ids.erase(enemy_id)
 	rpc("spawn_enemy", enemy_id, spawn_position, max_hp, max_hp, enemy_type, _enemy_display_name(enemy_id), _enemy_visual_color(enemy_id))
-	print("Respawned enemy %s type=%s at %s." % [enemy_id, enemy_type, spawn_position])
+	if debug_enemy_lifecycle_logs:
+		print("Respawned enemy %s type=%s at %s." % [enemy_id, enemy_type, spawn_position])
 
 
 func _update_enemy_positions(delta: float) -> void:
@@ -936,7 +941,8 @@ func spawn_enemies(enemy_snapshots: Array) -> void:
 
 		_spawn_enemy_visual(enemy_id, spawn_position, current_hp, max_hp, enemy_type, display_name, visual_color, false, "spawn_enemies")
 		received_count += 1
-	print("Received targeted enemy sync: enemies=%s broadcast=false." % received_count)
+	if debug_enemy_join_sync_logs:
+		print("Received targeted enemy sync: enemies=%s broadcast=false." % received_count)
 	initial_enemy_batch_received.emit(received_count)
 
 
@@ -968,7 +974,7 @@ func _spawn_enemy_visual(enemy_id: int, spawn_position: Vector3, current_hp: int
 	_target_positions[enemy_id] = initial_position
 	_set_enemy_label(enemy, enemy_id, current_hp, max_hp)
 	_apply_enemy_visual_color(enemy, visual_color)
-	if print_spawn:
+	if print_spawn and debug_enemy_lifecycle_logs:
 		print("Enemy placeholder instantiated on client: enemy_id=%s type=%s position=%s node_name=%s" % [enemy_id, enemy_type, spawn_position, enemy.name])
 
 
@@ -1008,7 +1014,8 @@ func show_enemy_hit(enemy_id: int, current_hp: int, max_hp: int) -> void:
 
 	var enemy: Node3D = _spawned_enemy_nodes[enemy_id] as Node3D
 	_set_enemy_label(enemy, enemy_id, current_hp, max_hp)
-	print("Enemy %s hit. HP: %s/%s" % [enemy_id, current_hp, max_hp])
+	if debug_enemy_lifecycle_logs:
+		print("Enemy %s hit. HP: %s/%s" % [enemy_id, current_hp, max_hp])
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -1051,7 +1058,8 @@ func despawn_enemy(enemy_id: int) -> void:
 	_target_positions.erase(enemy_id)
 	_enemy_type_by_id.erase(enemy_id)
 	_enemy_display_name_by_id.erase(enemy_id)
-	print("Enemy %s defeated and removed." % enemy_id)
+	if debug_enemy_lifecycle_logs:
+		print("Enemy %s defeated and removed." % enemy_id)
 
 
 func _set_enemy_label(enemy: Node, enemy_id: int, current_hp: int, max_hp: int) -> void:
