@@ -2,6 +2,7 @@ extends Node3D
 class_name EnemySpawner
 
 signal enemy_killed(attacker_peer_id: int, enemy_id: int)
+signal initial_enemy_batch_received(count: int)
 
 @export var enemy_placeholder_scene: PackedScene
 @export var idle_radius: float = 1.2
@@ -733,6 +734,7 @@ func spawn_enemies(enemy_snapshots: Array) -> void:
 	if multiplayer.is_server():
 		return
 
+	var received_count: int = 0
 	for snapshot in enemy_snapshots:
 		var snapshot_data: Dictionary = snapshot as Dictionary
 		var enemy_id: int = int(snapshot_data.get("enemy_id", 0))
@@ -743,7 +745,9 @@ func spawn_enemies(enemy_snapshots: Array) -> void:
 			continue
 
 		_spawn_enemy_visual(enemy_id, spawn_position, current_hp, max_hp, false, "spawn_enemies")
-	print("Received targeted enemy sync: enemies=%s broadcast=false." % enemy_snapshots.size())
+		received_count += 1
+	print("Received targeted enemy sync: enemies=%s broadcast=false." % received_count)
+	initial_enemy_batch_received.emit(received_count)
 
 
 func _spawn_enemy_visual(enemy_id: int, spawn_position: Vector3, current_hp: int, max_hp: int, print_spawn: bool, source: String) -> void:

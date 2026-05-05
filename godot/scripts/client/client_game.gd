@@ -6,11 +6,13 @@ extends Node3D
 @export var aim_heartbeat_interval: float = 0.35
 @export var aim_change_threshold: float = 0.03
 @export var camera_follow_speed: float = 8.0
+@export var debug_client_startup_timing: bool = true
 
 @onready var status_label: Label = $StatusLabel
 @onready var spawn_count_label: Label = $SpawnCountLabel
 @onready var game_hud: Node = $GameHUD
 @onready var world_spawner: Node3D = $WorldSpawner
+@onready var enemy_spawner: Node = $EnemySpawner
 @onready var active_camera: Camera3D = $Camera3D
 
 var selected_character: Dictionary = {}
@@ -32,9 +34,14 @@ var _was_ability_panel_toggle_pressed := false
 var _is_local_player_down := false
 var _window_has_focus: bool = true
 var _confirmed_ability_names: Array[String] = []
+var _client_startup_timing_start_msec: int = 0
+var _has_logged_camera_target_set: bool = false
+var _has_logged_hud_loadout_update: bool = false
+var _has_logged_hud_unlocked_update: bool = false
 
 
 func _ready() -> void:
+	_client_startup_timing_start_msec = Time.get_ticks_msec()
 	world_spawner.spawned_player_count_changed.connect(_on_spawned_player_count_changed)
 	world_spawner.player_spawned.connect(_on_player_spawned)
 	world_spawner.player_health_updated.connect(_on_player_health_updated)
@@ -44,6 +51,7 @@ func _ready() -> void:
 	world_spawner.ability_state_updated.connect(_on_ability_state_updated)
 	world_spawner.ability_catalog_updated.connect(_on_ability_catalog_updated)
 	world_spawner.ability_unlock_message_received.connect(_on_ability_unlock_message_received)
+	enemy_spawner.connect("initial_enemy_batch_received", Callable(self, "_on_initial_enemy_batch_received"))
 	game_hud.connect("combat_toggle_requested", Callable(self, "_send_combat_toggle_request"))
 	game_hud.connect("ability_toggle_requested", Callable(self, "_send_ability_toggle_request"))
 	game_hud.connect("loadout_save_requested", Callable(self, "_send_loadout_save_request"))
@@ -157,6 +165,7 @@ func _on_player_spawned(peer_id: int, player: Node3D) -> void:
 
 	_local_player = player
 	_snap_camera_to_local_player()
+	_log_client_startup_timing("local player spawn received")
 	print("Camera following local player peer %s." % peer_id)
 
 
@@ -199,6 +208,9 @@ func _on_combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries
 
 	game_hud.call("update_combat_mode", combat_enabled)
 	game_hud.call("update_loadout", loadout_entries)
+	if _has_sent_join_request and not _has_logged_hud_loadout_update:
+		_has_logged_hud_loadout_update = true
+		_log_client_startup_timing("HUD loadout update", {"ability_count": _confirmed_ability_names.size()})
 
 
 func _on_ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool) -> void:
@@ -220,6 +232,13 @@ func _on_ability_catalog_updated(peer_id: int, unlocked_abilities: Array) -> voi
 		return
 
 	game_hud.call("update_unlocked_abilities", unlocked_abilities)
+	if _has_sent_join_request and not _has_logged_hud_unlocked_update:
+		_has_logged_hud_unlocked_update = true
+		_log_client_startup_timing("HUD unlocked ability update", {"ability_count": unlocked_abilities.size()})
+
+
+func _on_initial_enemy_batch_received(enemy_count: int) -> void:
+	_log_client_startup_timing("initial enemy batch received", {"enemy_count": enemy_count})
 
 
 func _on_ability_unlock_message_received(peer_id: int, display_name: String) -> void:
@@ -385,6 +404,9 @@ func _snap_camera_to_local_player() -> void:
 	camera_transform.origin = _local_player.global_position + _camera_follow_offset
 	camera_transform.basis = _fixed_camera_basis
 	active_camera.global_transform = camera_transform
+	if not _has_logged_camera_target_set:
+		_has_logged_camera_target_set = true
+		_log_client_startup_timing("first camera target set")
 
 
 func _send_join_request() -> void:
@@ -403,3 +425,18 @@ func _send_join_request() -> void:
 	_send_movement_input(Vector2.ZERO)
 	_send_aim_input(Vector2(0.0, -1.0))
 	print("Sent join request for character %s (%s)." % [character_name, character_id])
+
+
+func _log_client_startup_timing(event_name: String, counts: Dictionary = {}) -> void:
+	if not debug_client_startup_timing:
+		return
+
+	var elapsed_msec: int = Time.get_ticks_msec() - _client_startup_timing_start_msec
+	var count_parts: PackedStringArray = PackedStringArray()
+	for count_name in counts:
+		count_parts.append("%s=%s" % [str(count_name), counts[count_name]])
+
+	var count_text: String = ""
+	if not count_parts.is_empty():
+		count_text = " " + " ".join(count_parts)
+	print("Client startup timing event=\"%s\" elapsed_ms=%s%s" % [event_name, elapsed_msec, count_text])

@@ -3,6 +3,7 @@ extends Node
 @export var server_port: int = 7777
 @export var backend_base_url: String = "http://127.0.0.1:8000"
 @export var server_region_id: String = "starting_region"
+@export var debug_join_timing: bool = true
 
 @onready var world_spawner: Node3D = $WorldSpawner
 @onready var enemy_spawner: Node = $EnemySpawner
@@ -11,6 +12,7 @@ var connected_peers: Array[int] = []
 var peer_sessions: Dictionary = {}
 var _pending_join_validations: Dictionary = {}
 var _session_kill_counts_by_peer: Dictionary = {}
+var _join_timing_start_msec_by_peer: Dictionary = {}
 
 const BACKEND_ABILITY_NAME_BY_KEY: Dictionary = {
 	"slash": "Slash",
@@ -70,6 +72,7 @@ func _on_peer_disconnected(peer_id: int) -> void:
 	peer_sessions.erase(peer_id)
 	_pending_join_validations.erase(peer_id)
 	_session_kill_counts_by_peer.erase(peer_id)
+	_join_timing_start_msec_by_peer.erase(peer_id)
 	world_spawner.unregister_peer(peer_id)
 
 
@@ -95,6 +98,8 @@ func _on_join_requested(peer_id: int, character_id: int, _character_name: String
 		_disconnect_peer(peer_id)
 		return
 
+	_join_timing_start_msec_by_peer[peer_id] = Time.get_ticks_msec()
+	_log_join_timing(peer_id, "join request received")
 	_validate_join_with_backend(peer_id, character_id, access_token)
 
 
@@ -133,6 +138,7 @@ func _on_join_validation_completed(
 
 	if not connected_peers.has(peer_id):
 		return
+	_log_join_timing(peer_id, "backend validate-join request completed")
 
 	if result != HTTPRequest.RESULT_SUCCESS:
 		print("Join validation failed for peer %s: HTTPRequest result %s." % [peer_id, result])
@@ -227,6 +233,7 @@ func _on_character_abilities_completed(
 
 	if not connected_peers.has(peer_id):
 		return
+	_log_join_timing(peer_id, "backend ability/loadout fetch completed")
 
 	if result != HTTPRequest.RESULT_SUCCESS:
 		print("Rejecting join for peer %s: ability loadout fetch failed with HTTPRequest result %s." % [peer_id, result])
@@ -281,12 +288,17 @@ func _complete_validated_join(peer_id: int, session: Dictionary, loadout_data: D
 	session["unlocked_ability_keys"] = _unlocked_ability_keys(unlocked_abilities)
 	session["unlock_attempted_ability_keys"] = []
 	peer_sessions[peer_id] = session
+	_log_join_timing(peer_id, "player session initialized")
 	print("Peer %s accepted as character %s (%s) with backend loadout: %s." % [peer_id, character_name, character_id, ", ".join(loadout_names)])
 	if _has_saved_position(position_x, position_y):
 		world_spawner.register_peer_at_position(peer_id, character_name, Vector3(position_x, 0.0, position_y), loadout, ability_enabled, ability_display_names, ability_keys, unlocked_abilities, ability_slot_indexes)
 	else:
 		world_spawner.register_peer(peer_id, character_name, loadout, ability_enabled, ability_display_names, ability_keys, unlocked_abilities, ability_slot_indexes)
+	_log_join_timing(peer_id, "initial player sync sent")
 	enemy_spawner.call("sync_peer", peer_id)
+	_log_join_timing(peer_id, "initial enemy sync sent")
+	_log_join_timing(peer_id, "total join accept time")
+	_join_timing_start_msec_by_peer.erase(peer_id)
 
 
 func _parse_backend_ability_loadout(peer_id: int, character_id: int, response_data: Dictionary) -> Dictionary:
@@ -741,5 +753,16 @@ func _normalized_backend_base_url() -> String:
 
 
 func _disconnect_peer(peer_id: int) -> void:
+	_join_timing_start_msec_by_peer.erase(peer_id)
 	if multiplayer.multiplayer_peer != null:
 		multiplayer.multiplayer_peer.disconnect_peer(peer_id)
+
+
+func _log_join_timing(peer_id: int, event_name: String) -> void:
+	if not debug_join_timing:
+		return
+	if not _join_timing_start_msec_by_peer.has(peer_id):
+		return
+
+	var elapsed_msec: int = Time.get_ticks_msec() - int(_join_timing_start_msec_by_peer[peer_id])
+	print("Join timing peer=%s event=\"%s\" elapsed_ms=%s" % [peer_id, event_name, elapsed_msec])
