@@ -14,7 +14,6 @@ var peer_sessions: Dictionary = {}
 var _pending_join_validations: Dictionary = {}
 var _join_timing_start_msec_by_peer: Dictionary = {}
 
-const XP_PER_ENEMY_KILL: int = 25
 const BACKEND_ABILITY_NAME_BY_KEY: Dictionary = {
 	"slash": "Slash",
 	"hp_regen": "HP Regen",
@@ -541,6 +540,11 @@ func _award_kill_xp(peer_id: int, enemy_id: int) -> void:
 		print("Cannot award XP for peer %s enemy %s: missing validated session data." % [peer_id, enemy_id])
 		return
 
+	var xp_reward: int = int(enemy_spawner.call("get_enemy_xp_reward", enemy_id))
+	if xp_reward <= 0:
+		print("Cannot award XP for peer %s enemy %s: missing prototype enemy XP reward." % [peer_id, enemy_id])
+		return
+
 	var request: HTTPRequest = HTTPRequest.new()
 	add_child(request)
 	request.request_completed.connect(_on_award_xp_completed.bind(peer_id, enemy_id, request))
@@ -549,7 +553,9 @@ func _award_kill_xp(peer_id: int, enemy_id: int) -> void:
 		"Content-Type: application/json",
 		"Authorization: Bearer %s" % access_token,
 	])
-	var body: String = JSON.stringify({"xp_amount": XP_PER_ENEMY_KILL})
+	# Prototype only: future XP scaling should consider player level versus enemy
+	# level and backend/database-backed enemy definitions.
+	var body: String = JSON.stringify({"xp_amount": xp_reward})
 	var url: String = "%s/characters/%s/xp" % [_normalized_backend_base_url(), character_id]
 	var error: Error = request.request(url, headers, HTTPClient.METHOD_POST, body)
 	if error != OK:

@@ -52,10 +52,14 @@ const DEFAULT_ENEMY_TYPE: String = "grunt"
 
 # Temporary Godot-only prototype definitions. These are intentionally server-owned
 # for now and should become backend/database-backed enemy definitions later.
+# Future XP scaling should consider player level versus enemy level once enemy
+# definitions move to the backend/database.
 const SERVER_PROTOTYPE_ENEMY_DEFINITIONS: Dictionary = {
 	"grunt": {
 		"enemy_type": "grunt",
 		"display_name": "Grunt",
+		"level": 1,
+		"xp_reward": 25,
 		"max_hp": 30,
 		"move_speed": 2.2,
 		"aggro_radius": 8.0,
@@ -85,6 +89,8 @@ const SERVER_PROTOTYPE_ENEMY_DEFINITIONS: Dictionary = {
 	"brute": {
 		"enemy_type": "brute",
 		"display_name": "Brute",
+		"level": 2,
+		"xp_reward": 50,
 		"max_hp": 75,
 		"move_speed": 1.55,
 		"aggro_radius": 9.5,
@@ -113,6 +119,8 @@ const SERVER_PROTOTYPE_ENEMY_DEFINITIONS: Dictionary = {
 	"caster": {
 		"enemy_type": "caster",
 		"display_name": "Caster",
+		"level": 1,
+		"xp_reward": 30,
 		"max_hp": 24,
 		"move_speed": 1.8,
 		"aggro_radius": 10.5,
@@ -190,6 +198,10 @@ func sync_peer(peer_id: int) -> void:
 
 func get_active_enemy_positions() -> Dictionary:
 	return enemies.duplicate()
+
+
+func get_enemy_xp_reward(enemy_id: int) -> int:
+	return _enemy_definition_int(enemy_id, "xp_reward", 0)
 
 
 func _process(delta: float) -> void:

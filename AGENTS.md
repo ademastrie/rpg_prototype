@@ -1,23 +1,20 @@
 # AGENTS.md
 
-## Project Map
+## Project Rules
 
-This is a learning prototype for a persistent-feeling online action RPG in Godot.
-
-Read deeper docs as needed:
-- [Architecture](docs/architecture.md)
-- [Networking](docs/networking.md)
-- [Ability Model](docs/ability_model.md)
-- [Backend Data Model](docs/backend_data_model.md)
-- [Testing](docs/testing.md)
-
-## Critical Rules
-
+- Godot version: 4.5.
 - Backend/PostgreSQL owns durable state and persistent character data.
 - Godot dedicated server owns live simulation.
 - Client owns visuals, input, and UI only.
 - Enemies, combat, HP, cooldowns, abilities, damage/healing, and respawn are server-authoritative.
-- Join sync must be read-only and must not reset live simulation state.
 - Current hardcoded Godot ability/enemy definitions are temporary prototype definitions.
-- Do not modify `backend/.env` or `backend/.venv`.
+- Preserve the existing client/server/backend authority split.
 - Make small, reviewable changes. Do not rewrite architecture without explicit approval.
+- Do not modify `backend/.env` or `backend/.venv`.
+
+## Environment / Verification
+
+- Do not attempt to run Python, Godot, unit tests, migrations, servers, or game launches in this Codex environment.
+- Use static review only: inspect code, check call flow, and reason about syntax/logic from the files provided.
+- Do not end responses with generic test cases or manual test checklists.
+- Only mention verification when a specific static-review concern remains or the user asks how to test something.
