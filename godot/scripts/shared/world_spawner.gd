@@ -11,6 +11,7 @@ signal ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool
 signal ability_state_updated(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float)
 signal ability_catalog_updated(peer_id: int, unlocked_abilities: Array)
 signal ability_unlock_message_received(peer_id: int, display_name: String)
+signal status_message_received(peer_id: int, message: String)
 signal join_requested(peer_id: int, character_id: int, character_name: String, access_token: String)
 signal ability_loadout_update_requested(peer_id: int, loadout_entries: Array)
 
@@ -30,6 +31,8 @@ signal ability_loadout_update_requested(peer_id: int, loadout_entries: Array)
 @export var enemy_contact_damage: int = 10
 @export var enemy_contact_damage_interval: float = 1.0
 @export var player_respawn_delay_seconds: float = 3.0
+@export var prototype_loot_drop_chance: float = 1.0
+@export var prototype_loot_pickup_radius: float = 1.5
 @export var debug_join_sync_logs: bool = false
 
 var players: Dictionary = {}
@@ -54,10 +57,13 @@ var _ability_display_names_by_peer: Dictionary = {}
 var _unlocked_abilities_by_peer: Dictionary = {}
 var _ability_enabled_by_peer: Dictionary = {}
 var _last_ability_time_by_peer: Dictionary = {}
+var _loot_orbs: Dictionary = {}
+var _spawned_loot_orb_nodes: Dictionary = {}
 var _local_prediction_input: Vector2 = Vector2.ZERO
 var _simulation_accumulator := 0.0
 var _snapshot_accumulator := 0.0
 var _next_spawn_index := 0
+var _next_loot_orb_id := 1
 var _character_names_by_peer: Dictionary = {}
 
 const SPAWN_POSITIONS: Array[Vector3] = [
@@ -123,6 +129,7 @@ func _register_peer(peer_id: int, character_name: String, use_custom_spawn: bool
 	rpc("spawn_player", peer_id, peer_position, character_name)
 	_broadcast_hp_regen_active_state(peer_id)
 	_send_position_snapshots(peer_id)
+	_sync_loot_orbs_to_peer(peer_id)
 
 
 func _sync_existing_players_to_peer(peer_id: int) -> void:
@@ -249,6 +256,27 @@ func apply_confirmed_character_progression(peer_id: int, progression: Dictionary
 	rpc_id(peer_id, "apply_character_progression_update", peer_id, confirmed_progression)
 
 
+func spawn_prototype_loot_drop(drop_position: Vector3) -> void:
+	if not multiplayer.is_server():
+		return
+	if prototype_loot_drop_chance <= 0.0:
+		return
+	if prototype_loot_drop_chance < 1.0 and randf() > prototype_loot_drop_chance:
+		return
+
+	var loot_orb_id: int = _next_loot_orb_id
+	_next_loot_orb_id += 1
+	# Prototype world-drop flow only: future loot should use backend item
+	# definitions, inventory, loot tables, and durable ownership/rewards.
+	var loot_data: Dictionary = {
+		"loot_orb_id": loot_orb_id,
+		"position": drop_position,
+		"active": true,
+	}
+	_loot_orbs[loot_orb_id] = loot_data
+	rpc("spawn_loot_orb", loot_orb_id, drop_position)
+
+
 func _process(delta: float) -> void:
 	if not multiplayer.is_server():
 		_smooth_spawned_players(delta)
@@ -261,6 +289,7 @@ func _process(delta: float) -> void:
 	while _simulation_accumulator >= tick_delta:
 		_simulate(tick_delta)
 		_apply_enemy_contact_damage(tick_delta)
+		_process_prototype_loot_pickups()
 		_process_combat_abilities()
 		_simulation_accumulator -= tick_delta
 
@@ -440,6 +469,52 @@ func _is_enemy_in_contact_range(player_position: Vector3, enemy_positions: Dicti
 			return true
 
 	return false
+
+
+func _process_prototype_loot_pickups() -> void:
+	if _loot_orbs.is_empty() or prototype_loot_pickup_radius <= 0.0:
+		return
+
+	for peer_id in players:
+		var peer_id_int: int = int(peer_id)
+		for loot_orb_id in _loot_orbs.keys():
+			if _validate_prototype_loot_pickup(peer_id_int, int(loot_orb_id)):
+				_complete_prototype_loot_pickup(peer_id_int, int(loot_orb_id))
+				break
+
+
+func _validate_prototype_loot_pickup(peer_id: int, loot_orb_id: int) -> bool:
+	# A peer appears in players only after server-side join validation/register.
+	if not players.has(peer_id):
+		return false
+	if bool(_player_is_down_by_peer.get(peer_id, false)):
+		return false
+
+	var current_hp: int = int(_player_current_hp_by_peer.get(peer_id, player_max_hp))
+	if current_hp <= 0:
+		return false
+	if not _loot_orbs.has(loot_orb_id):
+		return false
+
+	var loot_data: Dictionary = _loot_orbs[loot_orb_id] as Dictionary
+	if not bool(loot_data.get("active", false)):
+		return false
+
+	var player_position: Vector3 = players[peer_id] as Vector3
+	var loot_position: Vector3 = loot_data.get("position", Vector3.ZERO) as Vector3
+	return _distance_xz(player_position, loot_position) <= prototype_loot_pickup_radius
+
+
+func _complete_prototype_loot_pickup(peer_id: int, loot_orb_id: int) -> void:
+	if not _loot_orbs.has(loot_orb_id):
+		return
+
+	var loot_data: Dictionary = _loot_orbs[loot_orb_id] as Dictionary
+	loot_data["active"] = false
+	_loot_orbs[loot_orb_id] = loot_data
+	_loot_orbs.erase(loot_orb_id)
+	rpc("despawn_loot_orb", loot_orb_id)
+	rpc_id(peer_id, "apply_status_message", peer_id, "Picked up loot")
 
 
 func _process_combat_abilities() -> void:
@@ -701,6 +776,19 @@ func _send_position_snapshots(target_peer_id: int) -> void:
 		rpc_id(target_peer_id, "apply_position_snapshot", peer_id_int, position, facing_direction)
 
 
+func _sync_loot_orbs_to_peer(peer_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+
+	for loot_orb_id in _loot_orbs:
+		var loot_data: Dictionary = _loot_orbs[loot_orb_id] as Dictionary
+		if not bool(loot_data.get("active", false)):
+			continue
+
+		var loot_position: Vector3 = loot_data.get("position", Vector3.ZERO) as Vector3
+		rpc_id(peer_id, "spawn_loot_orb", int(loot_orb_id), loot_position)
+
+
 func _smooth_spawned_players(delta: float) -> void:
 	var weight: float = clamp(interpolation_speed * delta, 0.0, 1.0)
 	for peer_id in _spawned_nodes:
@@ -882,6 +970,11 @@ func apply_ability_catalog_update(peer_id: int, unlocked_abilities: Array) -> vo
 @rpc("authority", "call_remote", "reliable")
 func apply_ability_unlock_message(peer_id: int, display_name: String) -> void:
 	ability_unlock_message_received.emit(peer_id, display_name)
+
+
+@rpc("authority", "call_remote", "reliable")
+func apply_status_message(peer_id: int, message: String) -> void:
+	status_message_received.emit(peer_id, message)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -1159,6 +1252,44 @@ func show_firebolt(peer_id: int, firebolt_position: Vector3, aim_direction: Vect
 
 
 @rpc("authority", "call_remote", "reliable")
+func spawn_loot_orb(loot_orb_id: int, loot_position: Vector3) -> void:
+	if multiplayer.is_server():
+		return
+	if _spawned_loot_orb_nodes.has(loot_orb_id):
+		var existing_orb: Node3D = _spawned_loot_orb_nodes[loot_orb_id] as Node3D
+		existing_orb.position = loot_position + Vector3(0.0, 0.45, 0.0)
+		return
+
+	var orb: MeshInstance3D = MeshInstance3D.new()
+	var orb_mesh: SphereMesh = SphereMesh.new()
+	orb_mesh.radius = 0.35
+	orb_mesh.height = 0.7
+	orb.mesh = orb_mesh
+
+	var material: StandardMaterial3D = StandardMaterial3D.new()
+	material.albedo_color = Color(1.0, 0.86, 0.18, 1.0)
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.emission_enabled = true
+	material.emission = Color(1.0, 0.7, 0.1, 1.0)
+	material.emission_energy_multiplier = 0.8
+	orb.material_override = material
+	orb.name = "LootOrb_%s" % loot_orb_id
+	orb.position = loot_position + Vector3(0.0, 0.45, 0.0)
+	add_child(orb)
+	_spawned_loot_orb_nodes[loot_orb_id] = orb
+
+
+@rpc("authority", "call_remote", "reliable")
+func despawn_loot_orb(loot_orb_id: int) -> void:
+	if not _spawned_loot_orb_nodes.has(loot_orb_id):
+		return
+
+	var orb: Node3D = _spawned_loot_orb_nodes[loot_orb_id] as Node3D
+	orb.queue_free()
+	_spawned_loot_orb_nodes.erase(loot_orb_id)
+
+
+@rpc("authority", "call_remote", "reliable")
 func despawn_player(peer_id: int) -> void:
 	if not _spawned_nodes.has(peer_id):
 		return
@@ -1209,6 +1340,10 @@ func _apply_player_facing(player: Node3D, facing_direction: Vector2) -> void:
 
 	var normalized_facing: Vector2 = facing_direction.normalized()
 	player.rotation.y = atan2(-normalized_facing.x, -normalized_facing.y)
+
+
+func _distance_xz(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
 
 
 func _is_local_player_peer(peer_id: int) -> bool:

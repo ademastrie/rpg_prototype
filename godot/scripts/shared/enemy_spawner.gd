@@ -204,6 +204,13 @@ func get_enemy_xp_reward(enemy_id: int) -> int:
 	return _enemy_definition_int(enemy_id, "xp_reward", 0)
 
 
+func get_authoritative_enemy_position(enemy_id: int) -> Vector3:
+	if not multiplayer.is_server() or not enemies.has(enemy_id):
+		return Vector3.ZERO
+
+	return enemies[enemy_id] as Vector3
+
+
 func _process(delta: float) -> void:
 	if not multiplayer.is_server():
 		_smooth_spawned_enemies(delta)
