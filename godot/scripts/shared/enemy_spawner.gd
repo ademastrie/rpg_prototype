@@ -13,6 +13,12 @@ signal initial_enemy_batch_received(count: int)
 @export var basic_attack_damage: int = 10
 @export var basic_attack_range: float = 4.0
 @export var basic_attack_cone_dot: float = 0.65
+@export var melee_attack_enabled: bool = true
+@export var melee_attack_range: float = 2.0
+@export var melee_attack_radius: float = 1.75
+@export var melee_attack_damage: int = 15
+@export var melee_attack_windup_seconds: float = 0.65
+@export var melee_attack_recovery_seconds: float = 0.75
 @export var respawn_delay_seconds: float = 5.0
 @export var debug_enemy_return_logs: bool = false
 @export var debug_enemy_snap_logs: bool = false
@@ -34,6 +40,10 @@ var _returning_enemy_ids: Dictionary = {}
 var _enemy_return_regen_progress: Dictionary = {}
 var _enemy_return_log_last_seconds: Dictionary = {}
 var _enemy_previous_authoritative_positions: Dictionary = {}
+var _enemy_melee_windup_until: Dictionary = {}
+var _enemy_melee_recovery_until: Dictionary = {}
+var _enemy_melee_target_peer: Dictionary = {}
+var _enemy_melee_attack_positions: Dictionary = {}
 var _next_enemy_id: int = 1
 var _idle_time: float = 0.0
 var _snapshot_accumulator: float = 0.0
@@ -230,6 +240,7 @@ func _despawn_enemy(enemy_id: int) -> void:
 	_forced_aggro_until_by_enemy.erase(enemy_id)
 	_proximity_aggro_peer_by_enemy.erase(enemy_id)
 	_proximity_aggro_until_by_enemy.erase(enemy_id)
+	_clear_enemy_melee_attack(enemy_id)
 	_returning_enemy_ids.erase(enemy_id)
 	_enemy_return_regen_progress.erase(enemy_id)
 	_enemy_return_log_last_seconds.erase(enemy_id)
@@ -271,6 +282,7 @@ func _respawn_enemy(enemy_id: int, spawn_position: Vector3) -> void:
 	_forced_aggro_until_by_enemy.erase(enemy_id)
 	_proximity_aggro_peer_by_enemy.erase(enemy_id)
 	_proximity_aggro_until_by_enemy.erase(enemy_id)
+	_clear_enemy_melee_attack(enemy_id)
 	_returning_enemy_ids.erase(enemy_id)
 	_enemy_return_regen_progress.erase(enemy_id)
 	_enemy_return_log_last_seconds.erase(enemy_id)
@@ -286,9 +298,14 @@ func _update_enemy_positions(delta: float) -> void:
 		var enemy_position: Vector3 = enemies[enemy_id] as Vector3
 		var spawn_position: Vector3 = _enemy_spawn_points.get(enemy_id_int, enemy_position) as Vector3
 		if _returning_enemy_ids.has(enemy_id_int):
+			_clear_enemy_melee_attack(enemy_id_int)
 			var return_position: Vector3 = _return_position(enemy_id_int, enemy_position, spawn_position, delta)
 			enemies[enemy_id] = return_position
 			_log_server_enemy_snap(enemy_id_int, enemy_position, return_position, delta, "returning", _target_peer_for_enemy(enemy_id_int))
+			continue
+
+		if _update_enemy_melee_windup(enemy_id_int):
+			_log_server_enemy_snap(enemy_id_int, enemy_position, enemy_position, delta, "melee_windup", _target_peer_for_enemy(enemy_id_int))
 			continue
 
 		var target: Dictionary = _aggro_target_for_enemy(enemy_id_int, enemy_position, alive_player_positions)
@@ -300,6 +317,11 @@ func _update_enemy_positions(delta: float) -> void:
 				var target_return_position: Vector3 = _return_position(enemy_id_int, enemy_position, spawn_position, delta)
 				enemies[enemy_id] = target_return_position
 				_log_server_enemy_snap(enemy_id_int, enemy_position, target_return_position, delta, "entering_return", target_peer_id)
+				continue
+
+			if _can_start_enemy_melee_attack(enemy_id_int, enemy_position, target_position):
+				_start_enemy_melee_attack(enemy_id_int, enemy_position, target_peer_id)
+				_log_server_enemy_snap(enemy_id_int, enemy_position, enemy_position, delta, "melee_start", target_peer_id)
 				continue
 
 			var chase_position: Vector3 = _chase_position(enemy_position, target_position, delta)
@@ -453,6 +475,74 @@ func _set_forced_aggro(enemy_id: int, attacker_peer_id: int) -> void:
 	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
 	_forced_aggro_peer_by_enemy[enemy_id] = attacker_peer_id
 	_forced_aggro_until_by_enemy[enemy_id] = now_seconds + _enemy_definition_float("forced_aggro_seconds", 16.0)
+
+
+func _can_start_enemy_melee_attack(enemy_id: int, enemy_position: Vector3, target_position: Vector3) -> bool:
+	if not melee_attack_enabled or melee_attack_damage <= 0 or melee_attack_range <= 0.0 or melee_attack_radius <= 0.0:
+		return false
+	if _enemy_melee_windup_until.has(enemy_id):
+		return false
+
+	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
+	var recovery_until: float = float(_enemy_melee_recovery_until.get(enemy_id, 0.0))
+	if now_seconds < recovery_until:
+		return false
+
+	return _distance_xz(enemy_position, target_position) <= melee_attack_range
+
+
+func _start_enemy_melee_attack(enemy_id: int, enemy_position: Vector3, target_peer_id: int) -> void:
+	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
+	var windup_seconds: float = max(melee_attack_windup_seconds, 0.01)
+	_enemy_melee_windup_until[enemy_id] = now_seconds + windup_seconds
+	_enemy_melee_target_peer[enemy_id] = target_peer_id
+	_enemy_melee_attack_positions[enemy_id] = enemy_position
+	rpc("show_enemy_melee_telegraph", enemy_id, enemy_position, melee_attack_radius, windup_seconds)
+
+
+func _update_enemy_melee_windup(enemy_id: int) -> bool:
+	if not _enemy_melee_windup_until.has(enemy_id):
+		return false
+
+	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
+	if now_seconds < float(_enemy_melee_windup_until.get(enemy_id, 0.0)):
+		return true
+
+	_resolve_enemy_melee_attack(enemy_id)
+	return false
+
+
+func _resolve_enemy_melee_attack(enemy_id: int) -> void:
+	var target_peer_id: int = int(_enemy_melee_target_peer.get(enemy_id, 0))
+	var attack_position: Vector3 = _enemy_melee_attack_positions.get(enemy_id, Vector3.ZERO) as Vector3
+	_clear_enemy_melee_windup(enemy_id)
+	_enemy_melee_recovery_until[enemy_id] = float(Time.get_ticks_msec()) / 1000.0 + max(melee_attack_recovery_seconds, 0.0)
+
+	if target_peer_id <= 0:
+		return
+
+	var alive_player_positions: Dictionary = _get_alive_player_positions()
+	if not alive_player_positions.has(target_peer_id):
+		return
+
+	var target_position: Vector3 = alive_player_positions[target_peer_id] as Vector3
+	if _distance_xz(attack_position, target_position) > melee_attack_radius:
+		return
+
+	var world_spawner: Node = get_node_or_null("../WorldSpawner")
+	if world_spawner != null:
+		world_spawner.call("apply_enemy_melee_damage", target_peer_id, melee_attack_damage)
+
+
+func _clear_enemy_melee_windup(enemy_id: int) -> void:
+	_enemy_melee_windup_until.erase(enemy_id)
+	_enemy_melee_target_peer.erase(enemy_id)
+	_enemy_melee_attack_positions.erase(enemy_id)
+
+
+func _clear_enemy_melee_attack(enemy_id: int) -> void:
+	_clear_enemy_melee_windup(enemy_id)
+	_enemy_melee_recovery_until.erase(enemy_id)
 
 
 func _is_peer_alive(peer_id: int) -> bool:
@@ -815,6 +905,35 @@ func show_enemy_hit(enemy_id: int, current_hp: int, max_hp: int) -> void:
 	var enemy: Node3D = _spawned_enemy_nodes[enemy_id] as Node3D
 	_set_enemy_label(enemy, enemy_id, current_hp, max_hp)
 	print("Enemy %s hit. HP: %s/%s" % [enemy_id, current_hp, max_hp])
+
+
+@rpc("authority", "call_remote", "reliable")
+func show_enemy_melee_telegraph(enemy_id: int, attack_position: Vector3, radius: float, windup_seconds: float) -> void:
+	if radius <= 0.0:
+		return
+
+	var marker: MeshInstance3D = MeshInstance3D.new()
+	var marker_mesh: CylinderMesh = CylinderMesh.new()
+	marker_mesh.top_radius = radius
+	marker_mesh.bottom_radius = radius
+	marker_mesh.height = 0.08
+	marker.mesh = marker_mesh
+
+	var material: StandardMaterial3D = StandardMaterial3D.new()
+	material.albedo_color = Color(1.0, 0.1, 0.05, 0.35)
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	marker.material_override = material
+	marker.name = "EnemyMeleeTelegraph_%s" % enemy_id
+	marker.position = attack_position + Vector3(0.0, 0.1, 0.0)
+	add_child(marker)
+
+	var cleanup_timer: Timer = Timer.new()
+	cleanup_timer.one_shot = true
+	cleanup_timer.wait_time = max(windup_seconds, 0.05)
+	marker.add_child(cleanup_timer)
+	cleanup_timer.timeout.connect(marker.queue_free)
+	cleanup_timer.start()
 
 
 @rpc("authority", "call_remote", "reliable")

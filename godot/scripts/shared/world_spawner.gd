@@ -23,6 +23,7 @@ signal ability_loadout_update_requested(peer_id: int, loadout_entries: Array)
 @export var local_prediction_correction_speed: float = 4.0
 @export var basic_attack_cooldown_seconds: float = 0.75
 @export var player_max_hp: int = 100
+@export var enemy_contact_damage_enabled: bool = false
 @export var enemy_contact_range: float = 1.75
 @export var enemy_contact_damage: int = 10
 @export var enemy_contact_damage_interval: float = 1.0
@@ -261,6 +262,9 @@ func _simulate(delta: float) -> void:
 
 
 func _apply_enemy_contact_damage(_delta: float) -> void:
+	if not enemy_contact_damage_enabled or enemy_contact_damage <= 0 or enemy_contact_range <= 0.0:
+		return
+
 	var enemy_spawner: Node = get_node_or_null("../EnemySpawner")
 	if enemy_spawner == null:
 		return
@@ -282,13 +286,28 @@ func _apply_enemy_contact_damage(_delta: float) -> void:
 
 		var player_position: Vector3 = players[peer_id] as Vector3
 		if _is_enemy_in_contact_range(player_position, enemy_positions):
-			current_hp = max(current_hp - enemy_contact_damage, 0)
-			_player_current_hp_by_peer[peer_id] = current_hp
-			_last_contact_damage_time_by_peer[peer_id] = now_seconds
-			var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
-			rpc("apply_player_health_update", peer_id_int, current_hp, max_hp)
-			if current_hp <= 0:
-				_mark_player_down(peer_id_int)
+			if apply_enemy_melee_damage(peer_id_int, enemy_contact_damage):
+				_last_contact_damage_time_by_peer[peer_id] = now_seconds
+
+
+func apply_enemy_melee_damage(peer_id: int, damage: int) -> bool:
+	if not multiplayer.is_server() or damage <= 0 or not players.has(peer_id):
+		return false
+	if bool(_player_is_down_by_peer.get(peer_id, false)):
+		return false
+
+	var current_hp: int = int(_player_current_hp_by_peer.get(peer_id, player_max_hp))
+	if current_hp <= 0:
+		return false
+
+	current_hp = max(current_hp - damage, 0)
+	_player_current_hp_by_peer[peer_id] = current_hp
+	var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
+	rpc("apply_player_health_update", peer_id, current_hp, max_hp)
+	if current_hp <= 0:
+		_mark_player_down(peer_id)
+
+	return true
 
 
 func _mark_player_down(peer_id: int) -> void:
