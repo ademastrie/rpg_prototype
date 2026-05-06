@@ -176,11 +176,16 @@
 - `_equipment_display_text(slot_name: String) -> String:`
 - `_refresh_equipment_slot_options() -> void:`
 - `_confirmed_item_key_for_slot(slot_name: String) -> String:`
+- `_confirmed_equipment_item_for_slot(slot_name: String) -> Dictionary:`
+- `_add_equipment_option(option: OptionButton, item_key: String, display_name: String, quantity: int) -> void:`
+- `_equipment_item_display_name(item: Dictionary, item_key: String) -> String:`
 - `_eligible_inventory_items_for_slot(slot_name: String) -> Array:`
 - `_inventory_item_equip_slot(item: Dictionary) -> String:`
 - `_select_equipment_option(option: OptionButton, item_key: String) -> void:`
+- `_equipment_metadata_item_key(metadata: Variant) -> String:`
 - `_refresh_inventory_panel() -> void:`
 - `_confirmed_equipped_item_keys() -> Array[String]:`
+- `_confirmed_equipped_item_keys_except(excluded_slot_name: String) -> Array[String]:`
 - `_refresh_ability_panel_options() -> void:`
 - `_refresh_ability_panel_rows() -> void:`
 - `_select_ability_option(option: OptionButton, ability_key: String) -> void:`
@@ -351,6 +356,7 @@
 - `_on_character_equipment_completed(`
 - `_on_equipment_update_requested(peer_id: int, equipment_entries: Array) -> void:`
 - `_on_equipment_update_completed(`
+- `_restore_confirmed_equipment_for_peer(peer_id: int, message: String) -> void:`
 - `_extract_character_equipment(response_data: Dictionary) -> Dictionary:`
 - `_empty_character_equipment() -> Dictionary:`
 - `_equipment_entry_candidates(response_data: Dictionary) -> Array:`
