@@ -27,6 +27,12 @@ const LEVEL_UNLOCK_REWARDS: Array[Dictionary] = [
 const PROTOTYPE_ITEM_DISPLAY_NAMES: Dictionary = {
 	"slime_gel": "Slime Gel",
 }
+const PROTOTYPE_EQUIP_SLOT_BY_ITEM_KEY: Dictionary = {
+	"training_sword": "weapon",
+	"apprentice_staff": "weapon",
+	"simple_bow": "weapon",
+	"padded_chest": "chest",
+}
 const EQUIPMENT_SLOTS: Array[String] = ["weapon", "head", "chest", "arms", "hands", "legs", "feet"]
 
 
@@ -41,6 +47,7 @@ func _start_server() -> void:
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	world_spawner.join_requested.connect(_on_join_requested)
 	world_spawner.ability_loadout_update_requested.connect(_on_ability_loadout_update_requested)
+	world_spawner.equipment_update_requested.connect(_on_equipment_update_requested)
 	world_spawner.loot_reward_pickup_requested.connect(_on_loot_reward_pickup_requested)
 	enemy_spawner.connect("enemy_killed", Callable(self, "_on_enemy_killed"))
 
@@ -321,7 +328,72 @@ func _complete_validated_join(peer_id: int, session: Dictionary, loadout_data: D
 	_log_join_timing(peer_id, "initial enemy sync sent")
 	_log_join_timing(peer_id, "total join accept time")
 	_join_timing_start_msec_by_peer.erase(peer_id)
+	_fetch_character_inventory_for_session(peer_id)
 	_fetch_character_equipment_for_session(peer_id)
+
+
+func _fetch_character_inventory_for_session(peer_id: int) -> void:
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	if not bool(session.get("joined", false)):
+		return
+
+	var access_token: String = str(session.get("access_token", ""))
+	var character_id: int = int(session.get("character_id", 0))
+	if access_token.strip_edges() == "" or character_id <= 0:
+		print("Cannot load inventory for peer %s: missing validated session data." % peer_id)
+		return
+
+	var request: HTTPRequest = HTTPRequest.new()
+	add_child(request)
+	request.request_completed.connect(_on_character_inventory_completed.bind(peer_id, request))
+
+	var headers: PackedStringArray = PackedStringArray([
+		"Content-Type: application/json",
+		"Authorization: Bearer %s" % access_token,
+	])
+	var url: String = "%s/characters/%s/inventory" % [_normalized_backend_base_url(), character_id]
+	var error: Error = request.request(url, headers, HTTPClient.METHOD_GET)
+	if error != OK:
+		print("Failed to start inventory load for peer %s: %s" % [peer_id, error])
+		request.queue_free()
+
+
+func _on_character_inventory_completed(
+	result: int,
+	response_code: int,
+	_headers: PackedStringArray,
+	body: PackedByteArray,
+	peer_id: int,
+	request: HTTPRequest
+) -> void:
+	request.queue_free()
+	if not connected_peers.has(peer_id):
+		return
+
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	if not bool(session.get("joined", false)):
+		return
+
+	var response_text: String = body.get_string_from_utf8()
+	if result != HTTPRequest.RESULT_SUCCESS:
+		print("Inventory load failed for peer %s: HTTPRequest result %s." % [peer_id, result])
+		return
+
+	var json: JSON = JSON.new()
+	var parse_error: Error = json.parse(response_text)
+	if parse_error != OK or not (json.data is Dictionary):
+		print("Inventory load returned invalid JSON for peer %s. status=%s response=%s" % [peer_id, response_code, response_text])
+		return
+
+	var response_data: Dictionary = json.data as Dictionary
+	if response_code < 200 or response_code >= 300:
+		print("Inventory load rejected peer %s: status=%s response=%s" % [peer_id, response_code, response_data])
+		return
+
+	var confirmed_inventory: Array = _extract_inventory_items(response_data)
+	session["inventory_items"] = confirmed_inventory
+	peer_sessions[peer_id] = session
+	world_spawner.call("apply_confirmed_character_inventory", peer_id, confirmed_inventory)
 
 
 func _fetch_character_equipment_for_session(peer_id: int) -> void:
@@ -383,6 +455,89 @@ func _on_character_equipment_completed(
 		return
 	if int(response_data.get("character_id", int(session.get("character_id", 0)))) != int(session.get("character_id", 0)):
 		print("Equipment load ignored for peer %s: character id mismatch." % peer_id)
+		return
+
+	var confirmed_equipment: Dictionary = _extract_character_equipment(response_data)
+	session["equipment"] = confirmed_equipment
+	peer_sessions[peer_id] = session
+	world_spawner.call("apply_confirmed_character_equipment", peer_id, confirmed_equipment)
+
+
+func _on_equipment_update_requested(peer_id: int, equipment_entries: Array) -> void:
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	if not bool(session.get("joined", false)):
+		return
+
+	var access_token: String = str(session.get("access_token", ""))
+	var character_id: int = int(session.get("character_id", 0))
+	if access_token.strip_edges() == "" or character_id <= 0:
+		print("Rejecting equipment update for peer %s: missing validated session data." % peer_id)
+		return
+
+	var backend_entries: Array = []
+	for entry_variant in equipment_entries:
+		if not (entry_variant is Dictionary):
+			continue
+
+		var entry: Dictionary = entry_variant as Dictionary
+		var slot_name: String = str(entry.get("slot", "")).strip_edges().to_lower()
+		if not EQUIPMENT_SLOTS.has(slot_name):
+			continue
+
+		var item_key: String = str(entry.get("item_key", "")).strip_edges()
+		var backend_entry: Dictionary = {"slot": slot_name}
+		if item_key == "":
+			backend_entry["item_key"] = null
+		else:
+			backend_entry["item_key"] = item_key
+		backend_entries.append(backend_entry)
+
+	var request: HTTPRequest = HTTPRequest.new()
+	add_child(request)
+	request.request_completed.connect(_on_equipment_update_completed.bind(peer_id, request))
+
+	var headers: PackedStringArray = PackedStringArray([
+		"Content-Type: application/json",
+		"Authorization: Bearer %s" % access_token,
+	])
+	var body: String = JSON.stringify({"equipment": backend_entries})
+	var url: String = "%s/characters/%s/equipment" % [_normalized_backend_base_url(), character_id]
+	var error: Error = request.request(url, headers, HTTPClient.METHOD_PUT, body)
+	if error != OK:
+		print("Failed to start backend equipment update for peer %s: %s" % [peer_id, error])
+		request.queue_free()
+
+
+func _on_equipment_update_completed(
+	result: int,
+	response_code: int,
+	_headers: PackedStringArray,
+	body: PackedByteArray,
+	peer_id: int,
+	request: HTTPRequest
+) -> void:
+	request.queue_free()
+	if not connected_peers.has(peer_id):
+		return
+
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	if not bool(session.get("joined", false)):
+		return
+
+	var response_text: String = body.get_string_from_utf8()
+	if result != HTTPRequest.RESULT_SUCCESS:
+		print("Backend equipment update failed for peer %s: HTTPRequest result %s." % [peer_id, result])
+		return
+
+	var json: JSON = JSON.new()
+	var parse_error: Error = json.parse(response_text)
+	if parse_error != OK or not (json.data is Dictionary):
+		print("Backend equipment update returned invalid JSON for peer %s. status=%s response=%s" % [peer_id, response_code, response_text])
+		return
+
+	var response_data: Dictionary = json.data as Dictionary
+	if response_code < 200 or response_code >= 300:
+		print("Backend equipment update rejected peer %s: status=%s response=%s" % [peer_id, response_code, response_data])
 		return
 
 	var confirmed_equipment: Dictionary = _extract_character_equipment(response_data)
@@ -894,6 +1049,10 @@ func _extract_inventory_items(response_data: Dictionary) -> Array:
 	var candidates: Array = []
 	if response_data.get("items", null) is Array:
 		candidates = response_data.get("items", []) as Array
+	elif response_data.get("inventory_items", null) is Array:
+		candidates = response_data.get("inventory_items", []) as Array
+	elif response_data.get("inventory", null) is Array:
+		candidates = response_data.get("inventory", []) as Array
 	elif response_data.get("inventory", null) is Dictionary:
 		var inventory: Dictionary = response_data.get("inventory", {}) as Dictionary
 		if inventory.get("items", null) is Array:
@@ -927,10 +1086,16 @@ func _merge_confirmed_inventory_item(existing_inventory: Array, confirmed_item: 
 
 	var quantity: int = int(confirmed_item.get("quantity", fallback_quantity))
 	var display_name: String = str(confirmed_item.get("display_name", _display_name_for_item_payload(item_key, fallback_display_name))).strip_edges()
+	var equip_slot: String = str(confirmed_item.get("equip_slot", "")).strip_edges().to_lower()
+	var item_type: String = str(confirmed_item.get("item_type", "")).strip_edges().to_lower()
+	if equip_slot == "":
+		equip_slot = _fallback_equip_slot_for_item_key(item_key)
 	merged_by_key[item_key] = {
 		"item_key": item_key,
 		"display_name": display_name if display_name != "" else _display_name_for_item_payload(item_key, fallback_display_name),
 		"quantity": max(quantity, 0),
+		"equip_slot": equip_slot,
+		"item_type": item_type,
 	}
 	return merged_by_key.values()
 
@@ -949,12 +1114,54 @@ func _normalize_inventory_item(item_data: Dictionary) -> Dictionary:
 	if display_name == "" and item_data.get("item", null) is Dictionary:
 		var nested_item: Dictionary = item_data.get("item", {}) as Dictionary
 		display_name = str(nested_item.get("display_name", "")).strip_edges()
+	var quantity: int = max(int(item_data.get("quantity", item_data.get("count", 0))), 0)
+	var equip_slot: String = ""
+	var item_type: String = ""
+	if item_data.get("equip_slot", null) != null:
+		equip_slot = str(item_data.get("equip_slot", "")).strip_edges().to_lower()
+	elif item_data.get("equipment_slot", null) != null:
+		equip_slot = str(item_data.get("equipment_slot", "")).strip_edges().to_lower()
+	elif item_data.get("slot", null) != null:
+		equip_slot = str(item_data.get("slot", "")).strip_edges().to_lower()
+	if item_data.get("item_type", null) != null:
+		item_type = str(item_data.get("item_type", "")).strip_edges().to_lower()
+
+	var definition: Dictionary = _inventory_item_definition(item_data)
+	if equip_slot == "":
+		equip_slot = str(definition.get("equip_slot", definition.get("equipment_slot", definition.get("slot", "")))).strip_edges().to_lower()
+	if item_type == "":
+		item_type = str(definition.get("item_type", "")).strip_edges().to_lower()
+	if display_name == "":
+		display_name = str(definition.get("display_name", "")).strip_edges()
+	if quantity <= 0:
+		var nested_item_data: Dictionary = item_data.get("item", {}) as Dictionary
+		quantity = max(int(nested_item_data.get("quantity", nested_item_data.get("count", 0))), 0)
+	if equip_slot == "":
+		equip_slot = _fallback_equip_slot_for_item_key(item_key)
 
 	return {
 		"item_key": item_key,
 		"display_name": display_name if display_name != "" else _display_name_for_item_payload(item_key, ""),
-		"quantity": max(int(item_data.get("quantity", item_data.get("count", 0))), 0),
+		"quantity": quantity,
+		"equip_slot": equip_slot,
+		"item_type": item_type,
 	}
+
+
+func _inventory_item_definition(item_data: Dictionary) -> Dictionary:
+	if item_data.get("definition", null) is Dictionary:
+		return item_data.get("definition", {}) as Dictionary
+
+	if item_data.get("item", null) is Dictionary:
+		var nested_item: Dictionary = item_data.get("item", {}) as Dictionary
+		if nested_item.get("definition", null) is Dictionary:
+			return nested_item.get("definition", {}) as Dictionary
+
+	return {}
+
+
+func _fallback_equip_slot_for_item_key(item_key: String) -> String:
+	return str(PROTOTYPE_EQUIP_SLOT_BY_ITEM_KEY.get(item_key, "")).strip_edges().to_lower()
 
 
 func _display_name_for_item_payload(item_key: String, fallback_display_name: String) -> String:

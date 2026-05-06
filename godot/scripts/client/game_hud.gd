@@ -3,6 +3,7 @@ extends CanvasLayer
 signal combat_toggle_requested
 signal ability_toggle_requested(ability_name: String, enabled: bool)
 signal loadout_save_requested(loadout_entries: Array)
+signal equipment_save_requested(equipment_entries: Array)
 
 const HOTBAR_SLOT_COUNT: int = 5
 const PANEL_BACKGROUND_COLOR: Color = Color(0.05, 0.06, 0.07, 0.92)
@@ -45,6 +46,8 @@ var _character_gold_label: Label = null
 var _character_max_hp_label: Label = null
 var _character_damage_reduction_label: Label = null
 var _equipment_slot_labels: Dictionary = {}
+var _equipment_slot_options: Dictionary = {}
+var _equipment_panel_status: Label = null
 
 var _message_timer: SceneTreeTimer = null
 var _ability_enabled_by_name: Dictionary = {}
@@ -67,6 +70,7 @@ var _current_xp_to_next: int = 100
 var _current_gold: int = 0
 var _confirmed_inventory_items: Array = []
 var _confirmed_equipment: Dictionary = {}
+var _is_equipment_save_pending: bool = false
 var _current_max_hp: int = 100
 var _current_damage_reduction: float = 0.0
 var _dragged_panel: Control = null
@@ -124,11 +128,16 @@ func update_gold(gold: int) -> void:
 func update_inventory_items(inventory_items: Array) -> void:
 	_confirmed_inventory_items = inventory_items.duplicate(true)
 	_refresh_inventory_panel()
+	_refresh_equipment_slot_options()
 
 
 func update_equipment(equipment: Dictionary) -> void:
 	_confirmed_equipment = equipment.duplicate(true)
+	_is_equipment_save_pending = false
+	if _equipment_panel_status != null:
+		_equipment_panel_status.text = "Saved."
 	_refresh_character_panel()
+	_refresh_equipment_slot_options()
 
 
 func update_down_state(is_down: bool) -> void:
@@ -367,6 +376,30 @@ func _build_character_panel() -> void:
 		var slot_label: Label = _add_label(panel_vbox, "")
 		slot_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_equipment_slot_labels[slot_name] = slot_label
+
+		var slot_row: HBoxContainer = HBoxContainer.new()
+		slot_row.add_theme_constant_override("separation", 6)
+		panel_vbox.add_child(slot_row)
+
+		var option: OptionButton = OptionButton.new()
+		option.custom_minimum_size = Vector2(210.0, 0.0)
+		option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_apply_button_text_colors(option)
+		slot_row.add_child(option)
+		_equipment_slot_options[slot_name] = option
+
+	var equipment_action_row: HBoxContainer = HBoxContainer.new()
+	equipment_action_row.add_theme_constant_override("separation", 6)
+	panel_vbox.add_child(equipment_action_row)
+
+	var equipment_save_button: Button = Button.new()
+	equipment_save_button.text = "Save Equipment"
+	_apply_button_text_colors(equipment_save_button)
+	equipment_save_button.pressed.connect(_on_save_equipment_pressed)
+	equipment_action_row.add_child(equipment_save_button)
+
+	_equipment_panel_status = _add_label(panel_vbox, "")
+	_refresh_equipment_slot_options()
 	_refresh_character_panel()
 
 
@@ -581,6 +614,85 @@ func _equipment_display_text(slot_name: String) -> String:
 
 	var item_key: String = str(equipment_item.get("item_key", "")).strip_edges()
 	return item_key if item_key != "" else "Empty"
+
+
+func _refresh_equipment_slot_options() -> void:
+	for slot_name in EQUIPMENT_SLOTS:
+		if not _equipment_slot_options.has(slot_name):
+			continue
+
+		var option: OptionButton = _equipment_slot_options[slot_name] as OptionButton
+		var confirmed_item_key: String = _confirmed_item_key_for_slot(slot_name)
+		option.clear()
+		option.add_item("Unequip")
+		option.set_item_metadata(0, "")
+
+		for item in _eligible_inventory_items_for_slot(slot_name):
+			var item_key: String = str(item.get("item_key", "")).strip_edges()
+			if item_key == "":
+				continue
+			var display_name: String = str(item.get("display_name", item_key)).strip_edges()
+			var quantity: int = max(int(item.get("quantity", 0)), 0)
+			option.add_item("%s x%s" % [display_name if display_name != "" else item_key, quantity])
+			option.set_item_metadata(option.get_item_count() - 1, item_key)
+
+		_select_equipment_option(option, confirmed_item_key)
+
+
+func _confirmed_item_key_for_slot(slot_name: String) -> String:
+	var slot_data: Variant = _confirmed_equipment.get(slot_name, {})
+	if not (slot_data is Dictionary):
+		return ""
+
+	return str((slot_data as Dictionary).get("item_key", "")).strip_edges()
+
+
+func _eligible_inventory_items_for_slot(slot_name: String) -> Array:
+	var eligible_items: Array = []
+	for item_variant in _confirmed_inventory_items:
+		if not (item_variant is Dictionary):
+			continue
+
+		var item: Dictionary = item_variant as Dictionary
+		if _inventory_item_equip_slot(item) != slot_name:
+			continue
+		if int(item.get("quantity", 0)) <= 0:
+			continue
+		eligible_items.append(item)
+
+	return eligible_items
+
+
+func _inventory_item_equip_slot(item: Dictionary) -> String:
+	var slot_name: String = str(item.get("equip_slot", item.get("equipment_slot", item.get("slot", "")))).strip_edges().to_lower()
+	if slot_name != "":
+		return slot_name
+
+	if item.get("definition", null) is Dictionary:
+		var definition: Dictionary = item.get("definition", {}) as Dictionary
+		slot_name = str(definition.get("equip_slot", definition.get("equipment_slot", definition.get("slot", "")))).strip_edges().to_lower()
+		if slot_name != "":
+			return slot_name
+
+	if item.get("item", null) is Dictionary:
+		var nested_item: Dictionary = item.get("item", {}) as Dictionary
+		slot_name = str(nested_item.get("equip_slot", nested_item.get("equipment_slot", nested_item.get("slot", "")))).strip_edges().to_lower()
+		if slot_name != "":
+			return slot_name
+		if nested_item.get("definition", null) is Dictionary:
+			var nested_definition: Dictionary = nested_item.get("definition", {}) as Dictionary
+			slot_name = str(nested_definition.get("equip_slot", nested_definition.get("equipment_slot", nested_definition.get("slot", "")))).strip_edges().to_lower()
+
+	return slot_name
+
+
+func _select_equipment_option(option: OptionButton, item_key: String) -> void:
+	for item_index in range(option.get_item_count()):
+		if str(option.get_item_metadata(item_index)).strip_edges() == item_key:
+			option.select(item_index)
+			return
+
+	option.select(0)
 
 
 func _refresh_inventory_panel() -> void:
@@ -1019,6 +1131,30 @@ func _on_save_loadout_pressed() -> void:
 	_is_loadout_save_pending = true
 	_pending_loadout_entries = _duplicate_loadout_entries(loadout_entries)
 	loadout_save_requested.emit(loadout_entries)
+
+
+func _on_save_equipment_pressed() -> void:
+	var equipment_entries: Array = []
+	for slot_name in EQUIPMENT_SLOTS:
+		if not _equipment_slot_options.has(slot_name):
+			continue
+
+		var option: OptionButton = _equipment_slot_options[slot_name] as OptionButton
+		var selected_index: int = option.selected
+		var item_key: String = ""
+		if selected_index >= 0 and selected_index < option.get_item_count():
+			item_key = str(option.get_item_metadata(selected_index)).strip_edges()
+
+		equipment_entries.append({
+			"slot": slot_name,
+			"item_key": item_key,
+			"unequip": item_key == "",
+		})
+
+	_is_equipment_save_pending = true
+	if _equipment_panel_status != null:
+		_equipment_panel_status.text = "Saving..."
+	equipment_save_requested.emit(equipment_entries)
 
 
 func _on_message_timer_timeout(timer: SceneTreeTimer) -> void:

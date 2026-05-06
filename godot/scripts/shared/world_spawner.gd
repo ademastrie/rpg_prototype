@@ -17,6 +17,7 @@ signal ability_unlock_message_received(peer_id: int, display_name: String)
 signal status_message_received(peer_id: int, message: String)
 signal join_requested(peer_id: int, character_id: int, character_name: String, access_token: String)
 signal ability_loadout_update_requested(peer_id: int, loadout_entries: Array)
+signal equipment_update_requested(peer_id: int, equipment_entries: Array)
 signal loot_reward_pickup_requested(peer_id: int, loot_orb_id: int, reward_payload: Dictionary)
 
 @export var player_placeholder_scene: PackedScene
@@ -1218,6 +1219,42 @@ func request_update_ability_loadout(loadout_entries: Array) -> void:
 		return
 
 	ability_loadout_update_requested.emit(peer_id, loadout_entries)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_update_equipment(equipment_entries: Array) -> void:
+	if not multiplayer.is_server():
+		return
+
+	var peer_id: int = int(multiplayer.get_remote_sender_id())
+	if not players.has(peer_id):
+		return
+	if not _is_valid_equipment_request(equipment_entries):
+		return
+
+	equipment_update_requested.emit(peer_id, equipment_entries)
+
+
+func _is_valid_equipment_request(equipment_entries: Array) -> bool:
+	var allowed_slots: Array[String] = ["weapon", "head", "chest", "arms", "hands", "legs", "feet"]
+	var seen_slots: Array[String] = []
+	for entry_variant in equipment_entries:
+		if not (entry_variant is Dictionary):
+			return false
+
+		var entry: Dictionary = entry_variant as Dictionary
+		var slot_name: String = str(entry.get("slot", "")).strip_edges().to_lower()
+		var item_key: String = str(entry.get("item_key", "")).strip_edges()
+		if not allowed_slots.has(slot_name):
+			return false
+		if seen_slots.has(slot_name):
+			return false
+		if item_key == "" and not bool(entry.get("unequip", false)):
+			return false
+
+		seen_slots.append(slot_name)
+
+	return true
 
 
 func _is_valid_loadout_request(peer_id: int, loadout_entries: Array) -> bool:

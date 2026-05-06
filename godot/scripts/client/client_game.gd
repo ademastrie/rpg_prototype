@@ -61,6 +61,7 @@ func _ready() -> void:
 	game_hud.connect("combat_toggle_requested", Callable(self, "_send_combat_toggle_request"))
 	game_hud.connect("ability_toggle_requested", Callable(self, "_send_ability_toggle_request"))
 	game_hud.connect("loadout_save_requested", Callable(self, "_send_loadout_save_request"))
+	game_hud.connect("equipment_save_requested", Callable(self, "_send_equipment_save_request"))
 	_camera_follow_offset = active_camera.global_position
 	_fixed_camera_basis = active_camera.global_transform.basis
 	_on_spawned_player_count_changed(0)
@@ -454,6 +455,10 @@ func _send_ability_toggle_request(ability_name: String, enabled: bool) -> void:
 
 func _send_loadout_save_request(loadout_entries: Array) -> void:
 	world_spawner.rpc_id(1, "request_update_ability_loadout", loadout_entries)
+
+
+func _send_equipment_save_request(equipment_entries: Array) -> void:
+	world_spawner.rpc_id(1, "request_update_equipment", equipment_entries)
 
 
 func _update_camera_follow(delta: float) -> void:
