@@ -97,6 +97,7 @@
 - `_character_progression_response(character: Character) -> CharacterProgressionResponse:`
 - `_character_currency_response(character: Character) -> CharacterCurrencyResponse:`
 - `_character_inventory_response(character_id: int, db: Session) -> CharacterInventoryResponse:`
+- `_character_equipment_response(character_id: int, db: Session) -> CharacterEquipmentResponse:`
 - `_active_ability_definitions(db: Session) -> list[AbilityDefinition]:`
 - `_get_starter_ability_definition(ability_key: str, db: Session) -> AbilityDefinition:`
 - `_get_ability_definition(ability_key: str, db: Session) -> AbilityDefinition:`
@@ -105,6 +106,7 @@
 - `_ensure_starter_abilities(character_id: int, db: Session) -> None:`
 - `_character_abilities_response(character_id: int, db: Session) -> CharacterAbilitiesResponse:`
 - `_validate_loadout(character_id: int, loadout: list[AbilityLoadoutEntry], db: Session) -> None:`
+- `_validate_equip_slot(equip_slot: str) -> str:`
 - `list_characters(`
 - `create_character(`
 - `get_character(`
@@ -112,6 +114,8 @@
 - `award_character_xp(`
 - `award_character_currency(`
 - `get_character_inventory(`
+- `get_character_equipment(`
+- `update_character_equipment(`
 - `add_character_inventory_item(`
 - `get_character_abilities(`
 - `unlock_character_ability(`
@@ -125,6 +129,8 @@
 - `POST "/{character_id}/xp", response_model=CharacterProgressionResponse`
 - `POST "/{character_id}/currency", response_model=CharacterCurrencyResponse`
 - `GET "/{character_id}/inventory", response_model=CharacterInventoryResponse`
+- `GET "/{character_id}/equipment", response_model=CharacterEquipmentResponse`
+- `PUT "/{character_id}/equipment", response_model=CharacterEquipmentResponse`
 - `POST "/{character_id}/inventory/items", response_model=CharacterInventoryResponse`
 - `GET "/{character_id}/abilities", response_model=CharacterAbilitiesResponse`
 - `POST "/{character_id}/abilities/{ability_key}/unlock", response_model=CharacterAbilitiesResponse`
@@ -141,9 +147,13 @@
 - `CharacterProgressionResponse`
 - `CharacterCurrencyResponse`
 - `ItemDefinitionResponse`
+- `ItemStatModifierResponse`
 - `CharacterInventoryEntryResponse`
 - `CharacterInventoryResponse`
 - `CharacterInventoryItemAdd`
+- `CharacterEquipmentUpdate`
+- `CharacterEquipmentEntryResponse`
+- `CharacterEquipmentResponse`
 - `AbilityEffectResponse`
 - `AbilityDefinitionResponse`
 - `CharacterAbilityResponse`
@@ -268,7 +278,9 @@
 
 ### Classes
 - `ItemDefinition`
+- `ItemStatModifier`
 - `CharacterInventory`
+- `CharacterEquipment`
 
 ### Functions
 - None found

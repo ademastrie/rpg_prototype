@@ -3,7 +3,7 @@ extends CanvasLayer
 signal combat_toggle_requested
 signal ability_toggle_requested(ability_name: String, enabled: bool)
 signal loadout_save_requested(loadout_entries: Array)
-signal equipment_save_requested(equipment_entries: Array)
+signal equipment_change_requested(equipment_entries: Array)
 
 const HOTBAR_SLOT_COUNT: int = 5
 const PANEL_BACKGROUND_COLOR: Color = Color(0.05, 0.06, 0.07, 0.92)
@@ -70,7 +70,8 @@ var _current_xp_to_next: int = 100
 var _current_gold: int = 0
 var _confirmed_inventory_items: Array = []
 var _confirmed_equipment: Dictionary = {}
-var _is_equipment_save_pending: bool = false
+var _is_equipment_change_pending: bool = false
+var _is_refreshing_equipment_ui: bool = false
 var _current_max_hp: int = 100
 var _current_damage_reduction: float = 0.0
 var _dragged_panel: Control = null
@@ -133,10 +134,11 @@ func update_inventory_items(inventory_items: Array) -> void:
 
 func update_equipment(equipment: Dictionary) -> void:
 	_confirmed_equipment = equipment.duplicate(true)
-	_is_equipment_save_pending = false
+	_is_equipment_change_pending = false
 	if _equipment_panel_status != null:
 		_equipment_panel_status.text = "Saved."
 	_refresh_character_panel()
+	_refresh_inventory_panel()
 	_refresh_equipment_slot_options()
 
 
@@ -385,19 +387,11 @@ func _build_character_panel() -> void:
 		option.custom_minimum_size = Vector2(210.0, 0.0)
 		option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_apply_button_text_colors(option)
+		option.item_selected.connect(_on_equipment_option_selected.bind(slot_name))
 		slot_row.add_child(option)
 		_equipment_slot_options[slot_name] = option
 
-	var equipment_action_row: HBoxContainer = HBoxContainer.new()
-	equipment_action_row.add_theme_constant_override("separation", 6)
-	panel_vbox.add_child(equipment_action_row)
-
-	var equipment_save_button: Button = Button.new()
-	equipment_save_button.text = "Save Equipment"
-	_apply_button_text_colors(equipment_save_button)
-	equipment_save_button.pressed.connect(_on_save_equipment_pressed)
-	equipment_action_row.add_child(equipment_save_button)
-
+	# Future equipment UI should become a paper-doll/drag-drop character screen.
 	_equipment_panel_status = _add_label(panel_vbox, "")
 	_refresh_equipment_slot_options()
 	_refresh_character_panel()
@@ -617,6 +611,7 @@ func _equipment_display_text(slot_name: String) -> String:
 
 
 func _refresh_equipment_slot_options() -> void:
+	_is_refreshing_equipment_ui = true
 	for slot_name in EQUIPMENT_SLOTS:
 		if not _equipment_slot_options.has(slot_name):
 			continue
@@ -624,19 +619,30 @@ func _refresh_equipment_slot_options() -> void:
 		var option: OptionButton = _equipment_slot_options[slot_name] as OptionButton
 		var confirmed_item_key: String = _confirmed_item_key_for_slot(slot_name)
 		option.clear()
-		option.add_item("Unequip")
-		option.set_item_metadata(0, "")
+		option.add_item("Empty / Unequip")
+		option.set_item_metadata(0, null)
 
-		for item in _eligible_inventory_items_for_slot(slot_name):
+		var confirmed_item: Dictionary = _confirmed_equipment_item_for_slot(slot_name)
+		if not confirmed_item.is_empty() and confirmed_item_key != "":
+			_add_equipment_option(option, confirmed_item_key, _equipment_item_display_name(confirmed_item, confirmed_item_key), -1)
+
+		var equipped_other_slot_keys: Array[String] = _confirmed_equipped_item_keys_except(slot_name)
+		for item_variant in _eligible_inventory_items_for_slot(slot_name):
+			if not (item_variant is Dictionary):
+				continue
+
+			var item: Dictionary = item_variant as Dictionary
 			var item_key: String = str(item.get("item_key", "")).strip_edges()
 			if item_key == "":
 				continue
-			var display_name: String = str(item.get("display_name", item_key)).strip_edges()
-			var quantity: int = max(int(item.get("quantity", 0)), 0)
-			option.add_item("%s x%s" % [display_name if display_name != "" else item_key, quantity])
-			option.set_item_metadata(option.get_item_count() - 1, item_key)
+			if equipped_other_slot_keys.has(item_key):
+				continue
+
+			_add_equipment_option(option, item_key, _equipment_item_display_name(item, item_key), max(int(item.get("quantity", 0)), 0))
 
 		_select_equipment_option(option, confirmed_item_key)
+		option.disabled = _is_equipment_change_pending
+	_is_refreshing_equipment_ui = false
 
 
 func _confirmed_item_key_for_slot(slot_name: String) -> String:
@@ -645,6 +651,34 @@ func _confirmed_item_key_for_slot(slot_name: String) -> String:
 		return ""
 
 	return str((slot_data as Dictionary).get("item_key", "")).strip_edges()
+
+
+func _confirmed_equipment_item_for_slot(slot_name: String) -> Dictionary:
+	var slot_data: Variant = _confirmed_equipment.get(slot_name, {})
+	if not (slot_data is Dictionary):
+		return {}
+
+	return (slot_data as Dictionary).duplicate(true)
+
+
+func _add_equipment_option(option: OptionButton, item_key: String, display_name: String, quantity: int) -> void:
+	for item_index in range(option.get_item_count()):
+		if _equipment_metadata_item_key(option.get_item_metadata(item_index)) == item_key:
+			return
+
+	var option_text: String = display_name if display_name != "" else item_key
+	if quantity >= 0:
+		option_text = "%s x%s" % [option_text, quantity]
+	option.add_item(option_text)
+	option.set_item_metadata(option.get_item_count() - 1, item_key)
+
+
+func _equipment_item_display_name(item: Dictionary, item_key: String) -> String:
+	var display_name: String = str(item.get("display_name", "")).strip_edges()
+	if display_name != "":
+		return display_name
+
+	return item_key
 
 
 func _eligible_inventory_items_for_slot(slot_name: String) -> Array:
@@ -688,11 +722,18 @@ func _inventory_item_equip_slot(item: Dictionary) -> String:
 
 func _select_equipment_option(option: OptionButton, item_key: String) -> void:
 	for item_index in range(option.get_item_count()):
-		if str(option.get_item_metadata(item_index)).strip_edges() == item_key:
+		if _equipment_metadata_item_key(option.get_item_metadata(item_index)) == item_key:
 			option.select(item_index)
 			return
 
 	option.select(0)
+
+
+func _equipment_metadata_item_key(metadata: Variant) -> String:
+	if metadata == null:
+		return ""
+
+	return str(metadata).strip_edges()
 
 
 func _refresh_inventory_panel() -> void:
@@ -707,17 +748,49 @@ func _refresh_inventory_panel() -> void:
 		_add_label(_inventory_list, "No confirmed items yet.")
 		return
 
+	var visible_item_count: int = 0
+	var equipped_item_keys: Array[String] = _confirmed_equipped_item_keys()
 	for item_variant in _confirmed_inventory_items:
 		if not (item_variant is Dictionary):
 			continue
 
 		var item: Dictionary = item_variant as Dictionary
 		var item_key: String = str(item.get("item_key", "")).strip_edges()
+		if item_key != "" and equipped_item_keys.has(item_key):
+			continue
+
 		var display_name: String = str(item.get("display_name", item_key)).strip_edges()
 		var quantity: int = max(int(item.get("quantity", 0)), 0)
 		if display_name == "":
 			display_name = item_key
 		_add_label(_inventory_list, "%s x%s" % [display_name, quantity])
+		visible_item_count += 1
+
+	if visible_item_count == 0:
+		_add_label(_inventory_list, "No unequipped items.")
+
+
+func _confirmed_equipped_item_keys() -> Array[String]:
+	var equipped_item_keys: Array[String] = []
+	for slot_name in EQUIPMENT_SLOTS:
+		var item_key: String = _confirmed_item_key_for_slot(slot_name)
+		if item_key != "" and not equipped_item_keys.has(item_key):
+			equipped_item_keys.append(item_key)
+
+	return equipped_item_keys
+
+
+func _confirmed_equipped_item_keys_except(excluded_slot_name: String) -> Array[String]:
+	var equipped_item_keys: Array[String] = []
+	for slot_name in EQUIPMENT_SLOTS:
+		if slot_name == excluded_slot_name:
+			continue
+
+		var item_key: String = _confirmed_item_key_for_slot(slot_name)
+		if item_key != "" and not equipped_item_keys.has(item_key):
+			equipped_item_keys.append(item_key)
+
+	return equipped_item_keys
 
 
 func _refresh_ability_panel_options() -> void:
@@ -1133,28 +1206,37 @@ func _on_save_loadout_pressed() -> void:
 	loadout_save_requested.emit(loadout_entries)
 
 
-func _on_save_equipment_pressed() -> void:
-	var equipment_entries: Array = []
-	for slot_name in EQUIPMENT_SLOTS:
-		if not _equipment_slot_options.has(slot_name):
-			continue
+func _on_equipment_option_selected(_item_index: int, _slot_name: String) -> void:
+	if _is_refreshing_equipment_ui:
+		return
 
-		var option: OptionButton = _equipment_slot_options[slot_name] as OptionButton
-		var selected_index: int = option.selected
-		var item_key: String = ""
-		if selected_index >= 0 and selected_index < option.get_item_count():
-			item_key = str(option.get_item_metadata(selected_index)).strip_edges()
+	if _is_equipment_change_pending:
+		if _equipment_panel_status != null:
+			_equipment_panel_status.text = "Waiting for equipment confirmation."
+		_refresh_equipment_slot_options()
+		return
 
-		equipment_entries.append({
-			"slot": slot_name,
-			"item_key": item_key,
-			"unequip": item_key == "",
-		})
+	if not _equipment_slot_options.has(_slot_name):
+		return
 
-	_is_equipment_save_pending = true
+	var option: OptionButton = _equipment_slot_options[_slot_name] as OptionButton
+	var selected_index: int = option.selected
+	var selected_metadata: Variant = null
+	if selected_index >= 0 and selected_index < option.get_item_count():
+		selected_metadata = option.get_item_metadata(selected_index)
+
+	var item_key: String = _equipment_metadata_item_key(selected_metadata)
+	var equipment_entries: Array = [{
+		"slot": _slot_name,
+		"item_key": null if selected_metadata == null else item_key,
+		"unequip": item_key == "",
+	}]
+
+	_is_equipment_change_pending = true
 	if _equipment_panel_status != null:
 		_equipment_panel_status.text = "Saving..."
-	equipment_save_requested.emit(equipment_entries)
+	_refresh_equipment_slot_options()
+	equipment_change_requested.emit(equipment_entries)
 
 
 func _on_message_timer_timeout(timer: SceneTreeTimer) -> void:

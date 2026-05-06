@@ -472,9 +472,10 @@ func _on_equipment_update_requested(peer_id: int, equipment_entries: Array) -> v
 	var character_id: int = int(session.get("character_id", 0))
 	if access_token.strip_edges() == "" or character_id <= 0:
 		print("Rejecting equipment update for peer %s: missing validated session data." % peer_id)
+		_restore_confirmed_equipment_for_peer(peer_id, "Equipment update failed.")
 		return
 
-	var backend_entries: Array = []
+	var backend_entry: Dictionary = {}
 	for entry_variant in equipment_entries:
 		if not (entry_variant is Dictionary):
 			continue
@@ -484,13 +485,18 @@ func _on_equipment_update_requested(peer_id: int, equipment_entries: Array) -> v
 		if not EQUIPMENT_SLOTS.has(slot_name):
 			continue
 
-		var item_key: String = str(entry.get("item_key", "")).strip_edges()
-		var backend_entry: Dictionary = {"slot": slot_name}
-		if item_key == "":
+		var item_key_variant: Variant = entry.get("item_key", null)
+		var item_key: String = "" if item_key_variant == null else str(item_key_variant).strip_edges()
+		backend_entry = {"equip_slot": slot_name}
+		if item_key_variant == null or item_key == "":
 			backend_entry["item_key"] = null
 		else:
 			backend_entry["item_key"] = item_key
-		backend_entries.append(backend_entry)
+		break
+
+	if backend_entry.is_empty():
+		_restore_confirmed_equipment_for_peer(peer_id, "Equipment update failed.")
+		return
 
 	var request: HTTPRequest = HTTPRequest.new()
 	add_child(request)
@@ -500,12 +506,19 @@ func _on_equipment_update_requested(peer_id: int, equipment_entries: Array) -> v
 		"Content-Type: application/json",
 		"Authorization: Bearer %s" % access_token,
 	])
-	var body: String = JSON.stringify({"equipment": backend_entries})
+	var body: String = JSON.stringify(backend_entry)
+	print("Equipment update request: character_id=%s equip_slot=%s item_key=%s body=%s" % [
+		character_id,
+		str(backend_entry.get("equip_slot", "")),
+		str(backend_entry.get("item_key", null)),
+		body,
+	])
 	var url: String = "%s/characters/%s/equipment" % [_normalized_backend_base_url(), character_id]
 	var error: Error = request.request(url, headers, HTTPClient.METHOD_PUT, body)
 	if error != OK:
 		print("Failed to start backend equipment update for peer %s: %s" % [peer_id, error])
 		request.queue_free()
+		_restore_confirmed_equipment_for_peer(peer_id, "Equipment update failed.")
 
 
 func _on_equipment_update_completed(
@@ -527,22 +540,41 @@ func _on_equipment_update_completed(
 	var response_text: String = body.get_string_from_utf8()
 	if result != HTTPRequest.RESULT_SUCCESS:
 		print("Backend equipment update failed for peer %s: HTTPRequest result %s." % [peer_id, result])
+		_restore_confirmed_equipment_for_peer(peer_id, "Equipment update failed.")
 		return
 
 	var json: JSON = JSON.new()
 	var parse_error: Error = json.parse(response_text)
 	if parse_error != OK or not (json.data is Dictionary):
 		print("Backend equipment update returned invalid JSON for peer %s. status=%s response=%s" % [peer_id, response_code, response_text])
+		_restore_confirmed_equipment_for_peer(peer_id, "Equipment update failed.")
 		return
 
 	var response_data: Dictionary = json.data as Dictionary
 	if response_code < 200 or response_code >= 300:
 		print("Backend equipment update rejected peer %s: status=%s response=%s" % [peer_id, response_code, response_data])
+		_restore_confirmed_equipment_for_peer(peer_id, "Equipment update failed.")
 		return
 
 	var confirmed_equipment: Dictionary = _extract_character_equipment(response_data)
 	session["equipment"] = confirmed_equipment
 	peer_sessions[peer_id] = session
+	world_spawner.call("apply_confirmed_character_equipment", peer_id, confirmed_equipment)
+
+
+func _restore_confirmed_equipment_for_peer(peer_id: int, message: String) -> void:
+	if not connected_peers.has(peer_id):
+		return
+
+	if message.strip_edges() != "":
+		world_spawner.rpc_id(peer_id, "apply_status_message", peer_id, message)
+
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	var confirmed_equipment: Dictionary = {}
+	if session.get("equipment", null) is Dictionary:
+		confirmed_equipment = (session.get("equipment", {}) as Dictionary).duplicate(true)
+	else:
+		confirmed_equipment = _empty_character_equipment()
 	world_spawner.call("apply_confirmed_character_equipment", peer_id, confirmed_equipment)
 
 
@@ -605,7 +637,7 @@ func _equipment_entry_candidates(response_data: Dictionary) -> Array:
 
 
 func _normalize_equipment_entry(entry_data: Dictionary) -> Dictionary:
-	var slot: String = str(entry_data.get("slot", entry_data.get("equipment_slot", entry_data.get("slot_key", "")))).strip_edges()
+	var slot: String = str(entry_data.get("equip_slot", entry_data.get("slot", entry_data.get("equipment_slot", entry_data.get("slot_key", ""))))).strip_edges()
 	var item_key: String = str(entry_data.get("item_key", entry_data.get("key", ""))).strip_edges()
 	var display_name: String = str(entry_data.get("display_name", "")).strip_edges()
 
