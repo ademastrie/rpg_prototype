@@ -347,6 +347,10 @@
 ### Functions
 - `_ready() -> void:`
 - `_start_server() -> void:`
+- `_load_enemy_definitions_for_startup() -> void:`
+- `_on_enemy_definitions_startup_completed(`
+- `_clear_enemy_definition_startup_request() -> void:`
+- `_start_enet_server_after_enemy_definitions() -> void:`
 - `_on_peer_connected(peer_id: int) -> void:`
 - `_on_peer_disconnected(peer_id: int) -> void:`
 - `_on_join_requested(peer_id: int, character_id: int, _character_name: String, access_token: String) -> void:`
@@ -439,9 +443,14 @@
 
 ### Functions
 - `spawn_initial_enemies() -> void:`
+- `load_backend_enemy_definitions(data: Variant) -> bool:`
+- `use_prototype_enemy_definitions() -> void:`
 - `sync_peer(peer_id: int) -> void:`
 - `get_active_enemy_positions() -> Dictionary:`
 - `get_enemy_xp_reward(enemy_id: int) -> int:`
+- `get_enemy_level(enemy_id: int) -> int:`
+- `get_enemy_loot_table(enemy_id: int) -> Array:`
+- `get_enemy_type(enemy_id: int) -> String:`
 - `get_authoritative_enemy_position(enemy_id: int) -> Vector3:`
 - `_process(delta: float) -> void:`
 - `_spawn_enemy(spawn_position: Vector3, enemy_type: String = DEFAULT_ENEMY_TYPE) -> void:`
@@ -498,6 +507,16 @@
 - `_enemy_definition_for_enemy(enemy_id: int) -> Dictionary:`
 - `_enemy_definition_for_type(enemy_type: String) -> Dictionary:`
 - `_resolved_enemy_type(enemy_type: String) -> String:`
+- `_active_enemy_definitions() -> Dictionary:`
+- `_extract_backend_enemy_definition_array(data: Variant) -> Array:`
+- `_normalize_backend_enemy_definition(source: Dictionary) -> Dictionary:`
+- `_apply_backend_attack_type_defaults(definition: Dictionary) -> void:`
+- `_copy_backend_attack_fields(source: Dictionary, definition: Dictionary) -> void:`
+- `_extract_backend_loot_table_entries(source: Dictionary) -> Array:`
+- `_copy_string_definition_value(source: Dictionary, target: Dictionary, target_key: String, source_keys: Array) -> void:`
+- `_copy_int_definition_value(source: Dictionary, target: Dictionary, target_key: String, source_keys: Array) -> void:`
+- `_copy_float_definition_value(source: Dictionary, target: Dictionary, target_key: String, source_keys: Array) -> void:`
+- `_copy_bool_definition_value(source: Dictionary, target: Dictionary, target_key: String, source_keys: Array) -> void:`
 - `_enemy_type_for_enemy(enemy_id: int) -> String:`
 - `_max_hp_for_enemy(enemy_id: int) -> int:`
 - `_max_hp_for_type(enemy_type: String) -> int:`
@@ -572,14 +591,7 @@
 - `enemy_contact_damage: int = 10`
 - `enemy_contact_damage_interval: float = 1.0`
 - `player_respawn_delay_seconds: float = 3.0`
-- `prototype_loot_drop_chance: float = 1.0`
 - `prototype_loot_pickup_radius: float = 1.5`
-- `prototype_loot_reward_type: String = "item"`
-- `prototype_loot_gold_amount: int = 3`
-- `prototype_loot_item_key: String = "slime_gel"`
-- `prototype_loot_item_display_name: String = "Slime Gel"`
-- `prototype_loot_item_quantity: int = 1`
-- `prototype_equipment_drop_chance: float = 0.15`
 - `debug_join_sync_logs: bool = false`
 
 ### Functions
@@ -598,9 +610,11 @@
 - `apply_confirmed_character_gold(peer_id: int, gold: int) -> void:`
 - `apply_confirmed_character_inventory(peer_id: int, inventory_items: Array) -> void:`
 - `apply_confirmed_character_equipment(peer_id: int, equipment: Dictionary) -> void:`
-- `spawn_prototype_loot_drop(drop_position: Vector3) -> void:`
-- `_prototype_loot_reward_payloads() -> Array:`
-- `_prototype_equipment_reward_payload() -> Dictionary:`
+- `spawn_prototype_loot_drop(enemy_type: String, drop_position: Vector3, owner_peer_id: int) -> void:`
+- `spawn_loot_drop_from_entries(loot_table_entries: Array, enemy_type: String, drop_position: Vector3, owner_peer_id: int) -> void:`
+- `_prototype_loot_reward_payloads_for_enemy_type(enemy_type: String) -> Array:`
+- `_loot_reward_payloads_from_entries(loot_table_entries: Array, enemy_type: String) -> Array:`
+- `_prototype_loot_payload_from_entry(entry: Dictionary) -> Dictionary:`
 - `_prototype_loot_position_offset(reward_index: int, reward_count: int) -> Vector3:`
 - `_process(delta: float) -> void:`
 - `_simulate(delta: float) -> void:`

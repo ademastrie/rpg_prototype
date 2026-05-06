@@ -3,6 +3,7 @@ extends Node
 @export var server_port: int = 7777
 @export var backend_base_url: String = "http://127.0.0.1:8000"
 @export var server_region_id: String = "starting_region"
+@export var hosted_region_key: String = "starter_field"
 @export var debug_server_startup_logs: bool = false
 @export var debug_join_timing: bool = false
 
@@ -14,6 +15,7 @@ var peer_sessions: Dictionary = {}
 var _pending_join_validations: Dictionary = {}
 var _join_timing_start_msec_by_peer: Dictionary = {}
 var _enemy_definition_startup_request: HTTPRequest
+var _region_enemy_spawn_startup_request: HTTPRequest
 
 const BACKEND_ABILITY_NAME_BY_KEY: Dictionary = {
 	"slash": "Slash",
@@ -71,7 +73,7 @@ func _load_enemy_definitions_for_startup() -> void:
 		print("Failed to start backend enemy definition load: %s. Falling back to Godot prototype definitions." % error)
 		_clear_enemy_definition_startup_request()
 		enemy_spawner.call("use_prototype_enemy_definitions")
-		_start_enet_server_after_enemy_definitions()
+		_load_region_enemy_spawns_for_startup()
 
 
 func _on_enemy_definitions_startup_completed(
@@ -86,12 +88,12 @@ func _on_enemy_definitions_startup_completed(
 	if result != HTTPRequest.RESULT_SUCCESS:
 		print("Backend enemy definition load failed with HTTPRequest result %s. Falling back to Godot prototype definitions." % result)
 		enemy_spawner.call("use_prototype_enemy_definitions")
-		_start_enet_server_after_enemy_definitions()
+		_load_region_enemy_spawns_for_startup()
 		return
 	if response_code < 200 or response_code >= 300:
 		print("Backend enemy definition load failed. status=%s response=%s. Falling back to Godot prototype definitions." % [response_code, response_text])
 		enemy_spawner.call("use_prototype_enemy_definitions")
-		_start_enet_server_after_enemy_definitions()
+		_load_region_enemy_spawns_for_startup()
 		return
 
 	var json: JSON = JSON.new()
@@ -99,14 +101,14 @@ func _on_enemy_definitions_startup_completed(
 	if parse_error != OK:
 		print("Backend enemy definition load returned invalid JSON. status=%s response=%s. Falling back to Godot prototype definitions." % [response_code, response_text])
 		enemy_spawner.call("use_prototype_enemy_definitions")
-		_start_enet_server_after_enemy_definitions()
+		_load_region_enemy_spawns_for_startup()
 		return
 
 	if not bool(enemy_spawner.call("load_backend_enemy_definitions", json.data)):
 		print("Backend enemy definition load produced no usable cache. Falling back to Godot prototype definitions.")
 		enemy_spawner.call("use_prototype_enemy_definitions")
 
-	_start_enet_server_after_enemy_definitions()
+	_load_region_enemy_spawns_for_startup()
 
 
 func _clear_enemy_definition_startup_request() -> void:
@@ -117,9 +119,76 @@ func _clear_enemy_definition_startup_request() -> void:
 	_enemy_definition_startup_request = null
 
 
-func _start_enet_server_after_enemy_definitions() -> void:
+func _load_region_enemy_spawns_for_startup() -> void:
+	_region_enemy_spawn_startup_request = HTTPRequest.new()
+	add_child(_region_enemy_spawn_startup_request)
+	_region_enemy_spawn_startup_request.request_completed.connect(_on_region_enemy_spawns_startup_completed)
+
+	var safe_region_key: String = hosted_region_key.strip_edges()
+	if safe_region_key == "":
+		safe_region_key = "starter_field"
+
+	var url: String = "%s/regions/%s/enemy-spawns" % [_normalized_backend_base_url(), safe_region_key.uri_encode()]
+	var error: Error = _region_enemy_spawn_startup_request.request(url, PackedStringArray(["Content-Type: application/json"]), HTTPClient.METHOD_GET)
+	if error != OK:
+		print("Failed to start backend region enemy spawn load for '%s': %s. Falling back to Godot prototype spawns." % [safe_region_key, error])
+		_clear_region_enemy_spawn_startup_request()
+		enemy_spawner.call("use_prototype_region_enemy_spawns")
+		_start_enet_server_after_region_enemy_spawns()
+
+
+func _on_region_enemy_spawns_startup_completed(
+	result: int,
+	response_code: int,
+	_headers: PackedStringArray,
+	body: PackedByteArray
+) -> void:
+	_clear_region_enemy_spawn_startup_request()
+
+	var safe_region_key: String = hosted_region_key.strip_edges()
+	if safe_region_key == "":
+		safe_region_key = "starter_field"
+
+	var response_text: String = body.get_string_from_utf8()
+	if result != HTTPRequest.RESULT_SUCCESS:
+		print("Backend region enemy spawn load for '%s' failed with HTTPRequest result %s. Falling back to Godot prototype spawns." % [safe_region_key, result])
+		enemy_spawner.call("use_prototype_region_enemy_spawns")
+		_start_enet_server_after_region_enemy_spawns()
+		return
+	if response_code < 200 or response_code >= 300:
+		print("Backend region enemy spawn load for '%s' failed. status=%s response=%s. Falling back to Godot prototype spawns." % [safe_region_key, response_code, response_text])
+		enemy_spawner.call("use_prototype_region_enemy_spawns")
+		_start_enet_server_after_region_enemy_spawns()
+		return
+
+	var json: JSON = JSON.new()
+	var parse_error: Error = json.parse(response_text)
+	if parse_error != OK:
+		print("Backend region enemy spawn load for '%s' returned invalid JSON. status=%s response=%s. Falling back to Godot prototype spawns." % [safe_region_key, response_code, response_text])
+		enemy_spawner.call("use_prototype_region_enemy_spawns")
+		_start_enet_server_after_region_enemy_spawns()
+		return
+
+	if not bool(enemy_spawner.call("load_backend_region_enemy_spawns", json.data)):
+		print("Backend region enemy spawn load for '%s' produced no usable cache. Falling back to Godot prototype spawns." % safe_region_key)
+		enemy_spawner.call("use_prototype_region_enemy_spawns")
+
+	_start_enet_server_after_region_enemy_spawns()
+
+
+func _clear_region_enemy_spawn_startup_request() -> void:
+	if _region_enemy_spawn_startup_request == null:
+		return
+
+	_region_enemy_spawn_startup_request.queue_free()
+	_region_enemy_spawn_startup_request = null
+
+
+func _start_enet_server_after_region_enemy_spawns() -> void:
 	# Backend enemy definitions are durable data loaded once at startup; Godot
 	# owns the live server simulation and uses the cached definition values.
+	# Backend region spawns are durable spawn definitions; Godot owns all live
+	# enemy HP, position, target, cooldown, respawn, and combat state.
 
 	var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
 	var error: Error = peer.create_server(server_port)

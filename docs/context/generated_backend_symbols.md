@@ -190,6 +190,44 @@
 ### Routers
 - None found
 
+## `backend/app/enemies/__init__.py`
+
+### Classes
+- None found
+
+### Functions
+- None found
+
+### Routers
+- None found
+
+## `backend/app/enemies/router.py`
+
+### Classes
+- None found
+
+### Functions
+- `_enemy_definition_options() -> tuple:`
+- `list_enemy_definitions(db: Session = Depends(get_db)) -> list[EnemyDefinition]:`
+- `get_enemy_definition(`
+
+### Routers
+- `GET "", response_model=list[EnemyDefinitionResponse]`
+- `GET "/{enemy_key}", response_model=EnemyDefinitionResponse`
+
+## `backend/app/enemies/schemas.py`
+
+### Classes
+- `EnemyAttackResponse`
+- `EnemyLootEntryResponse`
+- `EnemyDefinitionResponse`
+
+### Functions
+- None found
+
+### Routers
+- None found
+
 ## `backend/app/game/__init__.py`
 
 ### Classes
@@ -275,6 +313,19 @@
 ### Routers
 - None found
 
+## `backend/app/models/enemy.py`
+
+### Classes
+- `EnemyDefinition`
+- `EnemyAttack`
+- `EnemyLootEntry`
+
+### Functions
+- None found
+
+### Routers
+- None found
+
 ## `backend/app/models/item.py`
 
 ### Classes
@@ -289,10 +340,64 @@
 ### Routers
 - None found
 
+## `backend/app/models/region.py`
+
+### Classes
+- `RegionDefinition`
+- `RegionEnemySpawn`
+
+### Functions
+- None found
+
+### Routers
+- None found
+
 ## `backend/app/models/user.py`
 
 ### Classes
 - `User`
+
+### Functions
+- None found
+
+### Routers
+- None found
+
+## `backend/app/regions/__init__.py`
+
+### Classes
+- None found
+
+### Functions
+- None found
+
+### Routers
+- None found
+
+## `backend/app/regions/router.py`
+
+### Classes
+- None found
+
+### Functions
+- `_region_options() -> tuple:`
+- `_get_active_region(region_key: str, db: Session) -> RegionDefinition:`
+- `list_regions(db: Session = Depends(get_db)) -> list[RegionDefinition]:`
+- `get_region(`
+- `list_region_enemy_spawns(`
+
+### Routers
+- `GET "", response_model=list[RegionDefinitionResponse]`
+- `GET "/{region_key}", response_model=RegionDefinitionDetailResponse`
+- `GET "/{region_key}/enemy-spawns", response_model=RegionEnemySpawnsResponse`
+
+## `backend/app/regions/schemas.py`
+
+### Classes
+- `RegionEnemySpawnResponse`
+- `RegionDefinitionResponse`
+- `RegionDefinitionDetailResponse`
+- `RegionEnemySpawnsResponse`
 
 ### Functions
 - None found

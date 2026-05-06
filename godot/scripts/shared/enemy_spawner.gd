@@ -36,6 +36,7 @@ var _proximity_aggro_until_by_enemy: Dictionary = {}
 var _returning_enemy_ids: Dictionary = {}
 var _enemy_return_regen_progress: Dictionary = {}
 var _enemy_return_log_last_seconds: Dictionary = {}
+var _enemy_suspicious_movement_log_last_seconds: Dictionary = {}
 var _enemy_previous_authoritative_positions: Dictionary = {}
 var _enemy_melee_windup_until: Dictionary = {}
 var _enemy_melee_recovery_until: Dictionary = {}
@@ -48,8 +49,13 @@ var _next_enemy_id: int = 1
 var _idle_time: float = 0.0
 var _snapshot_accumulator: float = 0.0
 var _server_enemy_definitions: Dictionary = {}
+var _server_region_enemy_spawns: Array[Dictionary] = []
+var _enemy_definition_overrides_by_id: Dictionary = {}
+var _enemy_spawn_respawn_seconds_by_id: Dictionary = {}
+var _enemy_region_spawn_key_by_id: Dictionary = {}
 
 const DEFAULT_ENEMY_TYPE: String = "grunt"
+const SUSPICIOUS_MOVEMENT_STEP: float = 6.0
 
 # Fallback prototype definitions. Backend enemy definitions are durable data;
 # Godot caches them at startup and owns only live simulation state such as HP,
@@ -162,6 +168,18 @@ func spawn_initial_enemies() -> void:
 	if not multiplayer.is_server() or not enemies.is_empty():
 		return
 
+	if not _server_region_enemy_spawns.is_empty():
+		# Backend stores durable spawn definitions. Godot expands them into
+		# server-owned live enemy instances and keeps runtime state in memory.
+		for spawn_data in _server_region_enemy_spawns:
+			var spawn_position: Vector3 = spawn_data.get("position", Vector3.ZERO) as Vector3
+			var enemy_type: String = str(spawn_data.get("enemy_type", DEFAULT_ENEMY_TYPE))
+			var spawn_key: String = str(spawn_data.get("spawn_key", ""))
+			var max_alive: int = max(int(spawn_data.get("max_alive", 1)), 1)
+			for spawn_index in range(max_alive):
+				_spawn_enemy(_spawn_position_for_index(spawn_position, float(spawn_data.get("spawn_radius", 0.0)), spawn_index, max_alive), enemy_type, spawn_data, spawn_key)
+		return
+
 	for spawn_data in INITIAL_ENEMY_SPAWNS:
 		var spawn_position: Vector3 = spawn_data.get("position", Vector3.ZERO) as Vector3
 		var enemy_type: String = str(spawn_data.get("enemy_type", DEFAULT_ENEMY_TYPE))
@@ -169,7 +187,9 @@ func spawn_initial_enemies() -> void:
 
 
 func load_backend_enemy_definitions(data: Variant) -> bool:
+	print("Backend enemy definitions response root type: %s." % type_string(typeof(data)))
 	var definitions_array: Array = _extract_backend_enemy_definition_array(data)
+	print("Backend enemy definitions raw count found: %s." % definitions_array.size())
 	if definitions_array.is_empty():
 		print("Backend enemy definitions response did not include any definitions.")
 		return false
@@ -187,13 +207,19 @@ func load_backend_enemy_definitions(data: Variant) -> bool:
 		loaded_definitions[enemy_type] = definition
 
 	if loaded_definitions.is_empty():
+		print("Backend enemy definitions usable count: 0.")
 		print("Backend enemy definitions response had no usable definitions.")
 		return false
+	print("Backend enemy definitions usable count: %s." % loaded_definitions.size())
+	var backend_enemy_keys: Array = loaded_definitions.keys()
+	backend_enemy_keys.sort()
+	print("Backend enemy keys loaded: %s." % ", ".join(backend_enemy_keys))
 	for prototype_enemy_type in SERVER_PROTOTYPE_ENEMY_DEFINITIONS:
 		if loaded_definitions.has(prototype_enemy_type):
 			continue
 
 		loaded_definitions[prototype_enemy_type] = (SERVER_PROTOTYPE_ENEMY_DEFINITIONS[prototype_enemy_type] as Dictionary).duplicate(true)
+		loaded_definitions[prototype_enemy_type]["backend_loaded"] = false
 		print("Backend enemy definitions did not include '%s'; using prototype fallback for that type." % prototype_enemy_type)
 
 	# Backend definitions are durable data. This cache is read during simulation;
@@ -206,6 +232,39 @@ func load_backend_enemy_definitions(data: Variant) -> bool:
 func use_prototype_enemy_definitions() -> void:
 	_server_enemy_definitions = {}
 	print("Using fallback Godot prototype enemy definitions.")
+
+
+func load_backend_region_enemy_spawns(data: Variant) -> bool:
+	var spawns_array: Array = _extract_backend_region_enemy_spawn_array(data)
+	if spawns_array.is_empty():
+		print("Backend region enemy spawns response did not include any spawns.")
+		return false
+
+	var loaded_spawns: Array[Dictionary] = []
+	for spawn_variant in spawns_array:
+		if not (spawn_variant is Dictionary):
+			continue
+
+		var spawn_definition: Dictionary = _normalize_backend_region_enemy_spawn(spawn_variant as Dictionary)
+		if spawn_definition.is_empty():
+			continue
+
+		loaded_spawns.append(spawn_definition)
+
+	if loaded_spawns.is_empty():
+		print("Backend region enemy spawns response had no usable spawns.")
+		return false
+
+	# Backend stores durable spawn definitions only. Live enemy HP, position,
+	# target, cooldown, leash, and respawn state remains server-owned in Godot.
+	_server_region_enemy_spawns = loaded_spawns
+	print("Loaded %s backend region enemy spawns into Godot server cache." % _server_region_enemy_spawns.size())
+	return true
+
+
+func use_prototype_region_enemy_spawns() -> void:
+	_server_region_enemy_spawns = []
+	print("Using fallback Godot prototype enemy spawns.")
 
 
 func sync_peer(peer_id: int) -> void:
@@ -284,7 +343,7 @@ func _process(delta: float) -> void:
 		_snapshot_accumulator = 0.0
 
 
-func _spawn_enemy(spawn_position: Vector3, enemy_type: String = DEFAULT_ENEMY_TYPE) -> void:
+func _spawn_enemy(spawn_position: Vector3, enemy_type: String = DEFAULT_ENEMY_TYPE, spawn_definition: Dictionary = {}, spawn_key: String = "") -> void:
 	var enemy_id: int = _next_enemy_id
 	_next_enemy_id += 1
 	var resolved_enemy_type: String = _resolved_enemy_type(enemy_type)
@@ -296,6 +355,13 @@ func _spawn_enemy(spawn_position: Vector3, enemy_type: String = DEFAULT_ENEMY_TY
 	_enemy_type_by_id[enemy_id] = resolved_enemy_type
 	_enemy_max_hp_by_id[enemy_id] = max_hp
 	_enemy_current_hp_by_id[enemy_id] = max_hp
+	if not spawn_definition.is_empty():
+		_enemy_region_spawn_key_by_id[enemy_id] = spawn_key
+		_enemy_spawn_respawn_seconds_by_id[enemy_id] = max(float(spawn_definition.get("respawn_seconds", respawn_delay_seconds)), 0.0)
+		var definition_overrides: Dictionary = spawn_definition.get("definition_overrides", {}) as Dictionary
+		if not definition_overrides.is_empty():
+			_enemy_definition_overrides_by_id[enemy_id] = definition_overrides.duplicate(true)
+	_log_backend_enemy_spawn_tuning(enemy_id, spawn_position)
 	rpc("spawn_enemy", enemy_id, spawn_position, max_hp, max_hp, resolved_enemy_type, _enemy_display_name(enemy_id), _enemy_visual_color(enemy_id))
 	if debug_enemy_lifecycle_logs:
 		print("Spawned enemy %s type=%s at %s." % [enemy_id, resolved_enemy_type, spawn_position])
@@ -405,6 +471,7 @@ func _despawn_enemy(enemy_id: int) -> void:
 	_returning_enemy_ids.erase(enemy_id)
 	_enemy_return_regen_progress.erase(enemy_id)
 	_enemy_return_log_last_seconds.erase(enemy_id)
+	_enemy_suspicious_movement_log_last_seconds.erase(enemy_id)
 	_enemy_previous_authoritative_positions.erase(enemy_id)
 	_dead_enemy_ids[enemy_id] = true
 	rpc("despawn_enemy", enemy_id)
@@ -417,7 +484,7 @@ func _schedule_enemy_respawn(enemy_id: int) -> void:
 
 	var respawn_timer: Timer = Timer.new()
 	respawn_timer.one_shot = true
-	respawn_timer.wait_time = respawn_delay_seconds
+	respawn_timer.wait_time = max(float(_enemy_spawn_respawn_seconds_by_id.get(enemy_id, respawn_delay_seconds)), 0.0)
 	add_child(respawn_timer)
 	respawn_timer.timeout.connect(_on_enemy_respawn_timer_timeout.bind(enemy_id, respawn_timer))
 	respawn_timer.start()
@@ -496,6 +563,10 @@ func _update_enemy_positions(delta: float) -> void:
 			if _can_start_enemy_melee_attack(enemy_id_int, enemy_position, target_position):
 				_start_enemy_melee_attack(enemy_id_int, enemy_position, target_peer_id)
 				_log_server_enemy_snap(enemy_id_int, enemy_position, enemy_position, delta, "melee_start", target_peer_id)
+				continue
+
+			if _should_hold_melee_recovery_position(enemy_id_int, enemy_position, target_position):
+				_log_server_enemy_snap(enemy_id_int, enemy_position, enemy_position, delta, "melee_recovery_hold", target_peer_id)
 				continue
 
 			if _should_hold_ranged_position(enemy_id_int, enemy_position, target_position):
@@ -820,6 +891,21 @@ func _should_hold_ranged_position(enemy_id: int, enemy_position: Vector3, target
 	return _distance_xz(enemy_position, target_position) <= min(preferred_distance, ranged_attack_range)
 
 
+func _should_hold_melee_recovery_position(enemy_id: int, enemy_position: Vector3, target_position: Vector3) -> bool:
+	if _enemy_attack_type(enemy_id) != "melee":
+		return false
+
+	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
+	if now_seconds >= float(_enemy_melee_recovery_until.get(enemy_id, 0.0)):
+		return false
+
+	var melee_attack_range: float = _enemy_definition_float(enemy_id, "melee_attack_range", 2.0)
+	if melee_attack_range <= 0.0:
+		return false
+
+	return _distance_xz(enemy_position, target_position) <= melee_attack_range
+
+
 func _is_peer_alive(peer_id: int) -> bool:
 	var alive_player_positions: Dictionary = _get_alive_player_positions()
 	return alive_player_positions.has(peer_id)
@@ -1034,10 +1120,29 @@ func _chase_position(enemy_id: int, enemy_position: Vector3, target_position: Ve
 	var chase_speed: float = _enemy_definition_float(enemy_id, "move_speed", 2.2)
 	var max_step: float = chase_speed * delta
 	var distance: float = offset.length()
+	if max_step > SUSPICIOUS_MOVEMENT_STEP:
+		_log_suspicious_movement_step(enemy_id, chase_speed, delta, max_step, distance)
 	if distance <= max_step:
 		return Vector3(target_position.x, enemy_position.y, target_position.z)
 
 	return enemy_position + offset.normalized() * max_step
+
+
+func _log_suspicious_movement_step(enemy_id: int, chase_speed: float, delta: float, max_step: float, distance_to_target: float) -> void:
+	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
+	var last_log_seconds: float = float(_enemy_suspicious_movement_log_last_seconds.get(enemy_id, -999.0))
+	if now_seconds - last_log_seconds < 2.0:
+		return
+
+	_enemy_suspicious_movement_log_last_seconds[enemy_id] = now_seconds
+	print("Warning: enemy %s suspicious movement step. enemy_key=%s chase_speed=%s delta=%s step=%s distance_to_target=%s." % [
+		enemy_id,
+		_enemy_type_for_enemy(enemy_id),
+		chase_speed,
+		delta,
+		max_step,
+		distance_to_target,
+	])
 
 
 func _enemy_definition_float(enemy_id: int, key: String, fallback: float) -> float:
@@ -1057,7 +1162,12 @@ func _enemy_attack_type(enemy_id: int) -> String:
 
 
 func _enemy_definition_for_enemy(enemy_id: int) -> Dictionary:
-	return _enemy_definition_for_type(_enemy_type_for_enemy(enemy_id))
+	var definition: Dictionary = _enemy_definition_for_type(_enemy_type_for_enemy(enemy_id)).duplicate(true)
+	if _enemy_definition_overrides_by_id.has(enemy_id):
+		var overrides: Dictionary = _enemy_definition_overrides_by_id[enemy_id] as Dictionary
+		for key in overrides:
+			definition[key] = overrides[key]
+	return definition
 
 
 func _enemy_definition_for_type(enemy_type: String) -> Dictionary:
@@ -1086,23 +1196,98 @@ func _extract_backend_enemy_definition_array(data: Variant) -> Array:
 		return []
 
 	var response_data: Dictionary = data as Dictionary
-	for key in ["enemy_definitions", "definitions", "items", "results", "enemies"]:
+	for key in ["value", "enemy_definitions", "definitions", "items", "results", "enemies"]:
 		if response_data.get(key, null) is Array:
 			return response_data.get(key, []) as Array
 	if response_data.get("data", null) is Dictionary:
 		return _extract_backend_enemy_definition_array(response_data.get("data", {}) as Dictionary)
+	if _looks_like_backend_enemy_definition(response_data):
+		return [response_data]
 	return []
 
 
+func _extract_backend_region_enemy_spawn_array(data: Variant) -> Array:
+	if data is Array:
+		return data as Array
+	if not (data is Dictionary):
+		return []
+
+	var response_data: Dictionary = data as Dictionary
+	for key in ["enemy_spawns", "spawns", "items", "results", "region_enemy_spawns"]:
+		if response_data.get(key, null) is Array:
+			return response_data.get(key, []) as Array
+	if response_data.get("data", null) is Dictionary:
+		return _extract_backend_region_enemy_spawn_array(response_data.get("data", {}) as Dictionary)
+	return []
+
+
+func _normalize_backend_region_enemy_spawn(source: Dictionary) -> Dictionary:
+	var spawn_key: String = str(source.get("spawn_key", source.get("key", source.get("id", "")))).strip_edges()
+	var enemy_type: String = str(source.get("enemy_key", source.get("enemy_type", source.get("enemy_definition_key", "")))).strip_edges()
+	if enemy_type == "":
+		print("Skipping backend region enemy spawn with missing enemy_key: %s" % source)
+		return {}
+
+	var position_x: float = _optional_float_value(source.get("position_x", source.get("x", 0.0)), "position_x", 0.0)
+	var position_y: float = _optional_float_value(source.get("position_y", source.get("y", 0.0)), "position_y", 0.0)
+	var position_z: float = _optional_float_value(source.get("position_z", source.get("z", 0.0)), "position_z", 0.0)
+	var spawn_radius: float = max(_optional_float_value(source.get("spawn_radius", 0.0), "spawn_radius", 0.0), 0.0)
+	var respawn_seconds: float = max(_optional_float_value(source.get("respawn_seconds", respawn_delay_seconds), "respawn_seconds", respawn_delay_seconds), 0.0)
+	var position: Vector3 = Vector3(
+		position_x,
+		position_y,
+		position_z
+	)
+	var spawn_definition: Dictionary = {
+		"spawn_key": spawn_key,
+		"enemy_type": enemy_type,
+		"position": position,
+		"spawn_radius": spawn_radius,
+		"max_alive": max(int(source.get("max_alive", 1)), 1),
+		"respawn_seconds": respawn_seconds,
+		"definition_overrides": _backend_region_spawn_definition_overrides(source),
+	}
+	return spawn_definition
+
+
+func _backend_region_spawn_definition_overrides(source: Dictionary) -> Dictionary:
+	var overrides: Dictionary = {}
+	_copy_string_definition_value(source, overrides, "behavior_profile_key", ["behavior_profile_key"])
+	_copy_float_definition_value(source, overrides, "aggro_radius", ["aggro_radius", "aggro_radius_override", "override_aggro_radius"])
+	_copy_float_definition_value(source, overrides, "forced_aggro_seconds", ["forced_aggro_seconds", "forced_aggro_seconds_override", "override_forced_aggro_seconds"])
+	_copy_float_definition_value(source, overrides, "proximity_aggro_seconds", ["proximity_aggro_seconds", "proximity_aggro_seconds_override", "override_proximity_aggro_seconds"])
+	_copy_float_definition_value(source, overrides, "home_return_distance", ["home_return_distance", "leash_distance", "leash_radius", "home_return_distance_override", "override_home_return_distance"])
+	_copy_float_definition_value(source, overrides, "target_drop_distance", ["target_drop_distance", "target_drop_distance_override", "override_target_drop_distance"])
+	_copy_float_definition_value(source, overrides, "hard_return_distance", ["hard_return_distance", "hard_return_distance_override", "override_hard_return_distance"])
+	_copy_float_definition_value(source, overrides, "emergency_failsafe_distance", ["emergency_failsafe_distance", "emergency_failsafe_distance_override", "override_emergency_failsafe_distance"])
+	_copy_float_definition_value(source, overrides, "leash_reset_distance", ["leash_reset_distance", "leash_reset_distance_override", "override_leash_reset_distance"])
+	_copy_float_definition_value(source, overrides, "idle_return_distance", ["idle_return_distance", "idle_return_distance_override", "override_idle_return_distance"])
+	return overrides
+
+
+func _spawn_position_for_index(center_position: Vector3, spawn_radius: float, spawn_index: int, spawn_count: int) -> Vector3:
+	if spawn_radius <= 0.0 or spawn_count <= 1:
+		return center_position
+
+	var angle: float = (TAU * float(spawn_index)) / float(spawn_count)
+	return center_position + Vector3(cos(angle) * spawn_radius, 0.0, sin(angle) * spawn_radius)
+
+
 func _normalize_backend_enemy_definition(source: Dictionary) -> Dictionary:
-	var enemy_type: String = str(source.get("enemy_type", source.get("key", source.get("type", source.get("id", ""))))).strip_edges()
+	if source.has("is_active") and not bool(source.get("is_active", true)):
+		return {}
+
+	var enemy_type: String = str(source.get("enemy_key", source.get("enemy_type", source.get("key", source.get("type", source.get("id", "")))))).strip_edges()
 	if enemy_type == "":
 		return {}
 
 	var fallback_type: String = enemy_type if SERVER_PROTOTYPE_ENEMY_DEFINITIONS.has(enemy_type) else DEFAULT_ENEMY_TYPE
 	var definition: Dictionary = (SERVER_PROTOTYPE_ENEMY_DEFINITIONS[fallback_type] as Dictionary).duplicate(true)
 	definition["enemy_type"] = enemy_type
+	definition["backend_loaded"] = true
 	_copy_string_definition_value(source, definition, "display_name", ["display_name", "name"])
+	_copy_string_definition_value(source, definition, "behavior_profile_key", ["behavior_profile_key"])
+	_copy_string_definition_value(source, definition, "visual_key", ["visual_key"])
 	_copy_int_definition_value(source, definition, "level", ["level"])
 	_copy_int_definition_value(source, definition, "xp_reward", ["xp_reward", "xp", "experience_reward"])
 	_copy_int_definition_value(source, definition, "max_hp", ["max_hp", "max_health", "hp"])
@@ -1112,8 +1297,11 @@ func _normalize_backend_enemy_definition(source: Dictionary) -> Dictionary:
 		"aggro_radius",
 		"forced_aggro_seconds",
 		"proximity_aggro_seconds",
-		"home_return_distance",
-		"target_drop_distance",
+	]:
+		_copy_float_definition_value(source, definition, key, [key])
+	_copy_float_definition_value(source, definition, "home_return_distance", ["home_return_distance", "leash_radius"])
+	_copy_float_definition_value(source, definition, "target_drop_distance", ["target_drop_distance", "leash_radius"])
+	for key in [
 		"hard_return_distance",
 		"emergency_failsafe_distance",
 		"leash_reset_distance",
@@ -1128,6 +1316,8 @@ func _normalize_backend_enemy_definition(source: Dictionary) -> Dictionary:
 	_copy_string_definition_value(source, definition, "attack_type", ["attack_type"])
 	_copy_backend_attack_fields(source, definition)
 	_apply_backend_attack_type_defaults(definition)
+	_normalize_backend_definition_tuning(definition, source)
+	_log_backend_enemy_definition_tuning(definition)
 	definition["loot_table_entries"] = _extract_backend_loot_table_entries(source)
 	return definition
 
@@ -1157,24 +1347,28 @@ func _copy_backend_attack_fields(source: Dictionary, definition: Dictionary) -> 
 
 		var attack: Dictionary = attack_variant as Dictionary
 		var attack_type: String = str(attack.get("attack_type", attack.get("type", ""))).strip_edges().to_lower()
+		if attack_type.contains("melee"):
+			attack_type = "melee"
+		elif attack_type.contains("ranged") or attack_type.contains("projectile"):
+			attack_type = "ranged"
 		if attack_type == "melee":
 			definition["attack_type"] = "melee"
 			definition["melee_attack_enabled"] = true
-			_copy_int_definition_value(attack, definition, "melee_attack_damage", ["damage", "attack_damage", "melee_attack_damage"])
-			_copy_float_definition_value(attack, definition, "melee_attack_range", ["range", "attack_range", "melee_attack_range"])
-			_copy_float_definition_value(attack, definition, "melee_attack_radius", ["radius", "melee_attack_radius"])
+			_copy_int_definition_value(attack, definition, "melee_attack_damage", ["damage", "damage_amount", "attack_damage", "melee_attack_damage"])
+			_copy_float_definition_value(attack, definition, "melee_attack_range", ["range", "max_range", "range_radius", "attack_range", "melee_attack_range"])
+			_copy_float_definition_value(attack, definition, "melee_attack_radius", ["radius", "attack_radius", "hit_radius", "impact_radius", "effect_radius", "melee_attack_radius"])
 			_copy_float_definition_value(attack, definition, "melee_attack_windup_seconds", ["windup_seconds", "windup", "melee_attack_windup_seconds"])
-			_copy_float_definition_value(attack, definition, "melee_attack_recovery_seconds", ["recovery_seconds", "cooldown_seconds", "recovery", "melee_attack_recovery_seconds"])
+			_copy_float_definition_value(attack, definition, "melee_attack_recovery_seconds", ["recovery_seconds", "cooldown_seconds", "cooldown", "recovery", "melee_attack_recovery_seconds"])
 		elif attack_type == "ranged":
 			definition["attack_type"] = "ranged"
 			definition["ranged_attack_enabled"] = true
 			definition["melee_attack_enabled"] = false
-			_copy_int_definition_value(attack, definition, "ranged_attack_damage", ["damage", "attack_damage", "ranged_attack_damage"])
-			_copy_float_definition_value(attack, definition, "ranged_attack_range", ["range", "attack_range", "ranged_attack_range"])
+			_copy_int_definition_value(attack, definition, "ranged_attack_damage", ["damage", "damage_amount", "attack_damage", "ranged_attack_damage"])
+			_copy_float_definition_value(attack, definition, "ranged_attack_range", ["range", "max_range", "range_radius", "attack_range", "ranged_attack_range"])
 			_copy_float_definition_value(attack, definition, "ranged_attack_preferred_distance", ["preferred_distance", "ranged_attack_preferred_distance"])
 			_copy_float_definition_value(attack, definition, "ranged_attack_windup_seconds", ["windup_seconds", "windup", "ranged_attack_windup_seconds"])
-			_copy_float_definition_value(attack, definition, "ranged_attack_recovery_seconds", ["recovery_seconds", "cooldown_seconds", "recovery", "ranged_attack_recovery_seconds"])
-			_copy_float_definition_value(attack, definition, "ranged_attack_width", ["width", "ranged_attack_width"])
+			_copy_float_definition_value(attack, definition, "ranged_attack_recovery_seconds", ["recovery_seconds", "cooldown_seconds", "cooldown", "recovery", "ranged_attack_recovery_seconds"])
+			_copy_float_definition_value(attack, definition, "ranged_attack_width", ["width", "radius", "attack_radius", "projectile_width", "ranged_attack_width"])
 
 	for key in [
 		"melee_attack_damage",
@@ -1197,11 +1391,132 @@ func _copy_backend_attack_fields(source: Dictionary, definition: Dictionary) -> 
 		_copy_bool_definition_value(source, definition, key, [key])
 
 
+func _normalize_backend_definition_tuning(definition: Dictionary, source: Dictionary) -> void:
+	var enemy_type: String = str(definition.get("enemy_type", DEFAULT_ENEMY_TYPE))
+
+	var attack_type: String = str(definition.get("attack_type", "melee"))
+	if attack_type == "melee":
+		_warn_if_missing_or_zero_attack_value(definition, source, enemy_type, "melee_attack_range", ["range", "max_range", "range_radius", "attack_range", "melee_attack_range"])
+		_warn_if_missing_or_zero_attack_value(definition, source, enemy_type, "melee_attack_radius", ["radius", "attack_radius", "hit_radius", "impact_radius", "effect_radius", "melee_attack_radius"])
+	elif attack_type == "ranged":
+		_warn_if_missing_or_zero_attack_value(definition, source, enemy_type, "ranged_attack_range", ["range", "max_range", "range_radius", "attack_range", "ranged_attack_range"])
+		_warn_if_missing_or_zero_attack_value(definition, source, enemy_type, "ranged_attack_width", ["width", "radius", "attack_radius", "projectile_width", "ranged_attack_width"])
+
+
+func _warn_if_missing_or_zero_attack_value(definition: Dictionary, source: Dictionary, enemy_type: String, key: String, source_keys: Array) -> void:
+	if not definition.has(key) or not _backend_has_any_attack_key(source, source_keys):
+		print("Warning: backend enemy '%s' missing %s; prototype default may be used." % [enemy_type, key])
+		return
+
+	if float(definition.get(key, 0.0)) <= 0.0:
+		print("Warning: backend enemy '%s' has zero %s." % [enemy_type, key])
+
+
+func _backend_has_any_key(source: Dictionary, keys: Array) -> bool:
+	for key in keys:
+		if source.has(key):
+			return true
+	return false
+
+
+func _backend_has_any_attack_key(source: Dictionary, keys: Array) -> bool:
+	if _backend_has_any_key(source, keys):
+		return true
+
+	var attacks: Array = []
+	if source.get("attacks", null) is Array:
+		attacks = source.get("attacks", []) as Array
+	elif source.get("attack", null) is Dictionary:
+		attacks = [source.get("attack", {}) as Dictionary]
+
+	for attack_variant in attacks:
+		if not (attack_variant is Dictionary):
+			continue
+		if _backend_has_any_key(attack_variant as Dictionary, keys):
+			return true
+	return false
+
+
+func _log_backend_enemy_definition_tuning(definition: Dictionary) -> void:
+	var enemy_type: String = str(definition.get("enemy_type", DEFAULT_ENEMY_TYPE))
+	var attack_type: String = str(definition.get("attack_type", "melee"))
+	var attack_range: float = _definition_attack_range(definition)
+	var attack_radius: float = _definition_attack_radius(definition)
+	var windup: float = _definition_attack_windup(definition)
+	var recovery: float = _definition_attack_recovery(definition)
+	print("Backend enemy definition tuning: enemy_key=%s move_speed=%s attack_type=%s attack_range=%s attack_radius=%s windup=%s recovery=%s aggro_radius=%s leash_radius=%s behavior_profile_key=%s." % [
+		enemy_type,
+		float(definition.get("move_speed", 0.0)),
+		attack_type,
+		attack_range,
+		attack_radius,
+		windup,
+		recovery,
+		float(definition.get("aggro_radius", 0.0)),
+		float(definition.get("home_return_distance", 0.0)),
+		str(definition.get("behavior_profile_key", "")),
+	])
+
+
+func _log_backend_enemy_spawn_tuning(enemy_id: int, spawn_position: Vector3) -> void:
+	var definition: Dictionary = _enemy_definition_for_enemy(enemy_id)
+	if not bool(definition.get("backend_loaded", false)):
+		return
+
+	var attack_type: String = str(definition.get("attack_type", "melee"))
+	print("Backend enemy spawned: enemy_id=%s enemy_key=%s move_speed=%s chase_speed=%s attack_type=%s attack_range=%s attack_radius=%s windup=%s recovery=%s aggro_radius=%s leash_radius=%s behavior_profile_key=%s spawn_position=%s." % [
+		enemy_id,
+		_enemy_type_for_enemy(enemy_id),
+		float(definition.get("move_speed", 0.0)),
+		float(definition.get("move_speed", 0.0)),
+		attack_type,
+		_definition_attack_range(definition),
+		_definition_attack_radius(definition),
+		_definition_attack_windup(definition),
+		_definition_attack_recovery(definition),
+		float(definition.get("aggro_radius", 0.0)),
+		float(definition.get("home_return_distance", 0.0)),
+		str(definition.get("behavior_profile_key", "")),
+		spawn_position,
+	])
+
+
+func _definition_attack_range(definition: Dictionary) -> float:
+	if str(definition.get("attack_type", "melee")) == "ranged":
+		return float(definition.get("ranged_attack_range", 0.0))
+	return float(definition.get("melee_attack_range", 0.0))
+
+
+func _definition_attack_radius(definition: Dictionary) -> float:
+	if str(definition.get("attack_type", "melee")) == "ranged":
+		return float(definition.get("ranged_attack_width", 0.0))
+	return float(definition.get("melee_attack_radius", 0.0))
+
+
+func _definition_attack_windup(definition: Dictionary) -> float:
+	if str(definition.get("attack_type", "melee")) == "ranged":
+		return float(definition.get("ranged_attack_windup_seconds", 0.0))
+	return float(definition.get("melee_attack_windup_seconds", 0.0))
+
+
+func _definition_attack_recovery(definition: Dictionary) -> float:
+	if str(definition.get("attack_type", "melee")) == "ranged":
+		return float(definition.get("ranged_attack_recovery_seconds", 0.0))
+	return float(definition.get("melee_attack_recovery_seconds", 0.0))
+
+
 func _extract_backend_loot_table_entries(source: Dictionary) -> Array:
-	for key in ["loot_table_entries", "loot_table", "loot"]:
+	for key in ["loot_table_entries", "loot_entries", "loot_table", "loot"]:
 		if source.get(key, null) is Array:
 			return (source.get(key, []) as Array).duplicate(true)
 	return []
+
+
+func _looks_like_backend_enemy_definition(source: Dictionary) -> bool:
+	for key in ["enemy_key", "enemy_type", "max_hp", "xp_reward", "attacks", "loot_entries"]:
+		if source.has(key):
+			return true
+	return false
 
 
 func _copy_string_definition_value(source: Dictionary, target: Dictionary, target_key: String, source_keys: Array) -> void:
@@ -1224,9 +1539,42 @@ func _copy_int_definition_value(source: Dictionary, target: Dictionary, target_k
 
 func _copy_float_definition_value(source: Dictionary, target: Dictionary, target_key: String, source_keys: Array) -> void:
 	for source_key in source_keys:
-		if source.has(source_key):
-			target[target_key] = float(source.get(source_key, target.get(target_key, 0.0)))
-			return
+		if not source.has(source_key):
+			continue
+
+		var raw_value: Variant = source.get(source_key)
+		var parsed_value: Variant = _try_parse_float_value(raw_value, source_key)
+		if parsed_value == null:
+			continue
+
+		target[target_key] = parsed_value
+		return
+
+
+func _optional_float_value(value: Variant, source_key: String, fallback: float) -> float:
+	var parsed_value: Variant = _try_parse_float_value(value, source_key)
+	if parsed_value == null:
+		return fallback
+
+	return parsed_value
+
+
+func _try_parse_float_value(value: Variant, source_key: String) -> Variant:
+	if value == null:
+		return null
+	if value is float:
+		return value
+	if value is int:
+		return float(value)
+	if value is String:
+		var text_value: String = (value as String).strip_edges()
+		if text_value == "":
+			return null
+		if text_value.is_valid_float():
+			return text_value.to_float()
+
+	print("Skipping backend float field '%s': invalid value '%s'." % [source_key, str(value)])
+	return null
 
 
 func _copy_bool_definition_value(source: Dictionary, target: Dictionary, target_key: String, source_keys: Array) -> void:

@@ -286,6 +286,29 @@ $Body = @{
 Invoke-RestMethod -Method Put "$BaseUrl/characters/$CharacterId/ability-loadout" -Headers $Headers -ContentType "application/json" -Body $Body
 ```
 
+### Enemy and region spawn tuning
+
+The prototype enemy and `starter_field` spawn tuning migration is:
+
+```powershell
+cd backend
+alembic upgrade head
+alembic current
+```
+
+Smoke check the static backend values:
+
+```powershell
+$BaseUrl = "http://127.0.0.1:8000"
+Invoke-RestMethod "$BaseUrl/enemy-definitions/grunt"
+Invoke-RestMethod "$BaseUrl/enemy-definitions/brute"
+Invoke-RestMethod "$BaseUrl/enemy-definitions/caster"
+Invoke-RestMethod "$BaseUrl/regions/starter_field/enemy-spawns"
+```
+
+Expected shape: enemy movement, aggro, leash, and attack ranges are already in
+Godot world units, and `starter_field` spawn positions are near the origin.
+
 ### Character deletion
 
 Character deletion uses bearer token auth and only deletes characters owned by the
