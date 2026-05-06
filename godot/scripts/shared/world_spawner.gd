@@ -324,8 +324,10 @@ func apply_confirmed_character_equipment(peer_id: int, equipment: Dictionary) ->
 	rpc_id(peer_id, "apply_character_equipment_update", peer_id, confirmed_equipment)
 
 
-func spawn_prototype_loot_drop(enemy_type: String, drop_position: Vector3) -> void:
+func spawn_prototype_loot_drop(enemy_type: String, drop_position: Vector3, owner_peer_id: int) -> void:
 	if not multiplayer.is_server():
+		return
+	if not players.has(owner_peer_id):
 		return
 
 	var reward_payloads: Array = _prototype_loot_reward_payloads_for_enemy_type(enemy_type)
@@ -344,10 +346,13 @@ func spawn_prototype_loot_drop(enemy_type: String, drop_position: Vector3) -> vo
 			"loot_orb_id": loot_orb_id,
 			"position": loot_position,
 			"active": true,
+			"owner_peer_id": owner_peer_id,
 			"reward_payload": reward_payload,
 		}
 		_loot_orbs[loot_orb_id] = loot_data
-		rpc("spawn_loot_orb", loot_orb_id, loot_position)
+		# Prototype ownership is server-local only. Future loot ownership should
+		# support parties, public timeout, trade rules, and backend persistence if needed.
+		rpc_id(owner_peer_id, "spawn_loot_orb", loot_orb_id, loot_position)
 
 
 func _prototype_loot_reward_payloads_for_enemy_type(enemy_type: String) -> Array:
@@ -715,6 +720,8 @@ func _validate_prototype_loot_pickup(peer_id: int, loot_orb_id: int) -> bool:
 	var loot_data: Dictionary = _loot_orbs[loot_orb_id] as Dictionary
 	if not bool(loot_data.get("active", false)):
 		return false
+	if int(loot_data.get("owner_peer_id", 0)) != peer_id:
+		return false
 
 	var player_position: Vector3 = players[peer_id] as Vector3
 	var loot_position: Vector3 = loot_data.get("position", Vector3.ZERO) as Vector3
@@ -1019,6 +1026,8 @@ func _sync_loot_orbs_to_peer(peer_id: int) -> void:
 	for loot_orb_id in _loot_orbs:
 		var loot_data: Dictionary = _loot_orbs[loot_orb_id] as Dictionary
 		if not bool(loot_data.get("active", false)):
+			continue
+		if int(loot_data.get("owner_peer_id", 0)) != peer_id:
 			continue
 
 		var loot_position: Vector3 = loot_data.get("position", Vector3.ZERO) as Vector3
