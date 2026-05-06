@@ -103,6 +103,12 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Refresh Characters"
 
+[node name="DeleteCharacterButton" type="Button" parent="RootMargin/RootLayout/CharacterButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+disabled = true
+text = "Delete Character"
+
 [node name="EnterGameButton" type="Button" parent="RootMargin/RootLayout"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -158,6 +164,49 @@ layout_mode = 2
 text = "Create"
 
 [node name="CancelCreateCharacterButton" type="Button" parent="CreateCharacterWindow/CreateCharacterMargin/CreateCharacterLayout/CreateCharacterButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Cancel"
+
+[node name="DeleteCharacterWindow" type="Window" parent="."]
+unique_name_in_owner = true
+title = "Delete Character"
+initial_position = 1
+size = Vector2i(380, 170)
+visible = false
+
+[node name="DeleteCharacterMargin" type="MarginContainer" parent="DeleteCharacterWindow"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="DeleteCharacterLayout" type="VBoxContainer" parent="DeleteCharacterWindow/DeleteCharacterMargin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="DeleteCharacterMessageLabel" type="Label" parent="DeleteCharacterWindow/DeleteCharacterMargin/DeleteCharacterLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+text = "Delete selected character?"
+
+[node name="DeleteCharacterButtons" type="HBoxContainer" parent="DeleteCharacterWindow/DeleteCharacterMargin/DeleteCharacterLayout"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ConfirmDeleteCharacterButton" type="Button" parent="DeleteCharacterWindow/DeleteCharacterMargin/DeleteCharacterLayout/DeleteCharacterButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Delete"
+
+[node name="CancelDeleteCharacterButton" type="Button" parent="DeleteCharacterWindow/DeleteCharacterMargin/DeleteCharacterLayout/DeleteCharacterButtons"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Cancel"

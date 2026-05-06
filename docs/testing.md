@@ -155,6 +155,32 @@ $Body = @{
 Invoke-RestMethod -Method Put "$BaseUrl/characters/$CharacterId/ability-loadout" -Headers $Headers -ContentType "application/json" -Body $Body
 ```
 
+### Character deletion
+
+Character deletion uses bearer token auth and only deletes characters owned by the
+authenticated user. Character ability rows and loadout rows are removed with the
+character; user accounts and global ability definitions remain.
+
+PowerShell:
+
+```powershell
+$BaseUrl = "http://127.0.0.1:8000"
+$Auth = Invoke-RestMethod -Method Post "$BaseUrl/auth/login" -ContentType "application/json" -Body '{"email":"dev@example.com","password":"password"}'
+$Headers = @{ Authorization = "Bearer $($Auth.access_token)" }
+
+$CreateBody = @{ name = "Delete Me"; starter_ability_key = "slash" } | ConvertTo-Json
+$Character = Invoke-RestMethod -Method Post "$BaseUrl/characters" -Headers $Headers -ContentType "application/json" -Body $CreateBody
+
+Invoke-RestMethod -Method Delete "$BaseUrl/characters/$($Character.id)" -Headers $Headers
+Invoke-RestMethod -Method Get "$BaseUrl/characters" -Headers $Headers
+
+# Ownership check: repeat the delete with another user's token and the same character id.
+# The expected result is 404 Character not found.
+```
+
+In Godot, log in, select a character on the character select screen, confirm
+Delete Character, and confirm that the list refreshes with no selected character.
+
 ## Local Environment Rules
 
 - Do not modify `backend/.env`.

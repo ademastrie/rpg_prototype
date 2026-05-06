@@ -11,6 +11,9 @@ extends Control
 @onready var create_character_window: Window = %CreateCharacterWindow
 @onready var character_name_edit: LineEdit = %CharacterNameEdit
 @onready var starter_ability_option: OptionButton = %StarterAbilityOption
+@onready var delete_character_button: Button = %DeleteCharacterButton
+@onready var delete_character_window: Window = %DeleteCharacterWindow
+@onready var delete_character_message_label: Label = %DeleteCharacterMessageLabel
 
 const LOGIN_SETTINGS_PATH := "user://prototype_login.cfg"
 const LOGIN_SETTINGS_SECTION := "login"
@@ -32,9 +35,13 @@ func _ready() -> void:
 	%ConfirmCreateCharacterButton.pressed.connect(_on_confirm_create_character_pressed)
 	%CancelCreateCharacterButton.pressed.connect(_on_cancel_create_character_pressed)
 	%RefreshCharactersButton.pressed.connect(_on_refresh_characters_pressed)
+	%DeleteCharacterButton.pressed.connect(_on_delete_character_pressed)
+	%ConfirmDeleteCharacterButton.pressed.connect(_on_confirm_delete_character_pressed)
+	%CancelDeleteCharacterButton.pressed.connect(_on_cancel_delete_character_pressed)
 	%EnterGameButton.pressed.connect(_on_enter_game_pressed)
 	character_list.item_selected.connect(_on_character_selected)
 	create_character_window.close_requested.connect(_on_cancel_create_character_pressed)
+	delete_character_window.close_requested.connect(_on_cancel_delete_character_pressed)
 
 	_setup_starter_ability_options()
 	_load_saved_login_email()
@@ -98,6 +105,44 @@ func _on_refresh_characters_pressed() -> void:
 	_refresh_characters()
 
 
+func _on_delete_character_pressed() -> void:
+	if not _has_token():
+		return
+
+	var character := _selected_character()
+	if character.is_empty():
+		_set_status("Select a character before deleting.")
+		return
+
+	var character_name: String = str(character.get("name", "Unnamed"))
+	delete_character_message_label.text = "Delete %s? This cannot be undone." % character_name
+	delete_character_window.popup_centered()
+
+
+func _on_confirm_delete_character_pressed() -> void:
+	if not _has_token():
+		return
+
+	var character := _selected_character()
+	if character.is_empty():
+		delete_character_window.hide()
+		_set_status("Select a character before deleting.")
+		return
+
+	var character_id := int(character.get("id", 0))
+	if character_id <= 0:
+		delete_character_window.hide()
+		_set_status("Selected character is missing an id.")
+		return
+
+	_track_request(api_client.delete_character(_access_token, character_id), "delete_character")
+	_set_status("Deleting character...")
+
+
+func _on_cancel_delete_character_pressed() -> void:
+	delete_character_window.hide()
+
+
 func _on_enter_game_pressed() -> void:
 	var selected_items := character_list.get_selected_items()
 	if selected_items.is_empty():
@@ -121,7 +166,10 @@ func _on_character_selected(index: int) -> void:
 	if index >= 0 and index < _characters.size():
 		var character := _characters[index]
 		_show_selected_character_info(character)
+		_update_character_actions(true)
 		_set_status("Selected %s." % character.get("name", "character"))
+	else:
+		_clear_selected_character_info()
 
 
 func _on_request_succeeded(request_id: int, _endpoint: String, data: Variant) -> void:
@@ -159,6 +207,10 @@ func _on_request_succeeded(request_id: int, _endpoint: String, data: Variant) ->
 			create_character_window.hide()
 			_clear_create_character_fields()
 			_set_status("Character created. Refreshing list...")
+			_refresh_characters()
+		"delete_character":
+			delete_character_window.hide()
+			_set_status("Character deleted. Refreshing list...")
 			_refresh_characters()
 		_:
 			_set_status("Request succeeded.")
@@ -224,6 +276,7 @@ func _show_selected_character_info(character: Dictionary) -> void:
 
 func _clear_selected_character_info() -> void:
 	selected_character_info_label.text = "No character selected."
+	_update_character_actions(false)
 
 
 func _clear_create_character_fields() -> void:
@@ -269,3 +322,19 @@ func _has_token() -> bool:
 
 func _set_status(message: String) -> void:
 	status_label.text = message
+
+
+func _selected_character() -> Dictionary:
+	var selected_items := character_list.get_selected_items()
+	if selected_items.is_empty():
+		return {}
+
+	var selected_index := selected_items[0]
+	if selected_index < 0 or selected_index >= _characters.size():
+		return {}
+
+	return _characters[selected_index]
+
+
+func _update_character_actions(has_selected_character: bool) -> void:
+	delete_character_button.disabled = not has_selected_character

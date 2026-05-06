@@ -63,6 +63,15 @@ func create_character(access_token: String, name: String, starter_ability_key: S
 	)
 
 
+func delete_character(access_token: String, character_id: int) -> int:
+	return _queue_json_request(
+		"/characters/%s" % character_id,
+		HTTPClient.METHOD_DELETE,
+		{},
+		access_token
+	)
+
+
 func _queue_json_request(
 	endpoint: String,
 	method: int,

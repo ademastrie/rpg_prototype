@@ -9,6 +9,7 @@ from app.characters.schemas import (
     CharacterAbilitiesResponse,
     CharacterAbilityResponse,
     CharacterCreate,
+    CharacterDeleteResponse,
     CharacterCurrencyAward,
     CharacterCurrencyResponse,
     CharacterProgressionResponse,
@@ -361,6 +362,30 @@ def get_character(
         )
 
     return character
+
+
+@router.delete("/{character_id}", response_model=CharacterDeleteResponse)
+def delete_character(
+    character_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CharacterDeleteResponse:
+    character = _get_owned_character(character_id, current_user.id, db)
+
+    db.execute(
+        delete(CharacterAbilityLoadout).where(
+            CharacterAbilityLoadout.character_id == character.id
+        )
+    )
+    db.execute(
+        delete(CharacterAbility).where(
+            CharacterAbility.character_id == character.id
+        )
+    )
+    db.delete(character)
+    db.commit()
+
+    return CharacterDeleteResponse(success=True, character_id=character_id)
 
 
 @router.post("/{character_id}/xp", response_model=CharacterProgressionResponse)

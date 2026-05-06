@@ -24,6 +24,11 @@ class CharacterResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CharacterDeleteResponse(BaseModel):
+    success: bool
+    character_id: int
+
+
 class CharacterXpAward(BaseModel):
     xp_amount: int
 
