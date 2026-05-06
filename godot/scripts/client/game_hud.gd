@@ -21,10 +21,13 @@ var _message_label: Label = null
 var _combat_toggle_button: Button = null
 var _character_panel_button: Button = null
 var _ability_panel_button: Button = null
+var _inventory_panel_button: Button = null
 var _hotbar: HBoxContainer = null
 var _character_panel: PanelContainer = null
 var _ability_panel: PanelContainer = null
+var _inventory_panel: PanelContainer = null
 var _ability_list: VBoxContainer = null
+var _inventory_list: VBoxContainer = null
 var _ability_panel_status: Label = null
 var _character_level_label: Label = null
 var _character_xp_label: Label = null
@@ -46,6 +49,7 @@ var _current_level: int = 1
 var _current_xp: int = 0
 var _current_xp_to_next: int = 100
 var _current_gold: int = 0
+var _confirmed_inventory_items: Array = []
 var _current_max_hp: int = 100
 var _current_damage_reduction: float = 0.0
 var _dragged_panel: Control = null
@@ -98,6 +102,11 @@ func update_gold(gold: int) -> void:
 	_current_gold = max(gold, 0)
 	_gold_label.text = "Gold: %s" % _current_gold
 	_refresh_character_panel()
+
+
+func update_inventory_items(inventory_items: Array) -> void:
+	_confirmed_inventory_items = inventory_items.duplicate(true)
+	_refresh_inventory_panel()
 
 
 func update_down_state(is_down: bool) -> void:
@@ -167,6 +176,10 @@ func toggle_ability_panel() -> void:
 	_ability_panel.visible = not _ability_panel.visible
 
 
+func toggle_inventory_panel() -> void:
+	_inventory_panel.visible = not _inventory_panel.visible
+
+
 func update_ability_enabled(ability_name: String, enabled: bool) -> void:
 	if not _confirmed_loadout.has(ability_name):
 		return
@@ -205,6 +218,7 @@ func _build_layout() -> void:
 	_build_hotbar()
 	_build_character_panel()
 	_build_ability_panel()
+	_build_inventory_panel()
 
 
 func _build_hud() -> void:
@@ -212,7 +226,7 @@ func _build_hud() -> void:
 	_hud_panel.name = "HUDPanel"
 	_hud_panel.offset_left = 16.0
 	_hud_panel.offset_top = 16.0
-	_hud_panel.offset_right = 332.0
+	_hud_panel.offset_right = 428.0
 	_hud_panel.offset_bottom = 208.0
 	_apply_panel_style(_hud_panel)
 	_root.add_child(_hud_panel)
@@ -240,6 +254,9 @@ func _build_hud() -> void:
 
 	_ability_panel_button = _add_button(button_row, "Abilities")
 	_ability_panel_button.pressed.connect(toggle_ability_panel)
+
+	_inventory_panel_button = _add_button(button_row, "Inventory")
+	_inventory_panel_button.pressed.connect(toggle_inventory_panel)
 
 	_message_label = _add_label(_hud_vbox, "")
 	_message_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -368,6 +385,32 @@ func _build_ability_panel() -> void:
 	_refresh_ability_panel_options()
 
 
+func _build_inventory_panel() -> void:
+	_inventory_panel = PanelContainer.new()
+	_inventory_panel.name = "InventoryPanel"
+	_inventory_panel.visible = false
+	_inventory_panel.anchor_left = 1.0
+	_inventory_panel.anchor_right = 1.0
+	_inventory_panel.offset_left = -336.0
+	_inventory_panel.offset_top = 556.0
+	_inventory_panel.offset_right = -16.0
+	_inventory_panel.offset_bottom = 760.0
+	_apply_panel_style(_inventory_panel)
+	_root.add_child(_inventory_panel)
+
+	var panel_vbox: VBoxContainer = VBoxContainer.new()
+	panel_vbox.add_theme_constant_override("separation", 6)
+	_inventory_panel.add_child(panel_vbox)
+
+	var title_label: Label = _add_title_label(panel_vbox, "Inventory")
+	title_label.gui_input.connect(_on_panel_drag_handle_input.bind(_inventory_panel))
+
+	_inventory_list = VBoxContainer.new()
+	_inventory_list.add_theme_constant_override("separation", 2)
+	panel_vbox.add_child(_inventory_list)
+	_refresh_inventory_panel()
+
+
 func _add_label(parent: Control, text: String) -> Label:
 	var label: Label = Label.new()
 	label.text = text
@@ -451,6 +494,31 @@ func _refresh_character_panel() -> void:
 	_character_gold_label.text = "Gold: %s" % _current_gold
 	_character_max_hp_label.text = "Max HP: %s" % _current_max_hp
 	_character_damage_reduction_label.text = "Damage Reduction: %s%%" % int(round(_current_damage_reduction * 100.0))
+
+
+func _refresh_inventory_panel() -> void:
+	if _inventory_list == null:
+		return
+
+	for child in _inventory_list.get_children():
+		_inventory_list.remove_child(child)
+		child.queue_free()
+
+	if _confirmed_inventory_items.is_empty():
+		_add_label(_inventory_list, "No confirmed items yet.")
+		return
+
+	for item_variant in _confirmed_inventory_items:
+		if not (item_variant is Dictionary):
+			continue
+
+		var item: Dictionary = item_variant as Dictionary
+		var item_key: String = str(item.get("item_key", "")).strip_edges()
+		var display_name: String = str(item.get("display_name", item_key)).strip_edges()
+		var quantity: int = max(int(item.get("quantity", 0)), 0)
+		if display_name == "":
+			display_name = item_key
+		_add_label(_inventory_list, "%s x%s" % [display_name, quantity])
 
 
 func _refresh_ability_panel_options() -> void:

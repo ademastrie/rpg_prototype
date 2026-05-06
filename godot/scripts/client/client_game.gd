@@ -30,6 +30,7 @@ var _has_sent_join_request := false
 var _was_combat_toggle_pressed := false
 var _was_character_panel_toggle_pressed := false
 var _was_ability_panel_toggle_pressed := false
+var _was_inventory_panel_toggle_pressed := false
 var _is_local_player_down := false
 var _window_has_focus: bool = true
 var _confirmed_ability_names: Array[String] = []
@@ -48,6 +49,7 @@ func _ready() -> void:
 	world_spawner.player_combat_stats_updated.connect(_on_player_combat_stats_updated)
 	world_spawner.character_progression_updated.connect(_on_character_progression_updated)
 	world_spawner.character_gold_updated.connect(_on_character_gold_updated)
+	world_spawner.character_inventory_updated.connect(_on_character_inventory_updated)
 	world_spawner.combat_mode_updated.connect(_on_combat_mode_updated)
 	world_spawner.ability_enabled_updated.connect(_on_ability_enabled_updated)
 	world_spawner.ability_state_updated.connect(_on_ability_state_updated)
@@ -108,6 +110,7 @@ func _process(delta: float) -> void:
 	_read_combat_toggle_input()
 	_read_character_panel_toggle_input()
 	_read_ability_panel_toggle_input()
+	_read_inventory_panel_toggle_input()
 	_update_camera_follow(delta)
 
 
@@ -149,6 +152,7 @@ func _on_connection_failed() -> void:
 	_was_combat_toggle_pressed = false
 	_was_character_panel_toggle_pressed = false
 	_was_ability_panel_toggle_pressed = false
+	_was_inventory_panel_toggle_pressed = false
 	game_hud.call("show_status_message", "Failed to connect to game server.")
 	print("Failed to connect to game server.")
 
@@ -161,6 +165,7 @@ func _on_server_disconnected() -> void:
 	_was_combat_toggle_pressed = false
 	_was_character_panel_toggle_pressed = false
 	_was_ability_panel_toggle_pressed = false
+	_was_inventory_panel_toggle_pressed = false
 	game_hud.call("show_status_message", "Disconnected from game server.")
 	print("Disconnected from game server.")
 
@@ -224,6 +229,13 @@ func _on_character_gold_updated(peer_id: int, gold: int) -> void:
 	game_hud.call("update_gold", confirmed_gold)
 	selected_character["gold"] = confirmed_gold
 	ClientSession.selected_character["gold"] = confirmed_gold
+
+
+func _on_character_inventory_updated(peer_id: int, inventory_items: Array) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+
+	game_hud.call("update_inventory_items", inventory_items)
 
 
 func _on_player_down_state_updated(peer_id: int, is_down: bool) -> void:
@@ -409,6 +421,14 @@ func _read_ability_panel_toggle_input() -> void:
 		game_hud.call("toggle_ability_panel")
 
 	_was_ability_panel_toggle_pressed = is_toggle_pressed
+
+
+func _read_inventory_panel_toggle_input() -> void:
+	var is_toggle_pressed: bool = Input.is_key_pressed(KEY_I)
+	if is_toggle_pressed and not _was_inventory_panel_toggle_pressed:
+		game_hud.call("toggle_inventory_panel")
+
+	_was_inventory_panel_toggle_pressed = is_toggle_pressed
 
 
 func _send_combat_toggle_request() -> void:

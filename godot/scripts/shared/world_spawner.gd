@@ -7,6 +7,7 @@ signal player_down_state_updated(peer_id: int, is_down: bool)
 signal player_combat_stats_updated(peer_id: int, combat_stats: Dictionary)
 signal character_progression_updated(peer_id: int, progression: Dictionary)
 signal character_gold_updated(peer_id: int, gold: int)
+signal character_inventory_updated(peer_id: int, inventory_items: Array)
 signal combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries: Array)
 signal ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool)
 signal ability_state_updated(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float)
@@ -35,7 +36,11 @@ signal loot_reward_pickup_requested(peer_id: int, loot_orb_id: int, reward_paylo
 @export var player_respawn_delay_seconds: float = 3.0
 @export var prototype_loot_drop_chance: float = 1.0
 @export var prototype_loot_pickup_radius: float = 1.5
+@export var prototype_loot_reward_type: String = "item"
 @export var prototype_loot_gold_amount: int = 3
+@export var prototype_loot_item_key: String = "slime_gel"
+@export var prototype_loot_item_display_name: String = "Slime Gel"
+@export var prototype_loot_item_quantity: int = 1
 @export var debug_join_sync_logs: bool = false
 
 var players: Dictionary = {}
@@ -51,6 +56,7 @@ var _player_is_down_by_peer: Dictionary = {}
 var _player_combat_stats_by_peer: Dictionary = {}
 var _character_progression_by_peer: Dictionary = {}
 var _character_gold_by_peer: Dictionary = {}
+var _character_inventory_items_by_peer: Dictionary = {}
 var _player_respawn_positions: Dictionary = {}
 var _last_contact_damage_time_by_peer: Dictionary = {}
 var _combat_enabled_by_peer: Dictionary = {}
@@ -168,6 +174,7 @@ func unregister_peer(peer_id: int) -> void:
 	_player_combat_stats_by_peer.erase(peer_id)
 	_character_progression_by_peer.erase(peer_id)
 	_character_gold_by_peer.erase(peer_id)
+	_character_inventory_items_by_peer.erase(peer_id)
 	_player_respawn_positions.erase(peer_id)
 	_last_contact_damage_time_by_peer.erase(peer_id)
 	_combat_enabled_by_peer.erase(peer_id)
@@ -271,6 +278,15 @@ func apply_confirmed_character_gold(peer_id: int, gold: int) -> void:
 	rpc_id(peer_id, "apply_character_gold_update", peer_id, confirmed_gold)
 
 
+func apply_confirmed_character_inventory(peer_id: int, inventory_items: Array) -> void:
+	if not multiplayer.is_server() or not players.has(peer_id):
+		return
+
+	var confirmed_items: Array = inventory_items.duplicate(true)
+	_character_inventory_items_by_peer[peer_id] = confirmed_items
+	rpc_id(peer_id, "apply_character_inventory_update", peer_id, confirmed_items)
+
+
 func spawn_prototype_loot_drop(drop_position: Vector3) -> void:
 	if not multiplayer.is_server():
 		return
@@ -279,15 +295,15 @@ func spawn_prototype_loot_drop(drop_position: Vector3) -> void:
 	if prototype_loot_drop_chance < 1.0 and randf() > prototype_loot_drop_chance:
 		return
 
+	# Prototype world-drop flow only. The pickup stays generic: future loot
+	# should come from backend loot tables, item definitions, inventory,
+	# equipment rules, and player/party ownership metadata.
+	var reward_payload: Dictionary = _prototype_loot_reward_payload()
+	if reward_payload.is_empty():
+		return
+
 	var loot_orb_id: int = _next_loot_orb_id
 	_next_loot_orb_id += 1
-	# Prototype world-drop flow only. The pickup stays generic: future reward
-	# payloads may include items, materials, quest objects, mixed reward bundles,
-	# and player/party ownership metadata.
-	var reward_payload: Dictionary = {
-		"type": "currency",
-		"gold_amount": max(prototype_loot_gold_amount, 0),
-	}
 	var loot_data: Dictionary = {
 		"loot_orb_id": loot_orb_id,
 		"position": drop_position,
@@ -296,6 +312,25 @@ func spawn_prototype_loot_drop(drop_position: Vector3) -> void:
 	}
 	_loot_orbs[loot_orb_id] = loot_data
 	rpc("spawn_loot_orb", loot_orb_id, drop_position)
+
+
+func _prototype_loot_reward_payload() -> Dictionary:
+	var reward_type: String = prototype_loot_reward_type.strip_edges()
+	if reward_type == "currency":
+		return {
+			"type": "currency",
+			"gold_amount": max(prototype_loot_gold_amount, 0),
+		}
+	if reward_type == "item":
+		return {
+			"type": "item",
+			"item_key": prototype_loot_item_key.strip_edges(),
+			"display_name": prototype_loot_item_display_name.strip_edges(),
+			"quantity": max(prototype_loot_item_quantity, 1),
+		}
+
+	print("Unsupported prototype loot reward type: %s." % reward_type)
+	return {}
 
 
 func _process(delta: float) -> void:
@@ -984,6 +1019,13 @@ func apply_character_gold_update(peer_id: int, gold: int) -> void:
 
 
 @rpc("authority", "call_remote", "reliable")
+func apply_character_inventory_update(peer_id: int, inventory_items: Array) -> void:
+	var confirmed_items: Array = inventory_items.duplicate(true)
+	_character_inventory_items_by_peer[peer_id] = confirmed_items
+	character_inventory_updated.emit(peer_id, confirmed_items)
+
+
+@rpc("authority", "call_remote", "reliable")
 func apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_entries: Array) -> void:
 	_combat_enabled_by_peer[peer_id] = combat_enabled
 	var loadout: Array = []
@@ -1355,6 +1397,7 @@ func despawn_player(peer_id: int) -> void:
 	_ability_enabled_by_peer.erase(peer_id)
 	_character_progression_by_peer.erase(peer_id)
 	_character_gold_by_peer.erase(peer_id)
+	_character_inventory_items_by_peer.erase(peer_id)
 	_player_is_down_by_peer.erase(peer_id)
 	print("Despawned player for peer %s." % peer_id)
 	spawned_player_count_changed.emit(_spawned_nodes.size())

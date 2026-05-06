@@ -24,6 +24,9 @@ const LEVEL_UNLOCK_REWARDS: Array[Dictionary] = [
 	{"level": 2, "ability_key": "hp_regen"},
 	{"level": 3, "ability_key": "damage_aura"},
 ]
+const PROTOTYPE_ITEM_DISPLAY_NAMES: Dictionary = {
+	"slime_gel": "Slime Gel",
+}
 
 
 func _ready() -> void:
@@ -311,6 +314,7 @@ func _complete_validated_join(peer_id: int, session: Dictionary, loadout_data: D
 		"xp_to_next": int(session.get("xp_to_next", int(session.get("level", 1)) * 100)),
 	})
 	world_spawner.call("apply_confirmed_character_gold", peer_id, int(session.get("gold", 0)))
+	world_spawner.call("apply_confirmed_character_inventory", peer_id, session.get("inventory_items", []) as Array)
 	_log_join_timing(peer_id, "initial player sync sent")
 	enemy_spawner.call("sync_peer", peer_id)
 	_log_join_timing(peer_id, "initial enemy sync sent")
@@ -542,11 +546,14 @@ func _on_loot_reward_pickup_requested(peer_id: int, loot_orb_id: int, reward_pay
 		return
 
 	# Pickup reward payloads are server-owned and intentionally generic. Future
-	# payloads may include items, materials, quest objects, mixed reward bundles,
-	# and player/party ownership rules.
+	# rewards should come from backend loot tables, item definitions, inventory,
+	# equipment rules, and player/party ownership metadata.
 	var reward_type: String = str(reward_payload.get("type", "")).strip_edges()
 	if reward_type == "currency":
 		_award_loot_currency(peer_id, loot_orb_id, reward_payload)
+		return
+	if reward_type == "item":
+		_award_loot_item(peer_id, loot_orb_id, reward_payload)
 		return
 
 	print("Rejecting unsupported loot reward for peer %s orb %s: %s" % [peer_id, loot_orb_id, reward_payload])
@@ -629,6 +636,183 @@ func _on_loot_currency_award_completed(
 	world_spawner.call("apply_confirmed_character_gold", peer_id, confirmed_gold)
 	world_spawner.call("confirm_loot_pickup", loot_orb_id)
 	world_spawner.rpc_id(peer_id, "apply_status_message", peer_id, "Picked up %s gold" % gold_amount)
+
+
+func _award_loot_item(peer_id: int, loot_orb_id: int, reward_payload: Dictionary) -> void:
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	if not bool(session.get("joined", false)):
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+		return
+
+	var access_token: String = str(session.get("access_token", ""))
+	var character_id: int = int(session.get("character_id", 0))
+	var item_key: String = str(reward_payload.get("item_key", "")).strip_edges()
+	var quantity: int = int(reward_payload.get("quantity", 0))
+	if access_token.strip_edges() == "" or character_id <= 0:
+		print("Cannot award loot item for peer %s orb %s: missing validated session data." % [peer_id, loot_orb_id])
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+		return
+	if item_key == "" or quantity <= 0:
+		print("Cannot award loot item for peer %s orb %s: invalid item payload %s." % [peer_id, loot_orb_id, reward_payload])
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+		return
+
+	var request: HTTPRequest = HTTPRequest.new()
+	add_child(request)
+	request.request_completed.connect(_on_loot_item_award_completed.bind(peer_id, loot_orb_id, item_key, quantity, str(reward_payload.get("display_name", "")), request))
+
+	var headers: PackedStringArray = PackedStringArray([
+		"Content-Type: application/json",
+		"Authorization: Bearer %s" % access_token,
+	])
+	var body: String = JSON.stringify({
+		"item_key": item_key,
+		"quantity": quantity,
+	})
+	var url: String = "%s/characters/%s/inventory/items" % [_normalized_backend_base_url(), character_id]
+	var error: Error = request.request(url, headers, HTTPClient.METHOD_POST, body)
+	if error != OK:
+		print("Failed to start loot item award for peer %s orb %s: %s" % [peer_id, loot_orb_id, error])
+		request.queue_free()
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+
+
+func _on_loot_item_award_completed(
+	result: int,
+	response_code: int,
+	_headers: PackedStringArray,
+	body: PackedByteArray,
+	peer_id: int,
+	loot_orb_id: int,
+	item_key: String,
+	quantity: int,
+	payload_display_name: String,
+	request: HTTPRequest
+) -> void:
+	request.queue_free()
+	if not connected_peers.has(peer_id):
+		world_spawner.call("confirm_loot_pickup", loot_orb_id)
+		return
+
+	var response_text: String = body.get_string_from_utf8()
+	if result != HTTPRequest.RESULT_SUCCESS:
+		print("Loot item award failed for peer %s orb %s: HTTPRequest result %s." % [peer_id, loot_orb_id, result])
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+		return
+
+	var json: JSON = JSON.new()
+	var parse_error: Error = json.parse(response_text)
+	if parse_error != OK or not (json.data is Dictionary):
+		print("Loot item award returned invalid JSON for peer %s orb %s. status=%s response=%s" % [peer_id, loot_orb_id, response_code, response_text])
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+		return
+
+	var response_data: Dictionary = json.data as Dictionary
+	if response_code < 200 or response_code >= 300:
+		print("Loot item award rejected peer %s orb %s: status=%s response=%s" % [peer_id, loot_orb_id, response_code, response_data])
+		world_spawner.call("reject_loot_pickup", loot_orb_id)
+		return
+
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	var existing_inventory: Array = session.get("inventory_items", []) as Array
+	var confirmed_inventory: Array = _confirmed_inventory_from_item_response(response_data, existing_inventory, item_key, quantity, payload_display_name)
+	session["inventory_items"] = confirmed_inventory
+	peer_sessions[peer_id] = session
+	world_spawner.call("apply_confirmed_character_inventory", peer_id, confirmed_inventory)
+	world_spawner.call("confirm_loot_pickup", loot_orb_id)
+	var display_name: String = _display_name_for_item_payload(item_key, payload_display_name)
+	world_spawner.rpc_id(peer_id, "apply_status_message", peer_id, "Picked up %s x%s" % [display_name, quantity])
+
+
+func _confirmed_inventory_from_item_response(response_data: Dictionary, existing_inventory: Array, item_key: String, quantity: int, payload_display_name: String) -> Array:
+	var response_items: Array = _extract_inventory_items(response_data)
+	if not response_items.is_empty():
+		return response_items
+
+	var confirmed_item: Dictionary = _normalize_inventory_item(response_data)
+	if confirmed_item.is_empty():
+		confirmed_item = {
+			"item_key": item_key,
+			"display_name": _display_name_for_item_payload(item_key, payload_display_name),
+			"quantity": quantity,
+		}
+	return _merge_confirmed_inventory_item(existing_inventory, confirmed_item, item_key, quantity, payload_display_name)
+
+
+func _extract_inventory_items(response_data: Dictionary) -> Array:
+	var candidates: Array = []
+	if response_data.get("items", null) is Array:
+		candidates = response_data.get("items", []) as Array
+	elif response_data.get("inventory", null) is Dictionary:
+		var inventory: Dictionary = response_data.get("inventory", {}) as Dictionary
+		if inventory.get("items", null) is Array:
+			candidates = inventory.get("items", []) as Array
+
+	var items: Array = []
+	for item_variant in candidates:
+		if not (item_variant is Dictionary):
+			continue
+
+		var item: Dictionary = _normalize_inventory_item(item_variant as Dictionary)
+		if not item.is_empty():
+			items.append(item)
+	return items
+
+
+func _merge_confirmed_inventory_item(existing_inventory: Array, confirmed_item: Dictionary, fallback_item_key: String, fallback_quantity: int, fallback_display_name: String) -> Array:
+	var merged_by_key: Dictionary = {}
+	for item_variant in existing_inventory:
+		if not (item_variant is Dictionary):
+			continue
+
+		var existing_item: Dictionary = _normalize_inventory_item(item_variant as Dictionary)
+		var existing_key: String = str(existing_item.get("item_key", "")).strip_edges()
+		if existing_key != "":
+			merged_by_key[existing_key] = existing_item
+
+	var item_key: String = str(confirmed_item.get("item_key", fallback_item_key)).strip_edges()
+	if item_key == "":
+		return merged_by_key.values()
+
+	var quantity: int = int(confirmed_item.get("quantity", fallback_quantity))
+	var display_name: String = str(confirmed_item.get("display_name", _display_name_for_item_payload(item_key, fallback_display_name))).strip_edges()
+	merged_by_key[item_key] = {
+		"item_key": item_key,
+		"display_name": display_name if display_name != "" else _display_name_for_item_payload(item_key, fallback_display_name),
+		"quantity": max(quantity, 0),
+	}
+	return merged_by_key.values()
+
+
+func _normalize_inventory_item(item_data: Dictionary) -> Dictionary:
+	var item_key: String = str(item_data.get("item_key", item_data.get("key", ""))).strip_edges()
+	if item_key == "" and item_data.get("item", null) is Dictionary:
+		var nested_item: Dictionary = item_data.get("item", {}) as Dictionary
+		item_key = str(nested_item.get("item_key", nested_item.get("key", ""))).strip_edges()
+	if item_key == "":
+		return {}
+
+	var display_name: String = str(item_data.get("display_name", "")).strip_edges()
+	if display_name == "" and item_data.get("definition", null) is Dictionary:
+		display_name = str((item_data.get("definition", {}) as Dictionary).get("display_name", "")).strip_edges()
+	if display_name == "" and item_data.get("item", null) is Dictionary:
+		var nested_item: Dictionary = item_data.get("item", {}) as Dictionary
+		display_name = str(nested_item.get("display_name", "")).strip_edges()
+
+	return {
+		"item_key": item_key,
+		"display_name": display_name if display_name != "" else _display_name_for_item_payload(item_key, ""),
+		"quantity": max(int(item_data.get("quantity", item_data.get("count", 0))), 0),
+	}
+
+
+func _display_name_for_item_payload(item_key: String, fallback_display_name: String) -> String:
+	var display_name: String = fallback_display_name.strip_edges()
+	if display_name != "":
+		return display_name
+	if PROTOTYPE_ITEM_DISPLAY_NAMES.has(item_key):
+		return str(PROTOTYPE_ITEM_DISPLAY_NAMES[item_key])
+	return item_key.replace("_", " ").capitalize()
 
 
 func _award_kill_xp(peer_id: int, enemy_id: int) -> void:
