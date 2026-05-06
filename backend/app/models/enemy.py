@@ -30,6 +30,10 @@ class EnemyDefinition(Base):
         cascade="all, delete-orphan",
         order_by="EnemyLootEntry.id",
     )
+    region_spawns: Mapped[list["RegionEnemySpawn"]] = relationship(
+        back_populates="enemy_definition",
+        order_by="RegionEnemySpawn.id",
+    )
 
 
 class EnemyAttack(Base):

@@ -2,10 +2,12 @@
 
 Enemy definitions are database-backed static content only. They should not create or update live enemy HP, position, aggro, cooldown, or other runtime state.
 
+Region definitions and region enemy spawn definitions are also database-backed static content only. They describe where enemies may spawn, but they should not store live enemy HP, position, target, cooldown, aggro, or respawn runtime state.
+
 Migration steps:
 
 - From `backend/`, run `alembic upgrade head`.
-- In Swagger, open `/docs` and inspect `GET /enemy-definitions` and `GET /enemy-definitions/{enemy_key}`.
+- In Swagger, open `/docs` and inspect `GET /enemy-definitions`, `GET /enemy-definitions/{enemy_key}`, `GET /regions`, `GET /regions/{region_key}`, and `GET /regions/{region_key}/enemy-spawns`.
 
 PowerShell smoke checks:
 
@@ -14,6 +16,9 @@ $baseUrl = "http://127.0.0.1:8000"
 Invoke-RestMethod "$baseUrl/enemy-definitions"
 Invoke-RestMethod "$baseUrl/enemy-definitions/grunt"
 Invoke-RestMethod "$baseUrl/enemy-definitions/caster"
+Invoke-RestMethod "$baseUrl/regions"
+Invoke-RestMethod "$baseUrl/regions/starter_field"
+Invoke-RestMethod "$baseUrl/regions/starter_field/enemy-spawns"
 ```
 
 Expected static-review shape:
@@ -22,6 +27,9 @@ Expected static-review shape:
 - `GET /enemy-definitions/grunt` should include melee attack data and gold/currency plus item loot entries.
 - Currency loot entries should have `payload_type` set to `currency` and `item_key` set to `null`.
 - Item loot entries should reference already seeded item definitions such as `slime_gel`, `training_sword`, or `padded_chest`.
+- `GET /regions/starter_field` should return `Starter Field` with active static enemy spawn definitions.
+- `GET /regions/starter_field/enemy-spawns` should include `grunt`, `brute`, and `caster` spawn definitions with referenced enemy display names when those enemy definitions are active.
+- Region enemy spawn definitions should include only static spawn config such as spawn position, radius, max alive count, respawn seconds, behavior profile, patrol path key, and optional leash/aggro overrides.
 
 Static-review scenarios for inventory instances:
 

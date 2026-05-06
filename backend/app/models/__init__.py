@@ -3,6 +3,7 @@ from app.models.ability import AbilityDefinition, AbilityEffect, CharacterAbilit
 from app.models.character import Character
 from app.models.enemy import EnemyAttack, EnemyDefinition, EnemyLootEntry
 from app.models.item import CharacterEquipment, CharacterInventory, ItemDefinition, ItemStatModifier
+from app.models.region import RegionDefinition, RegionEnemySpawn
 from app.models.user import User
 
 
@@ -20,5 +21,7 @@ __all__ = [
     "EnemyLootEntry",
     "ItemDefinition",
     "ItemStatModifier",
+    "RegionDefinition",
+    "RegionEnemySpawn",
     "User",
 ]
