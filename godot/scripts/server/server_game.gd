@@ -26,12 +26,18 @@ const LEVEL_UNLOCK_REWARDS: Array[Dictionary] = [
 ]
 const PROTOTYPE_ITEM_DISPLAY_NAMES: Dictionary = {
 	"slime_gel": "Slime Gel",
+	"training_sword": "Training Sword",
+	"padded_chest": "Padded Chest",
+	"cloth_hood": "Cloth Hood",
+	"worn_boots": "Worn Boots",
 }
 const PROTOTYPE_EQUIP_SLOT_BY_ITEM_KEY: Dictionary = {
 	"training_sword": "weapon",
 	"apprentice_staff": "weapon",
 	"simple_bow": "weapon",
 	"padded_chest": "chest",
+	"cloth_hood": "head",
+	"worn_boots": "feet",
 }
 const EQUIPMENT_SLOTS: Array[String] = ["weapon", "head", "chest", "arms", "hands", "legs", "feet"]
 
@@ -945,8 +951,8 @@ func _on_loot_reward_pickup_requested(peer_id: int, loot_orb_id: int, reward_pay
 		return
 
 	# Pickup reward payloads are server-owned and intentionally generic. Future
-	# rewards should come from backend loot tables, item definitions, inventory,
-	# equipment rules, and player/party ownership metadata.
+	# rewards should come from backend/database-backed loot tables with item
+	# rarity, affixes, inventory/equipment rules, and player/party ownership.
 	var reward_type: String = str(reward_payload.get("type", "")).strip_edges()
 	if reward_type == "currency":
 		_award_loot_currency(peer_id, loot_orb_id, reward_payload)

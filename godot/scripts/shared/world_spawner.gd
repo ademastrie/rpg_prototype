@@ -43,6 +43,7 @@ signal loot_reward_pickup_requested(peer_id: int, loot_orb_id: int, reward_paylo
 @export var prototype_loot_item_key: String = "slime_gel"
 @export var prototype_loot_item_display_name: String = "Slime Gel"
 @export var prototype_loot_item_quantity: int = 1
+@export var prototype_equipment_drop_chance: float = 0.15
 @export var debug_join_sync_logs: bool = false
 
 var players: Dictionary = {}
@@ -92,6 +93,12 @@ const SPAWN_POSITIONS: Array[Vector3] = [
 ]
 
 const DEFAULT_LOADOUT: Array[String] = ["Slash", "HP Regen", "Damage Aura", "Firebolt"]
+const PROTOTYPE_EQUIPMENT_DROP_ITEMS: Array[Dictionary] = [
+	{"item_key": "training_sword", "display_name": "Training Sword"},
+	{"item_key": "padded_chest", "display_name": "Padded Chest"},
+	{"item_key": "cloth_hood", "display_name": "Cloth Hood"},
+	{"item_key": "worn_boots", "display_name": "Worn Boots"},
+]
 const ABILITY_DEFINITIONS: Dictionary = {
 	"Slash": {
 		"cooldown": 1.25,
@@ -307,15 +314,14 @@ func apply_confirmed_character_equipment(peer_id: int, equipment: Dictionary) ->
 func spawn_prototype_loot_drop(drop_position: Vector3) -> void:
 	if not multiplayer.is_server():
 		return
-	if prototype_loot_drop_chance <= 0.0:
-		return
-	if prototype_loot_drop_chance < 1.0 and randf() > prototype_loot_drop_chance:
-		return
 
 	# Prototype world-drop flow only. Each pickup stays generic and server-owned:
 	# future loot should come from backend/database-backed loot tables, item
-	# definitions, inventory, equipment rules, and player/party ownership metadata.
+	# rarity, affixes, inventory/equipment rules, and player/party ownership metadata.
 	var reward_payloads: Array = _prototype_loot_reward_payloads()
+	var equipment_payload: Dictionary = _prototype_equipment_reward_payload()
+	if not equipment_payload.is_empty():
+		reward_payloads.append(equipment_payload)
 	if reward_payloads.is_empty():
 		return
 
@@ -339,6 +345,10 @@ func spawn_prototype_loot_drop(drop_position: Vector3) -> void:
 
 func _prototype_loot_reward_payloads() -> Array:
 	var reward_payloads: Array = []
+	if prototype_loot_drop_chance <= 0.0:
+		return reward_payloads
+	if prototype_loot_drop_chance < 1.0 and randf() > prototype_loot_drop_chance:
+		return reward_payloads
 
 	var gold_amount: int = max(prototype_loot_gold_amount, 1)
 	reward_payloads.append({
@@ -356,6 +366,26 @@ func _prototype_loot_reward_payloads() -> Array:
 		})
 
 	return reward_payloads
+
+
+func _prototype_equipment_reward_payload() -> Dictionary:
+	if prototype_equipment_drop_chance <= 0.0 or PROTOTYPE_EQUIPMENT_DROP_ITEMS.is_empty():
+		return {}
+	if prototype_equipment_drop_chance < 1.0 and randf() > prototype_equipment_drop_chance:
+		return {}
+
+	var item_index: int = randi_range(0, PROTOTYPE_EQUIPMENT_DROP_ITEMS.size() - 1)
+	var item_data: Dictionary = PROTOTYPE_EQUIPMENT_DROP_ITEMS[item_index] as Dictionary
+	var item_key: String = str(item_data.get("item_key", "")).strip_edges()
+	if item_key == "":
+		return {}
+
+	return {
+		"type": "item",
+		"item_key": item_key,
+		"display_name": str(item_data.get("display_name", "")).strip_edges(),
+		"quantity": 1,
+	}
 
 
 func _prototype_loot_position_offset(reward_index: int, reward_count: int) -> Vector3:
