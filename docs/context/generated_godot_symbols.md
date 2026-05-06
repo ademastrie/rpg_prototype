@@ -174,6 +174,7 @@
 - `_refresh_hotbar() -> void:`
 - `_refresh_character_panel() -> void:`
 - `_equipment_display_text(slot_name: String) -> String:`
+- `_format_stat_number(value: float) -> String:`
 - `_refresh_equipment_slot_options() -> void:`
 - `_confirmed_item_key_for_slot(slot_name: String) -> String:`
 - `_confirmed_equipment_item_for_slot(slot_name: String) -> Dictionary:`
@@ -361,6 +362,9 @@
 - `_empty_character_equipment() -> Dictionary:`
 - `_equipment_entry_candidates(response_data: Dictionary) -> Array:`
 - `_normalize_equipment_entry(entry_data: Dictionary) -> Dictionary:`
+- `_extract_stat_modifiers_from_item(item_data: Dictionary) -> Array:`
+- `_stat_modifier_containers(item_data: Dictionary) -> Array:`
+- `_normalize_stat_modifier(modifier_data: Dictionary) -> Dictionary:`
 - `_parse_backend_ability_loadout(peer_id: int, character_id: int, response_data: Dictionary) -> Dictionary:`
 - `_backend_unlocked_abilities(response_data: Dictionary) -> Array:`
 - `_backend_ability_display_names(response_data: Dictionary) -> Dictionary:`
@@ -570,6 +574,7 @@
 - `prototype_loot_item_key: String = "slime_gel"`
 - `prototype_loot_item_display_name: String = "Slime Gel"`
 - `prototype_loot_item_quantity: int = 1`
+- `prototype_equipment_drop_chance: float = 0.15`
 - `debug_join_sync_logs: bool = false`
 
 ### Functions
@@ -590,6 +595,7 @@
 - `apply_confirmed_character_equipment(peer_id: int, equipment: Dictionary) -> void:`
 - `spawn_prototype_loot_drop(drop_position: Vector3) -> void:`
 - `_prototype_loot_reward_payloads() -> Array:`
+- `_prototype_equipment_reward_payload() -> Dictionary:`
 - `_prototype_loot_position_offset(reward_index: int, reward_count: int) -> Vector3:`
 - `_process(delta: float) -> void:`
 - `_simulate(delta: float) -> void:`
@@ -599,6 +605,11 @@
 - `_modified_player_damage_taken(peer_id: int, raw_damage: int) -> int:`
 - `_default_player_combat_stats() -> Dictionary:`
 - `_recalculate_player_combat_stats(peer_id: int, restore_current_hp_to_max: bool = false) -> void:`
+- `_apply_equipped_item_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> void:`
+- `_equipment_item_stat_modifiers(equipment_item: Dictionary) -> Array:`
+- `_apply_stat_modifier_to_combat_stats(combat_stats: Dictionary, modifier: Dictionary) -> void:`
+- `_is_percent_modifier(modifier_type: String) -> bool:`
+- `_percent_modifier_value(value: float) -> float:`
 - `_apply_computed_player_max_hp(peer_id: int, computed_max_hp: int, restore_current_hp_to_max: bool = false) -> void:`
 - `_mark_player_down(peer_id: int) -> void:`
 - `_schedule_player_respawn(peer_id: int) -> void:`
