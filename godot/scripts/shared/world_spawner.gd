@@ -8,6 +8,7 @@ signal player_combat_stats_updated(peer_id: int, combat_stats: Dictionary)
 signal character_progression_updated(peer_id: int, progression: Dictionary)
 signal character_gold_updated(peer_id: int, gold: int)
 signal character_inventory_updated(peer_id: int, inventory_items: Array)
+signal character_equipment_updated(peer_id: int, equipment: Dictionary)
 signal combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries: Array)
 signal ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool)
 signal ability_state_updated(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float)
@@ -57,6 +58,7 @@ var _player_combat_stats_by_peer: Dictionary = {}
 var _character_progression_by_peer: Dictionary = {}
 var _character_gold_by_peer: Dictionary = {}
 var _character_inventory_items_by_peer: Dictionary = {}
+var _character_equipment_by_peer: Dictionary = {}
 var _player_respawn_positions: Dictionary = {}
 var _last_contact_damage_time_by_peer: Dictionary = {}
 var _combat_enabled_by_peer: Dictionary = {}
@@ -175,6 +177,7 @@ func unregister_peer(peer_id: int) -> void:
 	_character_progression_by_peer.erase(peer_id)
 	_character_gold_by_peer.erase(peer_id)
 	_character_inventory_items_by_peer.erase(peer_id)
+	_character_equipment_by_peer.erase(peer_id)
 	_player_respawn_positions.erase(peer_id)
 	_last_contact_damage_time_by_peer.erase(peer_id)
 	_combat_enabled_by_peer.erase(peer_id)
@@ -245,6 +248,7 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_recalculate_player_combat_stats(peer_id, true)
 	_character_progression_by_peer[peer_id] = {"level": 1, "xp": 0, "xp_to_next": 100}
 	_character_gold_by_peer[peer_id] = 0
+	_character_equipment_by_peer[peer_id] = {}
 	var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
 	rpc("apply_player_health_update", peer_id, max_hp, max_hp)
 	rpc("apply_player_down_state", peer_id, false)
@@ -285,6 +289,15 @@ func apply_confirmed_character_inventory(peer_id: int, inventory_items: Array) -
 	var confirmed_items: Array = inventory_items.duplicate(true)
 	_character_inventory_items_by_peer[peer_id] = confirmed_items
 	rpc_id(peer_id, "apply_character_inventory_update", peer_id, confirmed_items)
+
+
+func apply_confirmed_character_equipment(peer_id: int, equipment: Dictionary) -> void:
+	if not multiplayer.is_server() or not players.has(peer_id):
+		return
+
+	var confirmed_equipment: Dictionary = equipment.duplicate(true)
+	_character_equipment_by_peer[peer_id] = confirmed_equipment
+	rpc_id(peer_id, "apply_character_equipment_update", peer_id, confirmed_equipment)
 
 
 func spawn_prototype_loot_drop(drop_position: Vector3) -> void:
@@ -1043,6 +1056,13 @@ func apply_character_inventory_update(peer_id: int, inventory_items: Array) -> v
 
 
 @rpc("authority", "call_remote", "reliable")
+func apply_character_equipment_update(peer_id: int, equipment: Dictionary) -> void:
+	var confirmed_equipment: Dictionary = equipment.duplicate(true)
+	_character_equipment_by_peer[peer_id] = confirmed_equipment
+	character_equipment_updated.emit(peer_id, confirmed_equipment)
+
+
+@rpc("authority", "call_remote", "reliable")
 func apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_entries: Array) -> void:
 	_combat_enabled_by_peer[peer_id] = combat_enabled
 	var loadout: Array = []
@@ -1415,6 +1435,7 @@ func despawn_player(peer_id: int) -> void:
 	_character_progression_by_peer.erase(peer_id)
 	_character_gold_by_peer.erase(peer_id)
 	_character_inventory_items_by_peer.erase(peer_id)
+	_character_equipment_by_peer.erase(peer_id)
 	_player_is_down_by_peer.erase(peer_id)
 	print("Despawned player for peer %s." % peer_id)
 	spawned_player_count_changed.emit(_spawned_nodes.size())

@@ -50,6 +50,7 @@ func _ready() -> void:
 	world_spawner.character_progression_updated.connect(_on_character_progression_updated)
 	world_spawner.character_gold_updated.connect(_on_character_gold_updated)
 	world_spawner.character_inventory_updated.connect(_on_character_inventory_updated)
+	world_spawner.character_equipment_updated.connect(_on_character_equipment_updated)
 	world_spawner.combat_mode_updated.connect(_on_combat_mode_updated)
 	world_spawner.ability_enabled_updated.connect(_on_ability_enabled_updated)
 	world_spawner.ability_state_updated.connect(_on_ability_state_updated)
@@ -236,6 +237,13 @@ func _on_character_inventory_updated(peer_id: int, inventory_items: Array) -> vo
 		return
 
 	game_hud.call("update_inventory_items", inventory_items)
+
+
+func _on_character_equipment_updated(peer_id: int, equipment: Dictionary) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+
+	game_hud.call("update_equipment", equipment)
 
 
 func _on_player_down_state_updated(peer_id: int, is_down: bool) -> void:

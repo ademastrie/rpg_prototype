@@ -27,6 +27,7 @@ const LEVEL_UNLOCK_REWARDS: Array[Dictionary] = [
 const PROTOTYPE_ITEM_DISPLAY_NAMES: Dictionary = {
 	"slime_gel": "Slime Gel",
 }
+const EQUIPMENT_SLOTS: Array[String] = ["weapon", "head", "chest", "arms", "hands", "legs", "feet"]
 
 
 func _ready() -> void:
@@ -320,6 +321,156 @@ func _complete_validated_join(peer_id: int, session: Dictionary, loadout_data: D
 	_log_join_timing(peer_id, "initial enemy sync sent")
 	_log_join_timing(peer_id, "total join accept time")
 	_join_timing_start_msec_by_peer.erase(peer_id)
+	_fetch_character_equipment_for_session(peer_id)
+
+
+func _fetch_character_equipment_for_session(peer_id: int) -> void:
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	if not bool(session.get("joined", false)):
+		return
+
+	var access_token: String = str(session.get("access_token", ""))
+	var character_id: int = int(session.get("character_id", 0))
+	if access_token.strip_edges() == "" or character_id <= 0:
+		print("Cannot load equipment for peer %s: missing validated session data." % peer_id)
+		return
+
+	var request: HTTPRequest = HTTPRequest.new()
+	add_child(request)
+	request.request_completed.connect(_on_character_equipment_completed.bind(peer_id, request))
+
+	var headers: PackedStringArray = PackedStringArray([
+		"Content-Type: application/json",
+		"Authorization: Bearer %s" % access_token,
+	])
+	var url: String = "%s/characters/%s/equipment" % [_normalized_backend_base_url(), character_id]
+	var error: Error = request.request(url, headers, HTTPClient.METHOD_GET)
+	if error != OK:
+		print("Failed to start equipment load for peer %s: %s" % [peer_id, error])
+		request.queue_free()
+
+
+func _on_character_equipment_completed(
+	result: int,
+	response_code: int,
+	_headers: PackedStringArray,
+	body: PackedByteArray,
+	peer_id: int,
+	request: HTTPRequest
+) -> void:
+	request.queue_free()
+	if not connected_peers.has(peer_id):
+		return
+
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	if not bool(session.get("joined", false)):
+		return
+
+	var response_text: String = body.get_string_from_utf8()
+	if result != HTTPRequest.RESULT_SUCCESS:
+		print("Equipment load failed for peer %s: HTTPRequest result %s." % [peer_id, result])
+		return
+
+	var json: JSON = JSON.new()
+	var parse_error: Error = json.parse(response_text)
+	if parse_error != OK or not (json.data is Dictionary):
+		print("Equipment load returned invalid JSON for peer %s. status=%s response=%s" % [peer_id, response_code, response_text])
+		return
+
+	var response_data: Dictionary = json.data as Dictionary
+	if response_code < 200 or response_code >= 300:
+		print("Equipment load rejected peer %s: status=%s response=%s" % [peer_id, response_code, response_data])
+		return
+	if int(response_data.get("character_id", int(session.get("character_id", 0)))) != int(session.get("character_id", 0)):
+		print("Equipment load ignored for peer %s: character id mismatch." % peer_id)
+		return
+
+	var confirmed_equipment: Dictionary = _extract_character_equipment(response_data)
+	session["equipment"] = confirmed_equipment
+	peer_sessions[peer_id] = session
+	world_spawner.call("apply_confirmed_character_equipment", peer_id, confirmed_equipment)
+
+
+func _extract_character_equipment(response_data: Dictionary) -> Dictionary:
+	var equipment: Dictionary = _empty_character_equipment()
+	for entry_variant in _equipment_entry_candidates(response_data):
+		if not (entry_variant is Dictionary):
+			continue
+
+		var entry: Dictionary = _normalize_equipment_entry(entry_variant as Dictionary)
+		var slot: String = str(entry.get("slot", "")).strip_edges()
+		if not EQUIPMENT_SLOTS.has(slot):
+			continue
+
+		var item_key: String = str(entry.get("item_key", "")).strip_edges()
+		var display_name: String = str(entry.get("display_name", "")).strip_edges()
+		if item_key == "" and display_name == "":
+			continue
+
+		equipment[slot] = {
+			"item_key": item_key,
+			"display_name": display_name if display_name != "" else item_key,
+		}
+
+	return equipment
+
+
+func _empty_character_equipment() -> Dictionary:
+	var equipment: Dictionary = {}
+	for slot_name in EQUIPMENT_SLOTS:
+		equipment[slot_name] = {}
+	return equipment
+
+
+func _equipment_entry_candidates(response_data: Dictionary) -> Array:
+	if response_data.get("equipment", null) is Array:
+		return (response_data.get("equipment", []) as Array).duplicate()
+	if response_data.get("slots", null) is Array:
+		return (response_data.get("slots", []) as Array).duplicate()
+
+	var equipment_data: Variant = response_data.get("equipment", response_data)
+	if equipment_data is Dictionary:
+		var equipment_dictionary: Dictionary = equipment_data as Dictionary
+		if equipment_dictionary.get("slots", null) is Array:
+			return (equipment_dictionary.get("slots", []) as Array).duplicate()
+
+		var entries: Array = []
+		for slot_name in EQUIPMENT_SLOTS:
+			if not equipment_dictionary.has(slot_name):
+				continue
+
+			var slot_value: Variant = equipment_dictionary[slot_name]
+			if slot_value is Dictionary:
+				var slot_entry: Dictionary = (slot_value as Dictionary).duplicate()
+				slot_entry["slot"] = slot_name
+				entries.append(slot_entry)
+		return entries
+
+	return []
+
+
+func _normalize_equipment_entry(entry_data: Dictionary) -> Dictionary:
+	var slot: String = str(entry_data.get("slot", entry_data.get("equipment_slot", entry_data.get("slot_key", "")))).strip_edges()
+	var item_key: String = str(entry_data.get("item_key", entry_data.get("key", ""))).strip_edges()
+	var display_name: String = str(entry_data.get("display_name", "")).strip_edges()
+
+	if entry_data.get("item", null) is Dictionary:
+		var item_data: Dictionary = entry_data.get("item", {}) as Dictionary
+		if item_key == "":
+			item_key = str(item_data.get("item_key", item_data.get("key", ""))).strip_edges()
+		if display_name == "":
+			display_name = str(item_data.get("display_name", "")).strip_edges()
+		if display_name == "" and item_data.get("definition", null) is Dictionary:
+			display_name = str((item_data.get("definition", {}) as Dictionary).get("display_name", "")).strip_edges()
+
+	if display_name == "" and entry_data.get("definition", null) is Dictionary:
+		display_name = str((entry_data.get("definition", {}) as Dictionary).get("display_name", "")).strip_edges()
+
+	return {
+		"slot": slot,
+		"item_key": item_key,
+		"display_name": display_name,
+	}
 
 
 func _parse_backend_ability_loadout(peer_id: int, character_id: int, response_data: Dictionary) -> Dictionary:

@@ -8,6 +8,16 @@ const HOTBAR_SLOT_COUNT: int = 5
 const PANEL_BACKGROUND_COLOR: Color = Color(0.05, 0.06, 0.07, 0.92)
 const PANEL_BORDER_COLOR: Color = Color(0.35, 0.38, 0.42, 0.95)
 const PANEL_TEXT_COLOR: Color = Color(0.93, 0.94, 0.95, 1.0)
+const EQUIPMENT_SLOTS: Array[String] = ["weapon", "head", "chest", "arms", "hands", "legs", "feet"]
+const EQUIPMENT_SLOT_LABELS: Dictionary = {
+	"weapon": "Weapon",
+	"head": "Head",
+	"chest": "Chest",
+	"arms": "Arms",
+	"hands": "Hands",
+	"legs": "Legs",
+	"feet": "Feet",
+}
 
 var _root: Control = null
 var _hud_panel: PanelContainer = null
@@ -34,6 +44,7 @@ var _character_xp_label: Label = null
 var _character_gold_label: Label = null
 var _character_max_hp_label: Label = null
 var _character_damage_reduction_label: Label = null
+var _equipment_slot_labels: Dictionary = {}
 
 var _message_timer: SceneTreeTimer = null
 var _ability_enabled_by_name: Dictionary = {}
@@ -55,6 +66,7 @@ var _current_xp: int = 0
 var _current_xp_to_next: int = 100
 var _current_gold: int = 0
 var _confirmed_inventory_items: Array = []
+var _confirmed_equipment: Dictionary = {}
 var _current_max_hp: int = 100
 var _current_damage_reduction: float = 0.0
 var _dragged_panel: Control = null
@@ -112,6 +124,11 @@ func update_gold(gold: int) -> void:
 func update_inventory_items(inventory_items: Array) -> void:
 	_confirmed_inventory_items = inventory_items.duplicate(true)
 	_refresh_inventory_panel()
+
+
+func update_equipment(equipment: Dictionary) -> void:
+	_confirmed_equipment = equipment.duplicate(true)
+	_refresh_character_panel()
 
 
 func update_down_state(is_down: bool) -> void:
@@ -330,7 +347,7 @@ func _build_character_panel() -> void:
 	_character_panel.offset_left = -336.0
 	_character_panel.offset_top = 16.0
 	_character_panel.offset_right = -16.0
-	_character_panel.offset_bottom = 220.0
+	_character_panel.offset_bottom = 348.0
 	_apply_panel_style(_character_panel)
 	_root.add_child(_character_panel)
 
@@ -345,6 +362,11 @@ func _build_character_panel() -> void:
 	_character_gold_label = _add_label(panel_vbox, "")
 	_character_max_hp_label = _add_label(panel_vbox, "")
 	_character_damage_reduction_label = _add_label(panel_vbox, "")
+	_add_label(panel_vbox, "Equipment")
+	for slot_name in EQUIPMENT_SLOTS:
+		var slot_label: Label = _add_label(panel_vbox, "")
+		slot_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_equipment_slot_labels[slot_name] = slot_label
 	_refresh_character_panel()
 
 
@@ -533,6 +555,32 @@ func _refresh_character_panel() -> void:
 	_character_gold_label.text = "Gold: %s" % _current_gold
 	_character_max_hp_label.text = "Max HP: %s" % _current_max_hp
 	_character_damage_reduction_label.text = "Damage Reduction: %s%%" % int(round(_current_damage_reduction * 100.0))
+	for slot_name in EQUIPMENT_SLOTS:
+		if not _equipment_slot_labels.has(slot_name):
+			continue
+
+		var slot_label: Label = _equipment_slot_labels[slot_name] as Label
+		slot_label.text = "%s: %s" % [
+			str(EQUIPMENT_SLOT_LABELS.get(slot_name, slot_name.capitalize())),
+			_equipment_display_text(slot_name),
+		]
+
+
+func _equipment_display_text(slot_name: String) -> String:
+	var slot_data: Variant = _confirmed_equipment.get(slot_name, {})
+	if not (slot_data is Dictionary):
+		return "Empty"
+
+	var equipment_item: Dictionary = slot_data as Dictionary
+	if equipment_item.is_empty():
+		return "Empty"
+
+	var display_name: String = str(equipment_item.get("display_name", "")).strip_edges()
+	if display_name != "":
+		return display_name
+
+	var item_key: String = str(equipment_item.get("item_key", "")).strip_edges()
+	return item_key if item_key != "" else "Empty"
 
 
 func _refresh_inventory_panel() -> void:
