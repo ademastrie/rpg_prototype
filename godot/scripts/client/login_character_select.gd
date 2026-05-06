@@ -12,6 +12,10 @@ extends Control
 @onready var character_name_edit: LineEdit = %CharacterNameEdit
 @onready var starter_ability_option: OptionButton = %StarterAbilityOption
 
+const LOGIN_SETTINGS_PATH := "user://prototype_login.cfg"
+const LOGIN_SETTINGS_SECTION := "login"
+const LOGIN_SETTINGS_EMAIL_KEY := "last_email"
+
 var _access_token := ""
 var _characters: Array[Dictionary] = []
 var _pending_requests: Dictionary = {}
@@ -33,6 +37,7 @@ func _ready() -> void:
 	create_character_window.close_requested.connect(_on_cancel_create_character_pressed)
 
 	_setup_starter_ability_options()
+	_load_saved_login_email()
 	_clear_selected_character_info()
 	_set_status("Enter an email and password, then register or log in.")
 
@@ -44,7 +49,7 @@ func _on_register_pressed() -> void:
 		_set_status("Email and password are required.")
 		return
 
-	_track_request(api_client.register(email, password), "register")
+	_track_request(api_client.register(email, password), "register", email)
 	_set_status("Registering account...")
 
 
@@ -55,7 +60,7 @@ func _on_login_pressed() -> void:
 		_set_status("Email and password are required.")
 		return
 
-	_track_request(api_client.login(email, password), "login")
+	_track_request(api_client.login(email, password), "login", email)
 	_set_status("Logging in...")
 
 
@@ -120,14 +125,17 @@ func _on_character_selected(index: int) -> void:
 
 
 func _on_request_succeeded(request_id: int, _endpoint: String, data: Variant) -> void:
-	var action: String = _pending_requests.get(request_id, "")
+	var request_data: Dictionary = _pending_requests.get(request_id, {})
+	var action: String = str(request_data.get("action", ""))
 	_pending_requests.erase(request_id)
 
 	match action:
 		"register":
+			_save_login_email(str(request_data.get("email", "")))
 			_set_status("Account created. Log in to continue.")
 		"login":
 			if data is Dictionary and data.has("access_token"):
+				_save_login_email(str(request_data.get("email", "")))
 				_access_token = data["access_token"]
 				ClientSession.access_token = _access_token
 				_set_status("Logged in. Loading account...")
@@ -223,8 +231,33 @@ func _clear_create_character_fields() -> void:
 	starter_ability_option.select(0)
 
 
-func _track_request(request_id: int, action: String) -> void:
-	_pending_requests[request_id] = action
+func _track_request(request_id: int, action: String, email: String = "") -> void:
+	_pending_requests[request_id] = {
+		"action": action,
+		"email": email,
+	}
+
+
+func _load_saved_login_email() -> void:
+	var config := ConfigFile.new()
+	var error := config.load(LOGIN_SETTINGS_PATH)
+	if error != OK:
+		return
+
+	var saved_email := str(config.get_value(LOGIN_SETTINGS_SECTION, LOGIN_SETTINGS_EMAIL_KEY, "")).strip_edges()
+	if saved_email != "":
+		email_edit.text = saved_email
+
+
+func _save_login_email(email: String) -> void:
+	var saved_email := email.strip_edges()
+	if saved_email == "":
+		return
+
+	var config := ConfigFile.new()
+	# Local prototype convenience storage only; never store passwords or auth tokens here.
+	config.set_value(LOGIN_SETTINGS_SECTION, LOGIN_SETTINGS_EMAIL_KEY, saved_email)
+	config.save(LOGIN_SETTINGS_PATH)
 
 
 func _has_token() -> bool:
