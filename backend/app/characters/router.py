@@ -12,6 +12,9 @@ from app.characters.schemas import (
     CharacterDeleteResponse,
     CharacterCurrencyAward,
     CharacterCurrencyResponse,
+    CharacterInventoryEntryResponse,
+    CharacterInventoryItemAdd,
+    CharacterInventoryResponse,
     CharacterProgressionResponse,
     CharacterResponse,
     CharacterXpAward,
@@ -19,6 +22,7 @@ from app.characters.schemas import (
 from app.db import get_db
 from app.models.ability import AbilityDefinition, CharacterAbility, CharacterAbilityLoadout
 from app.models.character import Character
+from app.models.item import CharacterInventory, ItemDefinition
 from app.models.user import User
 
 
@@ -61,6 +65,30 @@ def _character_currency_response(character: Character) -> CharacterCurrencyRespo
     return CharacterCurrencyResponse(
         character_id=character.id,
         gold=character.gold,
+    )
+
+
+def _character_inventory_response(character_id: int, db: Session) -> CharacterInventoryResponse:
+    inventory_entries = list(
+        db.scalars(
+            select(CharacterInventory)
+            .options(selectinload(CharacterInventory.item_definition))
+            .join(CharacterInventory.item_definition)
+            .where(CharacterInventory.character_id == character_id)
+            .order_by(ItemDefinition.display_name)
+        ).all()
+    )
+
+    return CharacterInventoryResponse(
+        character_id=character_id,
+        items=[
+            CharacterInventoryEntryResponse(
+                item_key=entry.item_key,
+                quantity=entry.quantity,
+                definition=entry.item_definition,
+            )
+            for entry in inventory_entries
+        ],
     )
 
 
@@ -373,6 +401,11 @@ def delete_character(
     character = _get_owned_character(character_id, current_user.id, db)
 
     db.execute(
+        delete(CharacterInventory).where(
+            CharacterInventory.character_id == character.id
+        )
+    )
+    db.execute(
         delete(CharacterAbilityLoadout).where(
             CharacterAbilityLoadout.character_id == character.id
         )
@@ -433,6 +466,66 @@ def award_character_currency(
     db.refresh(character)
 
     return _character_currency_response(character)
+
+
+@router.get("/{character_id}/inventory", response_model=CharacterInventoryResponse)
+def get_character_inventory(
+    character_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CharacterInventoryResponse:
+    character = _get_owned_character(character_id, current_user.id, db)
+
+    return _character_inventory_response(character.id, db)
+
+
+@router.post("/{character_id}/inventory/items", response_model=CharacterInventoryResponse)
+def add_character_inventory_item(
+    character_id: int,
+    payload: CharacterInventoryItemAdd,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CharacterInventoryResponse:
+    if payload.quantity <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="quantity must be greater than 0.",
+        )
+
+    character = _get_owned_character(character_id, current_user.id, db)
+    item_key = payload.item_key.strip()
+    item_definition = db.scalar(
+        select(ItemDefinition).where(
+            ItemDefinition.item_key == item_key,
+            ItemDefinition.is_active.is_(True),
+        )
+    )
+    if item_definition is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown or inactive item_key: {item_key}.",
+        )
+
+    inventory_entry = db.scalar(
+        select(CharacterInventory).where(
+            CharacterInventory.character_id == character.id,
+            CharacterInventory.item_key == item_definition.item_key,
+        )
+    )
+    if inventory_entry is None:
+        db.add(
+            CharacterInventory(
+                character_id=character.id,
+                item_key=item_definition.item_key,
+                quantity=payload.quantity,
+            )
+        )
+    else:
+        inventory_entry.quantity += payload.quantity
+
+    db.commit()
+
+    return _character_inventory_response(character.id, db)
 
 
 @router.get("/{character_id}/abilities", response_model=CharacterAbilitiesResponse)

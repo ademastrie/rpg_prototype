@@ -49,6 +49,35 @@ class CharacterCurrencyResponse(BaseModel):
     gold: int
 
 
+class ItemDefinitionResponse(BaseModel):
+    item_key: str
+    display_name: str
+    description: str | None
+    item_type: str
+    stackable: bool
+    max_stack: int
+    icon_key: str | None
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class CharacterInventoryEntryResponse(BaseModel):
+    item_key: str
+    quantity: int
+    definition: ItemDefinitionResponse
+
+
+class CharacterInventoryResponse(BaseModel):
+    character_id: int
+    items: list[CharacterInventoryEntryResponse]
+
+
+class CharacterInventoryItemAdd(BaseModel):
+    item_key: str
+    quantity: int
+
+
 class AbilityEffectResponse(BaseModel):
     effect_type: str
     target_team: str

@@ -8,6 +8,7 @@ from app.models.base import Base
 
 if TYPE_CHECKING:
     from app.models.ability import CharacterAbility, CharacterAbilityLoadout
+    from app.models.item import CharacterInventory
     from app.models.user import User
 
 
@@ -46,6 +47,10 @@ class Character(Base):
         cascade="all, delete-orphan",
     )
     ability_loadout: Mapped[list["CharacterAbilityLoadout"]] = relationship(
+        back_populates="character",
+        cascade="all, delete-orphan",
+    )
+    inventory: Mapped[list["CharacterInventory"]] = relationship(
         back_populates="character",
         cascade="all, delete-orphan",
     )

@@ -107,6 +107,69 @@ try {
 # The expected result is 404 Character not found.
 ```
 
+### Character inventory
+
+The item definition and character inventory migration is:
+
+```powershell
+alembic upgrade head
+alembic current
+```
+
+Swagger:
+
+```powershell
+Start-Process http://127.0.0.1:8000/docs
+```
+
+In Swagger, log in through `POST /auth/login`, use the returned bearer token with
+Authorize, then try:
+
+- `GET /characters/{character_id}/inventory`
+- `POST /characters/{character_id}/inventory/items`
+
+Use one of the seeded prototype material keys:
+
+```json
+{
+  "item_key": "slime_gel",
+  "quantity": 2
+}
+```
+
+The response should include `character_id`, inventory item definition display data,
+and the updated `quantity`. Zero or negative `quantity` values should return 422.
+Unknown or inactive item keys should return 422.
+
+PowerShell:
+
+```powershell
+$BaseUrl = "http://127.0.0.1:8000"
+$Auth = Invoke-RestMethod -Method Post "$BaseUrl/auth/login" -ContentType "application/json" -Body '{"email":"dev@example.com","password":"password"}'
+$Headers = @{ Authorization = "Bearer $($Auth.access_token)" }
+
+$Characters = Invoke-RestMethod -Method Get "$BaseUrl/characters" -Headers $Headers
+$CharacterId = $Characters[0].id
+
+Invoke-RestMethod -Method Get "$BaseUrl/characters/$CharacterId/inventory" -Headers $Headers
+
+$ItemBody = @{ item_key = "slime_gel"; quantity = 2 } | ConvertTo-Json
+Invoke-RestMethod -Method Post "$BaseUrl/characters/$CharacterId/inventory/items" -Headers $Headers -ContentType "application/json" -Body $ItemBody
+
+$MoreItemBody = @{ item_key = "slime_gel"; quantity = 3 } | ConvertTo-Json
+Invoke-RestMethod -Method Post "$BaseUrl/characters/$CharacterId/inventory/items" -Headers $Headers -ContentType "application/json" -Body $MoreItemBody
+
+$InvalidItemBody = @{ item_key = "slime_gel"; quantity = 0 } | ConvertTo-Json
+try {
+    Invoke-RestMethod -Method Post "$BaseUrl/characters/$CharacterId/inventory/items" -Headers $Headers -ContentType "application/json" -Body $InvalidItemBody
+} catch {
+    $_.Exception.Response.StatusCode.value__
+}
+
+# Ownership check: repeat the GET or POST with another user's token and the same character id.
+# The expected result is 404 Character not found.
+```
+
 ### Character abilities and loadout
 
 The ability endpoints use the same bearer token auth as the other character endpoints.
