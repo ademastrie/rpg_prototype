@@ -47,8 +47,10 @@ mesh = SubResource("BoxMesh_hp_regen")
 surface_material_override/0 = SubResource("StandardMaterial3D_hp_regen")
 
 [node name="PeerLabel" type="Label3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.8, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.25, 0)
 billboard = 1
 text = "Peer ?"
-font_size = 36
+font_size = 54
+outline_size = 8
+outline_modulate = Color(0, 0, 0, 0.9)
 modulate = Color(0.8, 1, 1, 1)

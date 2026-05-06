@@ -31,8 +31,10 @@ mesh = SubResource("BoxMesh_marker")
 surface_material_override/0 = SubResource("StandardMaterial3D_marker")
 
 [node name="EnemyLabel" type="Label3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.3, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.8, 0)
 billboard = 1
 text = "Enemy ?"
-font_size = 34
+font_size = 52
+outline_size = 8
+outline_modulate = Color(0, 0, 0, 0.9)
 modulate = Color(1, 0.9, 0.65, 1)

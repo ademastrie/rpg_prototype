@@ -45,6 +45,11 @@ var _confirmed_loadout: Array[String] = []
 var _confirmed_loadout_entries: Array = []
 var _unlocked_abilities: Array = []
 var _ability_slot_rows: Array = []
+var _draft_loadout_entries: Array = []
+var _pending_loadout_entries: Array = []
+var _is_loadout_draft_active: bool = false
+var _is_loadout_draft_dirty: bool = false
+var _is_loadout_save_pending: bool = false
 var _current_level: int = 1
 var _current_xp: int = 0
 var _current_xp_to_next: int = 100
@@ -151,13 +156,26 @@ func update_loadout(loadout_entries: Array) -> void:
 
 	_rebuild_ability_controls()
 	_refresh_hotbar()
+	if _is_loadout_save_pending and _loadout_entries_match(_confirmed_loadout_entries, _pending_loadout_entries):
+		_is_loadout_save_pending = false
+		_pending_loadout_entries.clear()
+		if _loadout_entries_match(_confirmed_loadout_entries, _draft_loadout_entries):
+			_is_loadout_draft_dirty = false
+			_initialize_loadout_draft_from_confirmed()
+			if _ability_panel_status != null:
+				_ability_panel_status.text = "Saved."
+	elif _is_loadout_draft_active and not _is_loadout_draft_dirty:
+		_initialize_loadout_draft_from_confirmed()
+
+	_refresh_ability_panel_options()
 	_refresh_ability_panel_rows()
 
 
 func update_unlocked_abilities(unlocked_abilities: Array) -> void:
 	_unlocked_abilities = unlocked_abilities.duplicate()
 	_refresh_ability_panel_options()
-	_refresh_ability_panel_rows()
+	if not _is_loadout_draft_active or not _is_loadout_draft_dirty:
+		_refresh_ability_panel_rows()
 
 
 func show_status_message(message: String) -> void:
@@ -173,7 +191,13 @@ func toggle_character_panel() -> void:
 
 
 func toggle_ability_panel() -> void:
-	_ability_panel.visible = not _ability_panel.visible
+	if _ability_panel.visible:
+		_cancel_loadout_draft()
+		_ability_panel.visible = false
+		return
+
+	_begin_loadout_draft()
+	_ability_panel.visible = true
 
 
 func toggle_inventory_panel() -> void:
@@ -190,6 +214,8 @@ func update_ability_enabled(ability_name: String, enabled: bool) -> void:
 	state["enabled"] = enabled
 	_ability_state_by_name[ability_name] = state
 	_update_ability_display(ability_name)
+	if _is_loadout_draft_active and not _is_loadout_draft_dirty:
+		_initialize_loadout_draft_from_confirmed()
 	_refresh_ability_panel_rows()
 
 
@@ -205,6 +231,8 @@ func update_ability_state(ability_name: String, enabled: bool, active: bool, coo
 		"cooldown_remaining": cooldown_remaining,
 	}
 	_update_ability_display(ability_name)
+	if _is_loadout_draft_active and not _is_loadout_draft_dirty:
+		_initialize_loadout_draft_from_confirmed()
 	_refresh_ability_panel_rows()
 
 
@@ -367,6 +395,7 @@ func _build_ability_panel() -> void:
 		var enabled_check_box: CheckBox = CheckBox.new()
 		enabled_check_box.text = "Enabled"
 		_apply_button_text_colors(enabled_check_box)
+		enabled_check_box.toggled.connect(_on_loadout_enabled_toggled.bind(slot_index))
 		row.add_child(enabled_check_box)
 
 		_ability_slot_rows.append({
@@ -375,11 +404,21 @@ func _build_ability_panel() -> void:
 			"slot_index": slot_index,
 		})
 
+	var action_row: HBoxContainer = HBoxContainer.new()
+	action_row.add_theme_constant_override("separation", 6)
+	panel_vbox.add_child(action_row)
+
 	var save_button: Button = Button.new()
 	save_button.text = "Save Loadout"
 	_apply_button_text_colors(save_button)
 	save_button.pressed.connect(_on_save_loadout_pressed)
-	panel_vbox.add_child(save_button)
+	action_row.add_child(save_button)
+
+	var cancel_button: Button = Button.new()
+	cancel_button.text = "Cancel"
+	_apply_button_text_colors(cancel_button)
+	cancel_button.pressed.connect(_on_cancel_loadout_pressed)
+	action_row.add_child(cancel_button)
 
 	_ability_panel_status = _add_label(panel_vbox, "")
 	_refresh_ability_panel_options()
@@ -558,15 +597,12 @@ func _refresh_ability_panel_rows() -> void:
 		var row: Dictionary = _ability_slot_rows[slot_index] as Dictionary
 		var option: OptionButton = row["option"] as OptionButton
 		var enabled_check_box: CheckBox = row["enabled"] as CheckBox
-		var entry: Dictionary = _loadout_entry_for_slot(slot_index)
+		var entry: Dictionary = _panel_loadout_entry_for_slot(slot_index)
 		var ability_key: String = str(entry.get("ability_key", "")).strip_edges()
 		_select_ability_option(option, ability_key)
 		enabled_check_box.set_pressed_no_signal(bool(entry.get("enabled", true)))
 
 	_refresh_ability_panel_options()
-
-	if _ability_panel_status != null:
-		_ability_panel_status.text = ""
 
 
 func _select_ability_option(option: OptionButton, ability_key: String) -> void:
@@ -581,13 +617,12 @@ func _select_ability_option(option: OptionButton, ability_key: String) -> void:
 func _selected_ability_keys_by_slot() -> Dictionary:
 	var selected_keys_by_slot: Dictionary = {}
 	for slot_index in range(_ability_slot_rows.size()):
-		var row: Dictionary = _ability_slot_rows[slot_index] as Dictionary
-		var option: OptionButton = row["option"] as OptionButton
-		var selected_key: String = ""
-		if option.get_item_count() > 0 and option.selected >= 0:
-			selected_key = str(option.get_item_metadata(option.selected)).strip_edges()
-		else:
-			selected_key = str(_loadout_entry_for_slot(slot_index).get("ability_key", "")).strip_edges()
+		var selected_key: String = str(_panel_loadout_entry_for_slot(slot_index).get("ability_key", "")).strip_edges()
+		if selected_key == "" and not _is_loadout_draft_active:
+			var row: Dictionary = _ability_slot_rows[slot_index] as Dictionary
+			var option: OptionButton = row["option"] as OptionButton
+			if option.get_item_count() > 0 and option.selected >= 0:
+				selected_key = str(option.get_item_metadata(option.selected)).strip_edges()
 
 		selected_keys_by_slot[slot_index] = selected_key
 
@@ -604,6 +639,9 @@ func _blocked_ability_keys_for_slot(slot_index: int, selected_keys_by_slot: Dict
 		var selected_key: String = str(selected_keys_by_slot[other_slot_variant]).strip_edges()
 		if selected_key != "" and not blocked_keys.has(selected_key):
 			blocked_keys.append(selected_key)
+
+	if _is_loadout_draft_active:
+		return blocked_keys
 
 	for entry_variant in _confirmed_loadout_entries:
 		if not (entry_variant is Dictionary):
@@ -674,8 +712,176 @@ func _loadout_entry_for_slot(slot_index: int) -> Dictionary:
 	return {}
 
 
-func _on_loadout_option_selected(_item_index: int, _slot_index: int) -> void:
+func _panel_loadout_entry_for_slot(slot_index: int) -> Dictionary:
+	if _is_loadout_draft_active:
+		return _draft_loadout_entry_for_slot(slot_index)
+
+	return _loadout_entry_for_slot(slot_index)
+
+
+func _draft_loadout_entry_for_slot(slot_index: int) -> Dictionary:
+	for entry_variant in _draft_loadout_entries:
+		if not (entry_variant is Dictionary):
+			continue
+
+		var entry: Dictionary = entry_variant as Dictionary
+		if int(entry.get("slot_index", 0)) == slot_index:
+			return entry
+
+	return {}
+
+
+func _begin_loadout_draft() -> void:
+	_is_loadout_draft_active = true
+	_is_loadout_draft_dirty = false
+	_is_loadout_save_pending = false
+	_pending_loadout_entries.clear()
+	_initialize_loadout_draft_from_confirmed()
 	_refresh_ability_panel_options()
+	_refresh_ability_panel_rows()
+	if _ability_panel_status != null:
+		_ability_panel_status.text = ""
+
+
+func _cancel_loadout_draft() -> void:
+	_is_loadout_draft_active = false
+	_is_loadout_draft_dirty = false
+	_is_loadout_save_pending = false
+	_draft_loadout_entries.clear()
+	_pending_loadout_entries.clear()
+	_refresh_ability_panel_options()
+	_refresh_ability_panel_rows()
+	if _ability_panel_status != null:
+		_ability_panel_status.text = ""
+
+
+func _initialize_loadout_draft_from_confirmed() -> void:
+	_draft_loadout_entries = _duplicate_loadout_entries(_confirmed_loadout_entries)
+
+
+func _duplicate_loadout_entries(loadout_entries: Array) -> Array:
+	var duplicate_entries: Array = []
+	for entry_variant in loadout_entries:
+		if not (entry_variant is Dictionary):
+			continue
+
+		duplicate_entries.append((entry_variant as Dictionary).duplicate())
+
+	return duplicate_entries
+
+
+func _set_draft_loadout_entry(slot_index: int, ability_key: String, enabled: bool) -> void:
+	for entry_index in range(_draft_loadout_entries.size()):
+		var entry: Dictionary = _draft_loadout_entries[entry_index] as Dictionary
+		if int(entry.get("slot_index", 0)) == slot_index:
+			if ability_key == "":
+				_draft_loadout_entries.remove_at(entry_index)
+			else:
+				_draft_loadout_entries[entry_index] = _draft_entry_for_ability_key(slot_index, ability_key, enabled)
+			return
+
+	if ability_key != "":
+		_draft_loadout_entries.append(_draft_entry_for_ability_key(slot_index, ability_key, enabled))
+
+
+func _draft_entry_for_ability_key(slot_index: int, ability_key: String, enabled: bool) -> Dictionary:
+	var entry: Dictionary = {
+		"slot_index": slot_index,
+		"ability_key": ability_key,
+		"enabled": enabled,
+	}
+	var ability: Dictionary = _unlocked_ability_for_key(ability_key)
+	if not ability.is_empty():
+		entry["ability_name"] = str(ability.get("ability_name", ""))
+		entry["display_name"] = str(ability.get("display_name", ability_key))
+
+	return entry
+
+
+func _unlocked_ability_for_key(ability_key: String) -> Dictionary:
+	for ability_variant in _unlocked_abilities:
+		if not (ability_variant is Dictionary):
+			continue
+
+		var ability: Dictionary = ability_variant as Dictionary
+		if str(ability.get("ability_key", "")).strip_edges() == ability_key:
+			return ability
+
+	return {}
+
+
+func _loadout_entries_match(left_entries: Array, right_entries: Array) -> bool:
+	var left_by_slot: Dictionary = _loadout_entries_by_slot(left_entries)
+	var right_by_slot: Dictionary = _loadout_entries_by_slot(right_entries)
+	if left_by_slot.size() != right_by_slot.size():
+		return false
+
+	for slot_variant in left_by_slot.keys():
+		if not right_by_slot.has(slot_variant):
+			return false
+
+		var left_entry: Dictionary = left_by_slot[slot_variant] as Dictionary
+		var right_entry: Dictionary = right_by_slot[slot_variant] as Dictionary
+		if str(left_entry.get("ability_key", "")).strip_edges() != str(right_entry.get("ability_key", "")).strip_edges():
+			return false
+		if bool(left_entry.get("enabled", true)) != bool(right_entry.get("enabled", true)):
+			return false
+
+	return true
+
+
+func _loadout_entries_by_slot(loadout_entries: Array) -> Dictionary:
+	var entries_by_slot: Dictionary = {}
+	for entry_variant in loadout_entries:
+		if not (entry_variant is Dictionary):
+			continue
+
+		var entry: Dictionary = entry_variant as Dictionary
+		var ability_key: String = str(entry.get("ability_key", "")).strip_edges()
+		if ability_key == "":
+			continue
+
+		entries_by_slot[int(entry.get("slot_index", 0))] = entry
+
+	return entries_by_slot
+
+
+func _on_loadout_option_selected(item_index: int, slot_index: int) -> void:
+	if not _is_loadout_draft_active:
+		_begin_loadout_draft()
+
+	var row: Dictionary = _ability_slot_rows[slot_index] as Dictionary
+	var option: OptionButton = row["option"] as OptionButton
+	var enabled_check_box: CheckBox = row["enabled"] as CheckBox
+	var ability_key: String = ""
+	if item_index >= 0 and item_index < option.get_item_count():
+		ability_key = str(option.get_item_metadata(item_index)).strip_edges()
+
+	_set_draft_loadout_entry(slot_index, ability_key, enabled_check_box.button_pressed)
+	_is_loadout_draft_dirty = true
+	if _ability_panel_status != null:
+		_ability_panel_status.text = "Unsaved changes."
+	_refresh_ability_panel_options()
+
+
+func _on_loadout_enabled_toggled(enabled: bool, slot_index: int) -> void:
+	if not _is_loadout_draft_active:
+		_begin_loadout_draft()
+
+	var entry: Dictionary = _draft_loadout_entry_for_slot(slot_index)
+	var ability_key: String = str(entry.get("ability_key", "")).strip_edges()
+	if ability_key == "":
+		return
+
+	_set_draft_loadout_entry(slot_index, ability_key, enabled)
+	_is_loadout_draft_dirty = true
+	if _ability_panel_status != null:
+		_ability_panel_status.text = "Unsaved changes."
+
+
+func _on_cancel_loadout_pressed() -> void:
+	_cancel_loadout_draft()
+	_ability_panel.visible = false
 
 
 func _on_panel_drag_handle_input(event: InputEvent, panel: Control) -> void:
@@ -730,17 +936,19 @@ func _on_ability_check_box_toggled(enabled: bool, ability_name: String) -> void:
 func _on_save_loadout_pressed() -> void:
 	var loadout_entries: Array = []
 	var seen_keys: Array[String] = []
-	for slot_index in range(_ability_slot_rows.size()):
-		var row: Dictionary = _ability_slot_rows[slot_index] as Dictionary
-		var option: OptionButton = row["option"] as OptionButton
-		var enabled_check_box: CheckBox = row["enabled"] as CheckBox
-		var selected_index: int = option.selected
-		if selected_index < 0:
+	var source_entries: Array = _draft_loadout_entries if _is_loadout_draft_active else _confirmed_loadout_entries
+	for entry_variant in source_entries:
+		if not (entry_variant is Dictionary):
 			continue
 
-		var ability_key: String = str(option.get_item_metadata(selected_index)).strip_edges()
+		var entry: Dictionary = entry_variant as Dictionary
+		var slot_index: int = int(entry.get("slot_index", -1))
+		var ability_key: String = str(entry.get("ability_key", "")).strip_edges()
 		if ability_key == "":
 			continue
+		if slot_index < 0 or slot_index >= HOTBAR_SLOT_COUNT:
+			_ability_panel_status.text = "Invalid loadout slot."
+			return
 		if seen_keys.has(ability_key):
 			_ability_panel_status.text = "Duplicate abilities are not allowed."
 			return
@@ -749,7 +957,7 @@ func _on_save_loadout_pressed() -> void:
 		loadout_entries.append({
 			"slot_index": slot_index,
 			"ability_key": ability_key,
-			"enabled": enabled_check_box.button_pressed,
+			"enabled": bool(entry.get("enabled", true)),
 		})
 
 	if loadout_entries.size() > HOTBAR_SLOT_COUNT:
@@ -760,6 +968,8 @@ func _on_save_loadout_pressed() -> void:
 		return
 
 	_ability_panel_status.text = "Saving..."
+	_is_loadout_save_pending = true
+	_pending_loadout_entries = _duplicate_loadout_entries(loadout_entries)
 	loadout_save_requested.emit(loadout_entries)
 
 
