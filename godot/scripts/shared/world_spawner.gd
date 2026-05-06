@@ -295,42 +295,59 @@ func spawn_prototype_loot_drop(drop_position: Vector3) -> void:
 	if prototype_loot_drop_chance < 1.0 and randf() > prototype_loot_drop_chance:
 		return
 
-	# Prototype world-drop flow only. The pickup stays generic: future loot
-	# should come from backend loot tables, item definitions, inventory,
-	# equipment rules, and player/party ownership metadata.
-	var reward_payload: Dictionary = _prototype_loot_reward_payload()
-	if reward_payload.is_empty():
+	# Prototype world-drop flow only. Each pickup stays generic and server-owned:
+	# future loot should come from backend/database-backed loot tables, item
+	# definitions, inventory, equipment rules, and player/party ownership metadata.
+	var reward_payloads: Array = _prototype_loot_reward_payloads()
+	if reward_payloads.is_empty():
 		return
 
-	var loot_orb_id: int = _next_loot_orb_id
-	_next_loot_orb_id += 1
-	var loot_data: Dictionary = {
-		"loot_orb_id": loot_orb_id,
-		"position": drop_position,
-		"active": true,
-		"reward_payload": reward_payload,
-	}
-	_loot_orbs[loot_orb_id] = loot_data
-	rpc("spawn_loot_orb", loot_orb_id, drop_position)
+	for reward_index in reward_payloads.size():
+		var reward_payload: Dictionary = reward_payloads[reward_index] as Dictionary
+		if reward_payload.is_empty():
+			continue
 
-
-func _prototype_loot_reward_payload() -> Dictionary:
-	var reward_type: String = prototype_loot_reward_type.strip_edges()
-	if reward_type == "currency":
-		return {
-			"type": "currency",
-			"gold_amount": max(prototype_loot_gold_amount, 0),
+		var loot_position: Vector3 = drop_position + _prototype_loot_position_offset(reward_index, reward_payloads.size())
+		var loot_orb_id: int = _next_loot_orb_id
+		_next_loot_orb_id += 1
+		var loot_data: Dictionary = {
+			"loot_orb_id": loot_orb_id,
+			"position": loot_position,
+			"active": true,
+			"reward_payload": reward_payload,
 		}
-	if reward_type == "item":
-		return {
+		_loot_orbs[loot_orb_id] = loot_data
+		rpc("spawn_loot_orb", loot_orb_id, loot_position)
+
+
+func _prototype_loot_reward_payloads() -> Array:
+	var reward_payloads: Array = []
+
+	var gold_amount: int = max(prototype_loot_gold_amount, 1)
+	reward_payloads.append({
+			"type": "currency",
+			"gold_amount": gold_amount,
+	})
+
+	var item_key: String = prototype_loot_item_key.strip_edges()
+	if item_key != "":
+		reward_payloads.append({
 			"type": "item",
-			"item_key": prototype_loot_item_key.strip_edges(),
+			"item_key": item_key,
 			"display_name": prototype_loot_item_display_name.strip_edges(),
 			"quantity": max(prototype_loot_item_quantity, 1),
-		}
+		})
 
-	print("Unsupported prototype loot reward type: %s." % reward_type)
-	return {}
+	return reward_payloads
+
+
+func _prototype_loot_position_offset(reward_index: int, reward_count: int) -> Vector3:
+	if reward_count <= 1:
+		return Vector3.ZERO
+
+	var angle: float = (TAU / float(reward_count)) * float(reward_index)
+	var offset_radius: float = 0.45
+	return Vector3(cos(angle) * offset_radius, 0.0, sin(angle) * offset_radius)
 
 
 func _process(delta: float) -> void:
