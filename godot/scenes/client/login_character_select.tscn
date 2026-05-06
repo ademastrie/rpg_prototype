@@ -83,22 +83,11 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 180)
 layout_mode = 2
 
-[node name="CharacterNameLabel" type="Label" parent="RootMargin/RootLayout"]
-layout_mode = 2
-text = "New Character Name"
-
-[node name="CharacterNameEdit" type="LineEdit" parent="RootMargin/RootLayout"]
+[node name="SelectedCharacterInfoLabel" type="Label" parent="RootMargin/RootLayout"]
 unique_name_in_owner = true
 layout_mode = 2
-placeholder_text = "Character name"
-
-[node name="StarterAbilityLabel" type="Label" parent="RootMargin/RootLayout"]
-layout_mode = 2
-text = "Starter Ability"
-
-[node name="StarterAbilityOption" type="OptionButton" parent="RootMargin/RootLayout"]
-unique_name_in_owner = true
-layout_mode = 2
+autowrap_mode = 3
+text = "No character selected."
 
 [node name="CharacterButtons" type="HBoxContainer" parent="RootMargin/RootLayout"]
 layout_mode = 2
@@ -118,3 +107,57 @@ text = "Refresh Characters"
 unique_name_in_owner = true
 layout_mode = 2
 text = "Enter Game"
+
+[node name="CreateCharacterWindow" type="Window" parent="."]
+unique_name_in_owner = true
+title = "Create Character"
+initial_position = 1
+size = Vector2i(360, 260)
+visible = false
+
+[node name="CreateCharacterMargin" type="MarginContainer" parent="CreateCharacterWindow"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="CreateCharacterLayout" type="VBoxContainer" parent="CreateCharacterWindow/CreateCharacterMargin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="CharacterNameLabel" type="Label" parent="CreateCharacterWindow/CreateCharacterMargin/CreateCharacterLayout"]
+layout_mode = 2
+text = "Character Name"
+
+[node name="CharacterNameEdit" type="LineEdit" parent="CreateCharacterWindow/CreateCharacterMargin/CreateCharacterLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Character name"
+
+[node name="StarterAbilityLabel" type="Label" parent="CreateCharacterWindow/CreateCharacterMargin/CreateCharacterLayout"]
+layout_mode = 2
+text = "Starter Ability"
+
+[node name="StarterAbilityOption" type="OptionButton" parent="CreateCharacterWindow/CreateCharacterMargin/CreateCharacterLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="CreateCharacterButtons" type="HBoxContainer" parent="CreateCharacterWindow/CreateCharacterMargin/CreateCharacterLayout"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ConfirmCreateCharacterButton" type="Button" parent="CreateCharacterWindow/CreateCharacterMargin/CreateCharacterLayout/CreateCharacterButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Create"
+
+[node name="CancelCreateCharacterButton" type="Button" parent="CreateCharacterWindow/CreateCharacterMargin/CreateCharacterLayout/CreateCharacterButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Cancel"

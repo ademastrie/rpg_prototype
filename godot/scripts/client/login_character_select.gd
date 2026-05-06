@@ -7,6 +7,8 @@ extends Control
 @onready var password_edit: LineEdit = %PasswordEdit
 @onready var status_label: Label = %StatusLabel
 @onready var character_list: ItemList = %CharacterList
+@onready var selected_character_info_label: Label = %SelectedCharacterInfoLabel
+@onready var create_character_window: Window = %CreateCharacterWindow
 @onready var character_name_edit: LineEdit = %CharacterNameEdit
 @onready var starter_ability_option: OptionButton = %StarterAbilityOption
 
@@ -22,12 +24,16 @@ func _ready() -> void:
 
 	%RegisterButton.pressed.connect(_on_register_pressed)
 	%LoginButton.pressed.connect(_on_login_pressed)
-	%CreateCharacterButton.pressed.connect(_on_create_character_pressed)
+	%CreateCharacterButton.pressed.connect(_on_open_create_character_pressed)
+	%ConfirmCreateCharacterButton.pressed.connect(_on_confirm_create_character_pressed)
+	%CancelCreateCharacterButton.pressed.connect(_on_cancel_create_character_pressed)
 	%RefreshCharactersButton.pressed.connect(_on_refresh_characters_pressed)
 	%EnterGameButton.pressed.connect(_on_enter_game_pressed)
 	character_list.item_selected.connect(_on_character_selected)
+	create_character_window.close_requested.connect(_on_cancel_create_character_pressed)
 
 	_setup_starter_ability_options()
+	_clear_selected_character_info()
 	_set_status("Enter an email and password, then register or log in.")
 
 
@@ -53,7 +59,15 @@ func _on_login_pressed() -> void:
 	_set_status("Logging in...")
 
 
-func _on_create_character_pressed() -> void:
+func _on_open_create_character_pressed() -> void:
+	if not _has_token():
+		return
+
+	create_character_window.popup_centered()
+	character_name_edit.grab_focus()
+
+
+func _on_confirm_create_character_pressed() -> void:
 	if not _has_token():
 		return
 
@@ -65,6 +79,11 @@ func _on_create_character_pressed() -> void:
 	var starter_ability_key := _selected_starter_ability_key()
 	_track_request(api_client.create_character(_access_token, character_name, starter_ability_key), "create_character")
 	_set_status("Creating character...")
+
+
+func _on_cancel_create_character_pressed() -> void:
+	create_character_window.hide()
+	_clear_create_character_fields()
 
 
 func _on_refresh_characters_pressed() -> void:
@@ -96,6 +115,7 @@ func _on_enter_game_pressed() -> void:
 func _on_character_selected(index: int) -> void:
 	if index >= 0 and index < _characters.size():
 		var character := _characters[index]
+		_show_selected_character_info(character)
 		_set_status("Selected %s." % character.get("name", "character"))
 
 
@@ -128,7 +148,8 @@ func _on_request_succeeded(request_id: int, _endpoint: String, data: Variant) ->
 			_show_characters(data)
 			_set_status("Characters loaded.")
 		"create_character":
-			character_name_edit.text = ""
+			create_character_window.hide()
+			_clear_create_character_fields()
 			_set_status("Character created. Refreshing list...")
 			_refresh_characters()
 		_:
@@ -149,6 +170,7 @@ func _show_characters(data: Variant) -> void:
 	character_list.clear()
 	_characters.clear()
 	ClientSession.selected_character = {}
+	_clear_selected_character_info()
 
 	if not (data is Array):
 		_set_status("Character response was not a list.")
@@ -183,6 +205,22 @@ func _selected_starter_ability_key() -> String:
 		return "slash"
 
 	return str(starter_ability_option.get_item_metadata(selected_index))
+
+
+func _show_selected_character_info(character: Dictionary) -> void:
+	var character_name: String = str(character.get("name", "Unnamed"))
+	var level: int = int(character.get("level", 1))
+	var region_id: String = str(character.get("region_id", "unknown_region"))
+	selected_character_info_label.text = "Selected: %s - Level %s - %s" % [character_name, level, region_id]
+
+
+func _clear_selected_character_info() -> void:
+	selected_character_info_label.text = "No character selected."
+
+
+func _clear_create_character_fields() -> void:
+	character_name_edit.text = ""
+	starter_ability_option.select(0)
 
 
 func _track_request(request_id: int, action: String) -> void:
