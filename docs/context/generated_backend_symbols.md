@@ -96,6 +96,7 @@
 - `_get_owned_character(character_id: int, user_id: int, db: Session) -> Character:`
 - `_character_progression_response(character: Character) -> CharacterProgressionResponse:`
 - `_character_currency_response(character: Character) -> CharacterCurrencyResponse:`
+- `_character_inventory_response(character_id: int, db: Session) -> CharacterInventoryResponse:`
 - `_active_ability_definitions(db: Session) -> list[AbilityDefinition]:`
 - `_get_starter_ability_definition(ability_key: str, db: Session) -> AbilityDefinition:`
 - `_get_ability_definition(ability_key: str, db: Session) -> AbilityDefinition:`
@@ -107,8 +108,11 @@
 - `list_characters(`
 - `create_character(`
 - `get_character(`
+- `delete_character(`
 - `award_character_xp(`
 - `award_character_currency(`
+- `get_character_inventory(`
+- `add_character_inventory_item(`
 - `get_character_abilities(`
 - `unlock_character_ability(`
 - `update_character_ability_loadout(`
@@ -117,8 +121,11 @@
 - `GET "", response_model=list[CharacterResponse]`
 - `POST "", response_model=CharacterResponse, status_code=status.HTTP_201_CREATED`
 - `GET "/{character_id}", response_model=CharacterResponse`
+- `DELETE "/{character_id}", response_model=CharacterDeleteResponse`
 - `POST "/{character_id}/xp", response_model=CharacterProgressionResponse`
 - `POST "/{character_id}/currency", response_model=CharacterCurrencyResponse`
+- `GET "/{character_id}/inventory", response_model=CharacterInventoryResponse`
+- `POST "/{character_id}/inventory/items", response_model=CharacterInventoryResponse`
 - `GET "/{character_id}/abilities", response_model=CharacterAbilitiesResponse`
 - `POST "/{character_id}/abilities/{ability_key}/unlock", response_model=CharacterAbilitiesResponse`
 - `PUT "/{character_id}/ability-loadout", response_model=CharacterAbilitiesResponse`
@@ -128,10 +135,15 @@
 ### Classes
 - `CharacterCreate`
 - `CharacterResponse`
+- `CharacterDeleteResponse`
 - `CharacterXpAward`
 - `CharacterCurrencyAward`
 - `CharacterProgressionResponse`
 - `CharacterCurrencyResponse`
+- `ItemDefinitionResponse`
+- `CharacterInventoryEntryResponse`
+- `CharacterInventoryResponse`
+- `CharacterInventoryItemAdd`
 - `AbilityEffectResponse`
 - `AbilityDefinitionResponse`
 - `CharacterAbilityResponse`
@@ -245,6 +257,18 @@
 
 ### Classes
 - `Character`
+
+### Functions
+- None found
+
+### Routers
+- None found
+
+## `backend/app/models/item.py`
+
+### Classes
+- `ItemDefinition`
+- `CharacterInventory`
 
 ### Functions
 - None found

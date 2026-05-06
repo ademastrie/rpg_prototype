@@ -23,6 +23,7 @@
 - `get_current_user(access_token: String) -> int:`
 - `list_characters(access_token: String) -> int:`
 - `create_character(access_token: String, name: String, starter_ability_key: String = "slash") -> int:`
+- `delete_character(access_token: String, character_id: int) -> int:`
 - `_queue_json_request(`
 - `_process_next_request() -> void:`
 - `_on_request_completed(`
@@ -70,6 +71,7 @@
 - `_on_player_combat_stats_updated(peer_id: int, combat_stats: Dictionary) -> void:`
 - `_on_character_progression_updated(peer_id: int, progression: Dictionary) -> void:`
 - `_on_character_gold_updated(peer_id: int, gold: int) -> void:`
+- `_on_character_inventory_updated(peer_id: int, inventory_items: Array) -> void:`
 - `_on_player_down_state_updated(peer_id: int, is_down: bool) -> void:`
 - `_on_combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries: Array) -> void:`
 - `_on_ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool) -> void:`
@@ -84,13 +86,13 @@
 - `_should_send_aim(aim_direction: Vector2) -> bool:`
 - `_send_movement_input(input_direction: Vector2) -> void:`
 - `_send_aim_input(aim_direction: Vector2) -> void:`
-- `_read_basic_attack_input() -> void:`
 - `_read_combat_toggle_input() -> void:`
+- `_read_character_panel_toggle_input() -> void:`
 - `_read_ability_panel_toggle_input() -> void:`
+- `_read_inventory_panel_toggle_input() -> void:`
 - `_send_combat_toggle_request() -> void:`
 - `_send_ability_toggle_request(ability_name: String, enabled: bool) -> void:`
 - `_send_loadout_save_request(loadout_entries: Array) -> void:`
-- `_send_basic_attack_intent() -> void:`
 - `_update_camera_follow(delta: float) -> void:`
 - `_snap_camera_to_local_player() -> void:`
 - `_send_join_request() -> void:`
@@ -141,26 +143,47 @@
 - `update_health(current_hp: int, max_hp: int) -> void:`
 - `update_progression(level: int, xp: int, xp_to_next: int) -> void:`
 - `update_gold(gold: int) -> void:`
+- `update_inventory_items(inventory_items: Array) -> void:`
 - `update_down_state(is_down: bool) -> void:`
 - `update_combat_mode(combat_enabled: bool) -> void:`
 - `update_combat_stats(combat_stats: Dictionary) -> void:`
 - `update_loadout(loadout_entries: Array) -> void:`
 - `update_unlocked_abilities(unlocked_abilities: Array) -> void:`
 - `show_status_message(message: String) -> void:`
+- `toggle_character_panel() -> void:`
 - `toggle_ability_panel() -> void:`
+- `toggle_inventory_panel() -> void:`
 - `update_ability_enabled(ability_name: String, enabled: bool) -> void:`
 - `update_ability_state(ability_name: String, enabled: bool, active: bool, cooldown_remaining: float) -> void:`
-- `_rebuild_ability_controls() -> void:`
+- `_build_layout() -> void:`
+- `_build_hud() -> void:`
+- `_build_hotbar() -> void:`
+- `_build_character_panel() -> void:`
 - `_build_ability_panel() -> void:`
-- `_build_combat_stats_label() -> void:`
-- `_build_gold_label() -> void:`
+- `_build_inventory_panel() -> void:`
+- `_add_label(parent: Control, text: String) -> Label:`
+- `_add_title_label(parent: Control, text: String) -> Label:`
+- `_add_button(parent: Control, text: String) -> Button:`
+- `_apply_panel_style(panel: PanelContainer) -> void:`
+- `_apply_button_text_colors(button: BaseButton) -> void:`
+- `_rebuild_ability_controls() -> void:`
+- `_refresh_hotbar() -> void:`
+- `_refresh_character_panel() -> void:`
+- `_refresh_inventory_panel() -> void:`
 - `_refresh_ability_panel_options() -> void:`
 - `_refresh_ability_panel_rows() -> void:`
 - `_select_ability_option(option: OptionButton, ability_key: String) -> void:`
+- `_selected_ability_keys_by_slot() -> Dictionary:`
+- `_blocked_ability_keys_for_slot(slot_index: int, selected_keys_by_slot: Dictionary) -> Array[String]:`
 - `_update_confirmed_loadout_entry_enabled(ability_name: String, enabled: bool) -> void:`
-- `_update_loadout_label() -> void:`
 - `_update_ability_display(ability_name: String) -> void:`
+- `_ability_hotbar_text(slot_index: int, ability_name: String) -> String:`
+- `_loadout_entry_for_slot(slot_index: int) -> Dictionary:`
+- `_on_loadout_option_selected(_item_index: int, _slot_index: int) -> void:`
+- `_on_panel_drag_handle_input(event: InputEvent, panel: Control) -> void:`
+- `_move_dragged_panel() -> void:`
 - `_on_combat_toggle_button_pressed() -> void:`
+- `_on_hotbar_slot_pressed(slot_index: int) -> void:`
 - `_on_ability_check_box_toggled(enabled: bool, ability_name: String) -> void:`
 - `_on_save_loadout_pressed() -> void:`
 - `_on_message_timer_timeout(timer: SceneTreeTimer) -> void:`
@@ -208,8 +231,13 @@
 - `_ready() -> void:`
 - `_on_register_pressed() -> void:`
 - `_on_login_pressed() -> void:`
-- `_on_create_character_pressed() -> void:`
+- `_on_open_create_character_pressed() -> void:`
+- `_on_confirm_create_character_pressed() -> void:`
+- `_on_cancel_create_character_pressed() -> void:`
 - `_on_refresh_characters_pressed() -> void:`
+- `_on_delete_character_pressed() -> void:`
+- `_on_confirm_delete_character_pressed() -> void:`
+- `_on_cancel_delete_character_pressed() -> void:`
 - `_on_enter_game_pressed() -> void:`
 - `_on_character_selected(index: int) -> void:`
 - `_on_request_succeeded(request_id: int, _endpoint: String, data: Variant) -> void:`
@@ -218,9 +246,16 @@
 - `_show_characters(data: Variant) -> void:`
 - `_setup_starter_ability_options() -> void:`
 - `_selected_starter_ability_key() -> String:`
-- `_track_request(request_id: int, action: String) -> void:`
+- `_show_selected_character_info(character: Dictionary) -> void:`
+- `_clear_selected_character_info() -> void:`
+- `_clear_create_character_fields() -> void:`
+- `_track_request(request_id: int, action: String, email: String = "") -> void:`
+- `_load_saved_login_email() -> void:`
+- `_save_login_email(email: String) -> void:`
 - `_has_token() -> bool:`
 - `_set_status(message: String) -> void:`
+- `_selected_character() -> Dictionary:`
+- `_update_character_actions(has_selected_character: bool) -> void:`
 
 ### Rpcs
 - None found
@@ -295,6 +330,13 @@
 - `_on_loot_reward_pickup_requested(peer_id: int, loot_orb_id: int, reward_payload: Dictionary) -> void:`
 - `_award_loot_currency(peer_id: int, loot_orb_id: int, reward_payload: Dictionary) -> void:`
 - `_on_loot_currency_award_completed(`
+- `_award_loot_item(peer_id: int, loot_orb_id: int, reward_payload: Dictionary) -> void:`
+- `_on_loot_item_award_completed(`
+- `_confirmed_inventory_from_item_response(response_data: Dictionary, existing_inventory: Array, item_key: String, quantity: int, payload_display_name: String) -> Array:`
+- `_extract_inventory_items(response_data: Dictionary) -> Array:`
+- `_merge_confirmed_inventory_item(existing_inventory: Array, confirmed_item: Dictionary, fallback_item_key: String, fallback_quantity: int, fallback_display_name: String) -> Array:`
+- `_normalize_inventory_item(item_data: Dictionary) -> Dictionary:`
+- `_display_name_for_item_payload(item_key: String, fallback_display_name: String) -> String:`
 - `_award_kill_xp(peer_id: int, enemy_id: int) -> void:`
 - `_on_award_xp_completed(`
 - `_request_level_unlocks(peer_id: int, confirmed_level: int) -> void:`
@@ -448,6 +490,7 @@
 - `player_combat_stats_updated(peer_id: int, combat_stats: Dictionary)`
 - `character_progression_updated(peer_id: int, progression: Dictionary)`
 - `character_gold_updated(peer_id: int, gold: int)`
+- `character_inventory_updated(peer_id: int, inventory_items: Array)`
 - `combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries: Array)`
 - `ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool)`
 - `ability_state_updated(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float)`
@@ -477,7 +520,11 @@
 - `player_respawn_delay_seconds: float = 3.0`
 - `prototype_loot_drop_chance: float = 1.0`
 - `prototype_loot_pickup_radius: float = 1.5`
+- `prototype_loot_reward_type: String = "item"`
 - `prototype_loot_gold_amount: int = 3`
+- `prototype_loot_item_key: String = "slime_gel"`
+- `prototype_loot_item_display_name: String = "Slime Gel"`
+- `prototype_loot_item_quantity: int = 1`
 - `debug_join_sync_logs: bool = false`
 
 ### Functions
@@ -494,7 +541,9 @@
 - `_register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn_position: Vector3 = Vector3.ZERO, loadout: Array = [], ability_enabled: Dictionary = {}, ability_display_names: Dictionary = {}, ability_keys: Dictionary = {}, unlocked_abilities: Array = [], ability_slot_indexes: Dictionary = {}) -> void:`
 - `apply_confirmed_character_progression(peer_id: int, progression: Dictionary) -> void:`
 - `apply_confirmed_character_gold(peer_id: int, gold: int) -> void:`
+- `apply_confirmed_character_inventory(peer_id: int, inventory_items: Array) -> void:`
 - `spawn_prototype_loot_drop(drop_position: Vector3) -> void:`
+- `_prototype_loot_reward_payload() -> Dictionary:`
 - `_process(delta: float) -> void:`
 - `_simulate(delta: float) -> void:`
 - `_apply_enemy_contact_damage(_delta: float) -> void:`
@@ -554,6 +603,7 @@
 - `apply_player_combat_stats_update(peer_id: int, combat_stats: Dictionary) -> void:`
 - `apply_character_progression_update(peer_id: int, progression: Dictionary) -> void:`
 - `apply_character_gold_update(peer_id: int, gold: int) -> void:`
+- `apply_character_inventory_update(peer_id: int, inventory_items: Array) -> void:`
 - `apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_entries: Array) -> void:`
 - `apply_ability_catalog_update(peer_id: int, unlocked_abilities: Array) -> void:`
 - `apply_ability_unlock_message(peer_id: int, display_name: String) -> void:`
@@ -591,6 +641,7 @@
 - `@rpc("authority", "call_remote", "reliable") func apply_player_combat_stats_update(peer_id: int, combat_stats: Dictionary) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func apply_character_progression_update(peer_id: int, progression: Dictionary) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func apply_character_gold_update(peer_id: int, gold: int) -> void:`
+- `@rpc("authority", "call_remote", "reliable") func apply_character_inventory_update(peer_id: int, inventory_items: Array) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func apply_combat_mode_update(peer_id: int, combat_enabled: bool, loadout_entries: Array) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func apply_ability_catalog_update(peer_id: int, unlocked_abilities: Array) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func apply_ability_unlock_message(peer_id: int, display_name: String) -> void:`
