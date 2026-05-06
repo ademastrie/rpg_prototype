@@ -597,6 +597,7 @@ func _extract_character_equipment(response_data: Dictionary) -> Dictionary:
 		equipment[slot] = {
 			"item_key": item_key,
 			"display_name": display_name if display_name != "" else item_key,
+			"stat_modifiers": _extract_stat_modifiers_from_item(entry),
 		}
 
 	return equipment
@@ -640,6 +641,7 @@ func _normalize_equipment_entry(entry_data: Dictionary) -> Dictionary:
 	var slot: String = str(entry_data.get("equip_slot", entry_data.get("slot", entry_data.get("equipment_slot", entry_data.get("slot_key", ""))))).strip_edges()
 	var item_key: String = str(entry_data.get("item_key", entry_data.get("key", ""))).strip_edges()
 	var display_name: String = str(entry_data.get("display_name", "")).strip_edges()
+	var stat_modifiers: Array = _extract_stat_modifiers_from_item(entry_data)
 
 	if entry_data.get("item", null) is Dictionary:
 		var item_data: Dictionary = entry_data.get("item", {}) as Dictionary
@@ -657,6 +659,65 @@ func _normalize_equipment_entry(entry_data: Dictionary) -> Dictionary:
 		"slot": slot,
 		"item_key": item_key,
 		"display_name": display_name,
+		"stat_modifiers": stat_modifiers,
+	}
+
+
+func _extract_stat_modifiers_from_item(item_data: Dictionary) -> Array:
+	var modifier_candidates: Array = []
+	for container in _stat_modifier_containers(item_data):
+		if not (container is Dictionary):
+			continue
+
+		var container_data: Dictionary = container as Dictionary
+		var raw_modifiers: Variant = container_data.get("stat_modifiers", container_data.get("modifiers", container_data.get("stats", [])))
+		if raw_modifiers is Array:
+			modifier_candidates.append_array(raw_modifiers as Array)
+		elif raw_modifiers is Dictionary:
+			var raw_modifier_dictionary: Dictionary = raw_modifiers as Dictionary
+			for stat_key in raw_modifier_dictionary.keys():
+				modifier_candidates.append({
+					"stat_key": str(stat_key),
+					"modifier_type": "flat",
+					"value": raw_modifier_dictionary[stat_key],
+				})
+
+	var modifiers: Array = []
+	for modifier_variant in modifier_candidates:
+		if not (modifier_variant is Dictionary):
+			continue
+
+		var modifier: Dictionary = _normalize_stat_modifier(modifier_variant as Dictionary)
+		if not modifier.is_empty():
+			modifiers.append(modifier)
+	return modifiers
+
+
+func _stat_modifier_containers(item_data: Dictionary) -> Array:
+	var containers: Array = [item_data]
+	if item_data.get("definition", null) is Dictionary:
+		containers.append(item_data.get("definition", {}) as Dictionary)
+	if item_data.get("item", null) is Dictionary:
+		var nested_item: Dictionary = item_data.get("item", {}) as Dictionary
+		containers.append(nested_item)
+		if nested_item.get("definition", null) is Dictionary:
+			containers.append(nested_item.get("definition", {}) as Dictionary)
+	return containers
+
+
+func _normalize_stat_modifier(modifier_data: Dictionary) -> Dictionary:
+	var stat_key: String = str(modifier_data.get("stat_key", modifier_data.get("key", modifier_data.get("stat", modifier_data.get("attribute", ""))))).strip_edges().to_lower()
+	var modifier_type: String = str(modifier_data.get("modifier_type", modifier_data.get("type", "flat"))).strip_edges().to_lower()
+	var value: float = float(modifier_data.get("value", modifier_data.get("amount", 0.0)))
+	if stat_key == "" or is_zero_approx(value):
+		return {}
+	if modifier_type == "":
+		modifier_type = "flat"
+
+	return {
+		"stat_key": stat_key,
+		"modifier_type": modifier_type,
+		"value": value,
 	}
 
 

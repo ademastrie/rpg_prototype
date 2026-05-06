@@ -112,6 +112,8 @@ const ABILITY_DEFINITIONS: Dictionary = {
 		"width": 0.7,
 	},
 }
+const PLAYER_DAMAGE_REDUCTION_CAP: float = 0.80
+const SUPPORTED_EQUIPMENT_STAT_KEYS: Array[String] = ["max_hp", "damage_reduction", "attack_power", "spell_power", "move_speed"]
 
 
 func send_join_request(character_id: int, character_name: String, access_token: String) -> void:
@@ -236,6 +238,7 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_player_is_down_by_peer[peer_id] = false
 	_player_respawn_positions[peer_id] = players[peer_id]
 	_combat_enabled_by_peer[peer_id] = false
+	_character_equipment_by_peer[peer_id] = {}
 	var effective_loadout: Array = loadout.duplicate()
 	if effective_loadout.is_empty():
 		effective_loadout = DEFAULT_LOADOUT.duplicate()
@@ -249,7 +252,6 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_recalculate_player_combat_stats(peer_id, true)
 	_character_progression_by_peer[peer_id] = {"level": 1, "xp": 0, "xp_to_next": 100}
 	_character_gold_by_peer[peer_id] = 0
-	_character_equipment_by_peer[peer_id] = {}
 	var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
 	rpc("apply_player_health_update", peer_id, max_hp, max_hp)
 	rpc("apply_player_down_state", peer_id, false)
@@ -298,6 +300,7 @@ func apply_confirmed_character_equipment(peer_id: int, equipment: Dictionary) ->
 
 	var confirmed_equipment: Dictionary = equipment.duplicate(true)
 	_character_equipment_by_peer[peer_id] = confirmed_equipment
+	_recalculate_player_combat_stats(peer_id)
 	rpc_id(peer_id, "apply_character_equipment_update", peer_id, confirmed_equipment)
 
 
@@ -457,7 +460,7 @@ func apply_enemy_damage_to_player(peer_id: int, raw_damage: int) -> bool:
 
 func _modified_player_damage_taken(peer_id: int, raw_damage: int) -> int:
 	var combat_stats: Dictionary = _player_combat_stats_by_peer.get(peer_id, _default_player_combat_stats()) as Dictionary
-	var damage_reduction: float = clamp(float(combat_stats.get("damage_reduction", 0.0)), 0.0, 0.95)
+	var damage_reduction: float = clamp(float(combat_stats.get("damage_reduction", 0.0)), 0.0, PLAYER_DAMAGE_REDUCTION_CAP)
 	return max(int(round(float(raw_damage) * (1.0 - damage_reduction))), 1)
 
 
@@ -465,6 +468,9 @@ func _default_player_combat_stats() -> Dictionary:
 	return {
 		"max_hp": player_max_hp,
 		"damage_reduction": 0.0,
+		"attack_power": 0.0,
+		"spell_power": 0.0,
+		"move_speed": movement_speed,
 	}
 
 
@@ -475,14 +481,89 @@ func _recalculate_player_combat_stats(peer_id: int, restore_current_hp_to_max: b
 	var combat_stats: Dictionary = _default_player_combat_stats()
 	var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
 	# Temporary prototype modifiers: Slash grants damage reduction and max HP while slotted.
-	# Future modifiers should come from backend ability effects, gear, buffs/debuffs.
+	# Future stats should be assembled from backend base stats, backend ability
+	# effects, gear, buffs/debuffs, and other server-owned simulation state.
 	if loadout.has("Slash"):
-		combat_stats["damage_reduction"] = 0.20
+		combat_stats["damage_reduction"] = float(combat_stats["damage_reduction"]) + 0.20
 		combat_stats["max_hp"] = int(combat_stats["max_hp"]) + 25
 
+	_apply_equipped_item_stat_modifiers(peer_id, combat_stats)
+	combat_stats["damage_reduction"] = clamp(float(combat_stats.get("damage_reduction", 0.0)), 0.0, PLAYER_DAMAGE_REDUCTION_CAP)
+	combat_stats["max_hp"] = max(int(round(float(combat_stats.get("max_hp", player_max_hp)))), 1)
 	_player_combat_stats_by_peer[peer_id] = combat_stats
 	_apply_computed_player_max_hp(peer_id, int(combat_stats.get("max_hp", player_max_hp)), restore_current_hp_to_max)
 	rpc_id(peer_id, "apply_player_combat_stats_update", peer_id, combat_stats)
+
+
+func _apply_equipped_item_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> void:
+	var equipment: Dictionary = _character_equipment_by_peer.get(peer_id, {}) as Dictionary
+	for slot_name in equipment.keys():
+		var slot_data: Variant = equipment[slot_name]
+		if not (slot_data is Dictionary):
+			continue
+
+		var equipment_item: Dictionary = slot_data as Dictionary
+		var stat_modifiers: Array = _equipment_item_stat_modifiers(equipment_item)
+		for modifier_variant in stat_modifiers:
+			if not (modifier_variant is Dictionary):
+				continue
+
+			_apply_stat_modifier_to_combat_stats(combat_stats, modifier_variant as Dictionary)
+
+
+func _equipment_item_stat_modifiers(equipment_item: Dictionary) -> Array:
+	var raw_modifiers: Variant = equipment_item.get("stat_modifiers", [])
+	if raw_modifiers is Array:
+		return (raw_modifiers as Array).duplicate(true)
+	if raw_modifiers is Dictionary:
+		var modifiers: Array = []
+		var raw_modifier_dictionary: Dictionary = raw_modifiers as Dictionary
+		for stat_key in raw_modifier_dictionary.keys():
+			modifiers.append({
+				"stat_key": str(stat_key),
+				"modifier_type": "flat",
+				"value": raw_modifier_dictionary[stat_key],
+			})
+		return modifiers
+
+	return []
+
+
+func _apply_stat_modifier_to_combat_stats(combat_stats: Dictionary, modifier: Dictionary) -> void:
+	var stat_key: String = str(modifier.get("stat_key", modifier.get("key", modifier.get("stat", "")))).strip_edges().to_lower()
+	if not SUPPORTED_EQUIPMENT_STAT_KEYS.has(stat_key):
+		return
+
+	var modifier_type: String = str(modifier.get("modifier_type", modifier.get("type", "flat"))).strip_edges().to_lower()
+	var value: float = float(modifier.get("value", modifier.get("amount", 0.0)))
+	if modifier_type == "":
+		modifier_type = "flat"
+
+	match stat_key:
+		"max_hp":
+			if _is_percent_modifier(modifier_type):
+				combat_stats["max_hp"] = int(round(float(combat_stats.get("max_hp", player_max_hp)) * (1.0 + _percent_modifier_value(value))))
+			else:
+				combat_stats["max_hp"] = int(round(float(combat_stats.get("max_hp", player_max_hp)) + value))
+		"damage_reduction":
+			var reduction_delta: float = _percent_modifier_value(value)
+			combat_stats["damage_reduction"] = float(combat_stats.get("damage_reduction", 0.0)) + reduction_delta
+		"attack_power", "spell_power", "move_speed":
+			if _is_percent_modifier(modifier_type):
+				combat_stats[stat_key] = float(combat_stats.get(stat_key, 0.0)) * (1.0 + _percent_modifier_value(value))
+			else:
+				combat_stats[stat_key] = float(combat_stats.get(stat_key, 0.0)) + value
+
+
+func _is_percent_modifier(modifier_type: String) -> bool:
+	return modifier_type == "percent" or modifier_type == "percentage" or modifier_type == "pct"
+
+
+func _percent_modifier_value(value: float) -> float:
+	if abs(value) > 1.0:
+		return value / 100.0
+
+	return value
 
 
 func _apply_computed_player_max_hp(peer_id: int, computed_max_hp: int, restore_current_hp_to_max: bool = false) -> void:

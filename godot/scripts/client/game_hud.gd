@@ -45,6 +45,9 @@ var _character_xp_label: Label = null
 var _character_gold_label: Label = null
 var _character_max_hp_label: Label = null
 var _character_damage_reduction_label: Label = null
+var _character_attack_power_label: Label = null
+var _character_spell_power_label: Label = null
+var _character_move_speed_label: Label = null
 var _equipment_slot_labels: Dictionary = {}
 var _equipment_slot_options: Dictionary = {}
 var _equipment_panel_status: Label = null
@@ -74,6 +77,9 @@ var _is_equipment_change_pending: bool = false
 var _is_refreshing_equipment_ui: bool = false
 var _current_max_hp: int = 100
 var _current_damage_reduction: float = 0.0
+var _current_attack_power: float = 0.0
+var _current_spell_power: float = 0.0
+var _current_move_speed: float = 0.0
 var _dragged_panel: Control = null
 var _drag_offset: Vector2 = Vector2.ZERO
 
@@ -153,6 +159,9 @@ func update_combat_mode(combat_enabled: bool) -> void:
 func update_combat_stats(combat_stats: Dictionary) -> void:
 	_current_damage_reduction = float(combat_stats.get("damage_reduction", 0.0))
 	_current_max_hp = int(combat_stats.get("max_hp", _current_max_hp))
+	_current_attack_power = float(combat_stats.get("attack_power", _current_attack_power))
+	_current_spell_power = float(combat_stats.get("spell_power", _current_spell_power))
+	_current_move_speed = float(combat_stats.get("move_speed", _current_move_speed))
 	_refresh_character_panel()
 
 
@@ -358,7 +367,7 @@ func _build_character_panel() -> void:
 	_character_panel.offset_left = -336.0
 	_character_panel.offset_top = 16.0
 	_character_panel.offset_right = -16.0
-	_character_panel.offset_bottom = 348.0
+	_character_panel.offset_bottom = 408.0
 	_apply_panel_style(_character_panel)
 	_root.add_child(_character_panel)
 
@@ -373,6 +382,9 @@ func _build_character_panel() -> void:
 	_character_gold_label = _add_label(panel_vbox, "")
 	_character_max_hp_label = _add_label(panel_vbox, "")
 	_character_damage_reduction_label = _add_label(panel_vbox, "")
+	_character_attack_power_label = _add_label(panel_vbox, "")
+	_character_spell_power_label = _add_label(panel_vbox, "")
+	_character_move_speed_label = _add_label(panel_vbox, "")
 	_add_label(panel_vbox, "Equipment")
 	for slot_name in EQUIPMENT_SLOTS:
 		var slot_label: Label = _add_label(panel_vbox, "")
@@ -582,6 +594,9 @@ func _refresh_character_panel() -> void:
 	_character_gold_label.text = "Gold: %s" % _current_gold
 	_character_max_hp_label.text = "Max HP: %s" % _current_max_hp
 	_character_damage_reduction_label.text = "Damage Reduction: %s%%" % int(round(_current_damage_reduction * 100.0))
+	_character_attack_power_label.text = "Attack Power: %s" % _format_stat_number(_current_attack_power)
+	_character_spell_power_label.text = "Spell Power: %s" % _format_stat_number(_current_spell_power)
+	_character_move_speed_label.text = "Move Speed: %s" % _format_stat_number(_current_move_speed)
 	for slot_name in EQUIPMENT_SLOTS:
 		if not _equipment_slot_labels.has(slot_name):
 			continue
@@ -608,6 +623,13 @@ func _equipment_display_text(slot_name: String) -> String:
 
 	var item_key: String = str(equipment_item.get("item_key", "")).strip_edges()
 	return item_key if item_key != "" else "Empty"
+
+
+func _format_stat_number(value: float) -> String:
+	if is_equal_approx(value, round(value)):
+		return str(int(round(value)))
+
+	return "%.1f" % value
 
 
 func _refresh_equipment_slot_options() -> void:
