@@ -12,6 +12,9 @@ from app.characters.schemas import (
     CharacterDeleteResponse,
     CharacterCurrencyAward,
     CharacterCurrencyResponse,
+    CharacterEquipmentEntryResponse,
+    CharacterEquipmentResponse,
+    CharacterEquipmentUpdate,
     CharacterInventoryEntryResponse,
     CharacterInventoryItemAdd,
     CharacterInventoryResponse,
@@ -22,7 +25,7 @@ from app.characters.schemas import (
 from app.db import get_db
 from app.models.ability import AbilityDefinition, CharacterAbility, CharacterAbilityLoadout
 from app.models.character import Character
-from app.models.item import CharacterInventory, ItemDefinition
+from app.models.item import CharacterEquipment, CharacterInventory, ItemDefinition
 from app.models.user import User
 
 
@@ -30,6 +33,7 @@ router = APIRouter(prefix="/characters", tags=["characters"])
 MAX_LOADOUT_ENTRIES = 5
 DEFAULT_STARTER_ABILITY_KEY = "slash"
 STARTER_ABILITY_KEYS = {"slash", "firebolt"}
+VALID_EQUIPMENT_SLOTS = {"weapon", "head", "chest", "arms", "hands", "legs", "feet"}
 
 
 def _xp_to_next_level(level: int) -> int:
@@ -88,6 +92,35 @@ def _character_inventory_response(character_id: int, db: Session) -> CharacterIn
                 definition=entry.item_definition,
             )
             for entry in inventory_entries
+        ],
+    )
+
+
+def _character_equipment_response(character_id: int, db: Session) -> CharacterEquipmentResponse:
+    equipment_entries = list(
+        db.scalars(
+            select(CharacterEquipment)
+            .options(
+                selectinload(CharacterEquipment.item_definition).selectinload(
+                    ItemDefinition.stat_modifiers
+                )
+            )
+            .join(CharacterEquipment.item_definition)
+            .where(CharacterEquipment.character_id == character_id)
+            .order_by(CharacterEquipment.equip_slot)
+        ).all()
+    )
+
+    return CharacterEquipmentResponse(
+        character_id=character_id,
+        equipment=[
+            CharacterEquipmentEntryResponse(
+                equip_slot=entry.equip_slot,
+                item_key=entry.item_key,
+                definition=entry.item_definition,
+                stat_modifiers=entry.item_definition.stat_modifiers,
+            )
+            for entry in equipment_entries
         ],
     )
 
@@ -347,6 +380,17 @@ def _validate_loadout(character_id: int, loadout: list[AbilityLoadoutEntry], db:
         )
 
 
+def _validate_equip_slot(equip_slot: str) -> str:
+    equip_slot_text = equip_slot.strip()
+    if equip_slot_text not in VALID_EQUIPMENT_SLOTS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"equip_slot must be one of: {', '.join(sorted(VALID_EQUIPMENT_SLOTS))}.",
+        )
+
+    return equip_slot_text
+
+
 @router.get("", response_model=list[CharacterResponse])
 def list_characters(
     current_user: User = Depends(get_current_user),
@@ -403,6 +447,11 @@ def delete_character(
     db.execute(
         delete(CharacterInventory).where(
             CharacterInventory.character_id == character.id
+        )
+    )
+    db.execute(
+        delete(CharacterEquipment).where(
+            CharacterEquipment.character_id == character.id
         )
     )
     db.execute(
@@ -477,6 +526,92 @@ def get_character_inventory(
     character = _get_owned_character(character_id, current_user.id, db)
 
     return _character_inventory_response(character.id, db)
+
+
+@router.get("/{character_id}/equipment", response_model=CharacterEquipmentResponse)
+def get_character_equipment(
+    character_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CharacterEquipmentResponse:
+    character = _get_owned_character(character_id, current_user.id, db)
+
+    return _character_equipment_response(character.id, db)
+
+
+@router.put("/{character_id}/equipment", response_model=CharacterEquipmentResponse)
+def update_character_equipment(
+    character_id: int,
+    payload: CharacterEquipmentUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> CharacterEquipmentResponse:
+    character = _get_owned_character(character_id, current_user.id, db)
+    equip_slot = _validate_equip_slot(payload.equip_slot)
+    item_key = payload.item_key.strip() if payload.item_key is not None else ""
+
+    equipment_entry = db.scalar(
+        select(CharacterEquipment).where(
+            CharacterEquipment.character_id == character.id,
+            CharacterEquipment.equip_slot == equip_slot,
+        )
+    )
+
+    if item_key == "":
+        if equipment_entry is not None:
+            db.delete(equipment_entry)
+            db.commit()
+        return _character_equipment_response(character.id, db)
+
+    item_definition = db.scalar(
+        select(ItemDefinition).where(
+            ItemDefinition.item_key == item_key,
+            ItemDefinition.is_active.is_(True),
+        )
+    )
+    if item_definition is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown or inactive item_key: {item_key}.",
+        )
+    if item_definition.item_type != "equipment" or item_definition.equip_slot is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Item is not equippable: {item_key}.",
+        )
+    if item_definition.equip_slot != equip_slot:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Item {item_key} cannot be equipped in slot {equip_slot}.",
+        )
+
+    inventory_entry = db.scalar(
+        select(CharacterInventory).where(
+            CharacterInventory.character_id == character.id,
+            CharacterInventory.item_key == item_definition.item_key,
+            CharacterInventory.quantity > 0,
+        )
+    )
+    if inventory_entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Item is not in this character's inventory: {item_key}.",
+        )
+
+    if equipment_entry is None:
+        db.add(
+            CharacterEquipment(
+                character_id=character.id,
+                equip_slot=equip_slot,
+                item_key=item_definition.item_key,
+            )
+        )
+    else:
+        equipment_entry.item_key = item_definition.item_key
+
+    db.commit()
+
+    return _character_equipment_response(character.id, db)
 
 
 @router.post("/{character_id}/inventory/items", response_model=CharacterInventoryResponse)

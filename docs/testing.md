@@ -170,6 +170,74 @@ try {
 # The expected result is 404 Character not found.
 ```
 
+### Character equipment
+
+The character equipment migration is:
+
+```powershell
+alembic upgrade head
+alembic current
+```
+
+Swagger:
+
+```powershell
+Start-Process http://127.0.0.1:8000/docs
+```
+
+In Swagger, log in through `POST /auth/login`, use the returned bearer token with
+Authorize, then try:
+
+- `GET /characters/{character_id}/equipment`
+- `PUT /characters/{character_id}/equipment`
+
+Equip requests use `equip_slot` and `item_key`. Send `null` or an empty string for
+`item_key` to unequip that slot.
+
+```json
+{
+  "equip_slot": "weapon",
+  "item_key": "training_sword"
+}
+```
+
+Seeded prototype equipment keys are `training_sword`, `apprentice_staff`,
+`simple_bow`, `cloth_hood`, `padded_chest`, `cloth_wraps`, `training_gloves`,
+`cloth_pants`, and `worn_boots`. A character must have the item in inventory before
+equipping it.
+
+PowerShell:
+
+```powershell
+$BaseUrl = "http://127.0.0.1:8000"
+$Auth = Invoke-RestMethod -Method Post "$BaseUrl/auth/login" -ContentType "application/json" -Body '{"email":"dev@example.com","password":"password"}'
+$Headers = @{ Authorization = "Bearer $($Auth.access_token)" }
+
+$Characters = Invoke-RestMethod -Method Get "$BaseUrl/characters" -Headers $Headers
+$CharacterId = $Characters[0].id
+
+Invoke-RestMethod -Method Get "$BaseUrl/characters/$CharacterId/equipment" -Headers $Headers
+
+$GrantSwordBody = @{ item_key = "training_sword"; quantity = 1 } | ConvertTo-Json
+Invoke-RestMethod -Method Post "$BaseUrl/characters/$CharacterId/inventory/items" -Headers $Headers -ContentType "application/json" -Body $GrantSwordBody
+
+$EquipSwordBody = @{ equip_slot = "weapon"; item_key = "training_sword" } | ConvertTo-Json
+Invoke-RestMethod -Method Put "$BaseUrl/characters/$CharacterId/equipment" -Headers $Headers -ContentType "application/json" -Body $EquipSwordBody
+
+$UnequipWeaponBody = @{ equip_slot = "weapon"; item_key = $null } | ConvertTo-Json
+Invoke-RestMethod -Method Put "$BaseUrl/characters/$CharacterId/equipment" -Headers $Headers -ContentType "application/json" -Body $UnequipWeaponBody
+
+$WrongSlotBody = @{ equip_slot = "head"; item_key = "training_sword" } | ConvertTo-Json
+try {
+    Invoke-RestMethod -Method Put "$BaseUrl/characters/$CharacterId/equipment" -Headers $Headers -ContentType "application/json" -Body $WrongSlotBody
+} catch {
+    $_.Exception.Response.StatusCode.value__
+}
+
+# Ownership check: repeat the GET or PUT with another user's token and the same character id.
+# The expected result is 404 Character not found.
+```
+
 ### Character abilities and loadout
 
 The ability endpoints use the same bearer token auth as the other character endpoints.

@@ -54,10 +54,19 @@ class ItemDefinitionResponse(BaseModel):
     display_name: str
     description: str | None
     item_type: str
+    equip_slot: str | None
     stackable: bool
     max_stack: int
     icon_key: str | None
     is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class ItemStatModifierResponse(BaseModel):
+    stat_key: str
+    value: float
+    modifier_type: str
 
     model_config = {"from_attributes": True}
 
@@ -76,6 +85,23 @@ class CharacterInventoryResponse(BaseModel):
 class CharacterInventoryItemAdd(BaseModel):
     item_key: str
     quantity: int
+
+
+class CharacterEquipmentUpdate(BaseModel):
+    equip_slot: str
+    item_key: str | None = None
+
+
+class CharacterEquipmentEntryResponse(BaseModel):
+    equip_slot: str
+    item_key: str
+    definition: ItemDefinitionResponse
+    stat_modifiers: list[ItemStatModifierResponse]
+
+
+class CharacterEquipmentResponse(BaseModel):
+    character_id: int
+    equipment: list[CharacterEquipmentEntryResponse]
 
 
 class AbilityEffectResponse(BaseModel):
