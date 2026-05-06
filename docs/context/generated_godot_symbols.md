@@ -176,17 +176,21 @@
 - `_equipment_display_text(slot_name: String) -> String:`
 - `_format_stat_number(value: float) -> String:`
 - `_refresh_equipment_slot_options() -> void:`
+- `_confirmed_inventory_entry_id_for_slot(slot_name: String) -> String:`
 - `_confirmed_item_key_for_slot(slot_name: String) -> String:`
 - `_confirmed_equipment_item_for_slot(slot_name: String) -> Dictionary:`
-- `_add_equipment_option(option: OptionButton, item_key: String, display_name: String, quantity: int) -> void:`
+- `_add_equipment_option(option: OptionButton, item: Dictionary, quantity: int) -> void:`
 - `_equipment_item_display_name(item: Dictionary, item_key: String) -> String:`
 - `_eligible_inventory_items_for_slot(slot_name: String) -> Array:`
+- `_inventory_entry_id(item: Dictionary) -> String:`
 - `_inventory_item_equip_slot(item: Dictionary) -> String:`
-- `_select_equipment_option(option: OptionButton, item_key: String) -> void:`
+- `_select_equipment_option(option: OptionButton, inventory_entry_id: String, item_key: String = "") -> void:`
+- `_equipment_metadata_matches_item(metadata: Variant, inventory_entry_id: String, item_key: String) -> bool:`
+- `_equipment_metadata_inventory_entry_id(metadata: Variant) -> String:`
 - `_equipment_metadata_item_key(metadata: Variant) -> String:`
 - `_refresh_inventory_panel() -> void:`
-- `_confirmed_equipped_item_keys() -> Array[String]:`
-- `_confirmed_equipped_item_keys_except(excluded_slot_name: String) -> Array[String]:`
+- `_confirmed_equipped_inventory_entry_ids() -> Array[String]:`
+- `_confirmed_equipped_inventory_entry_ids_except(excluded_slot_name: String) -> Array[String]:`
 - `_refresh_ability_panel_options() -> void:`
 - `_refresh_ability_panel_rows() -> void:`
 - `_select_ability_option(option: OptionButton, ability_key: String) -> void:`
@@ -362,6 +366,7 @@
 - `_empty_character_equipment() -> Dictionary:`
 - `_equipment_entry_candidates(response_data: Dictionary) -> Array:`
 - `_normalize_equipment_entry(entry_data: Dictionary) -> Dictionary:`
+- `_extract_inventory_entry_id(item_data: Dictionary) -> String:`
 - `_extract_stat_modifiers_from_item(item_data: Dictionary) -> Array:`
 - `_stat_modifier_containers(item_data: Dictionary) -> Array:`
 - `_normalize_stat_modifier(modifier_data: Dictionary) -> Dictionary:`

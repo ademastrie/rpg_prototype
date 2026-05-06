@@ -107,6 +107,7 @@
 - `_character_abilities_response(character_id: int, db: Session) -> CharacterAbilitiesResponse:`
 - `_validate_loadout(character_id: int, loadout: list[AbilityLoadoutEntry], db: Session) -> None:`
 - `_validate_equip_slot(equip_slot: str) -> str:`
+- `_validate_equippable_inventory_entry(`
 - `list_characters(`
 - `create_character(`
 - `get_character(`
