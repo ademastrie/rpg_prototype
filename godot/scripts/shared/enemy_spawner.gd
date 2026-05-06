@@ -47,13 +47,13 @@ var _enemy_ranged_target_peer: Dictionary = {}
 var _next_enemy_id: int = 1
 var _idle_time: float = 0.0
 var _snapshot_accumulator: float = 0.0
+var _server_enemy_definitions: Dictionary = {}
 
 const DEFAULT_ENEMY_TYPE: String = "grunt"
 
-# Temporary Godot-only prototype definitions. These are intentionally server-owned
-# for now and should become backend/database-backed enemy definitions later.
-# Future XP scaling should consider player level versus enemy level once enemy
-# definitions move to the backend/database.
+# Fallback prototype definitions. Backend enemy definitions are durable data;
+# Godot caches them at startup and owns only live simulation state such as HP,
+# position, targets, cooldowns, attacks, and leash/respawn state.
 const SERVER_PROTOTYPE_ENEMY_DEFINITIONS: Dictionary = {
 	"grunt": {
 		"enemy_type": "grunt",
@@ -168,6 +168,46 @@ func spawn_initial_enemies() -> void:
 		_spawn_enemy(spawn_position, enemy_type)
 
 
+func load_backend_enemy_definitions(data: Variant) -> bool:
+	var definitions_array: Array = _extract_backend_enemy_definition_array(data)
+	if definitions_array.is_empty():
+		print("Backend enemy definitions response did not include any definitions.")
+		return false
+
+	var loaded_definitions: Dictionary = {}
+	for definition_variant in definitions_array:
+		if not (definition_variant is Dictionary):
+			continue
+
+		var definition: Dictionary = _normalize_backend_enemy_definition(definition_variant as Dictionary)
+		var enemy_type: String = str(definition.get("enemy_type", "")).strip_edges()
+		if enemy_type == "":
+			continue
+
+		loaded_definitions[enemy_type] = definition
+
+	if loaded_definitions.is_empty():
+		print("Backend enemy definitions response had no usable definitions.")
+		return false
+	for prototype_enemy_type in SERVER_PROTOTYPE_ENEMY_DEFINITIONS:
+		if loaded_definitions.has(prototype_enemy_type):
+			continue
+
+		loaded_definitions[prototype_enemy_type] = (SERVER_PROTOTYPE_ENEMY_DEFINITIONS[prototype_enemy_type] as Dictionary).duplicate(true)
+		print("Backend enemy definitions did not include '%s'; using prototype fallback for that type." % prototype_enemy_type)
+
+	# Backend definitions are durable data. This cache is read during simulation;
+	# live enemy state remains server-owned in Godot and is never persisted here.
+	_server_enemy_definitions = loaded_definitions
+	print("Loaded %s backend enemy definitions into Godot server cache." % _server_enemy_definitions.size())
+	return true
+
+
+func use_prototype_enemy_definitions() -> void:
+	_server_enemy_definitions = {}
+	print("Using fallback Godot prototype enemy definitions.")
+
+
 func sync_peer(peer_id: int) -> void:
 	if not multiplayer.is_server():
 		return
@@ -202,6 +242,16 @@ func get_active_enemy_positions() -> Dictionary:
 
 func get_enemy_xp_reward(enemy_id: int) -> int:
 	return _enemy_definition_int(enemy_id, "xp_reward", 0)
+
+
+func get_enemy_level(enemy_id: int) -> int:
+	return _enemy_definition_int(enemy_id, "level", 1)
+
+
+func get_enemy_loot_table(enemy_id: int) -> Array:
+	var definition: Dictionary = _enemy_definition_for_enemy(enemy_id)
+	var loot_table: Array = definition.get("loot_table_entries", []) as Array
+	return loot_table.duplicate(true)
 
 
 func get_enemy_type(enemy_id: int) -> String:
@@ -1011,13 +1061,179 @@ func _enemy_definition_for_enemy(enemy_id: int) -> Dictionary:
 
 
 func _enemy_definition_for_type(enemy_type: String) -> Dictionary:
-	return SERVER_PROTOTYPE_ENEMY_DEFINITIONS.get(_resolved_enemy_type(enemy_type), SERVER_PROTOTYPE_ENEMY_DEFINITIONS[DEFAULT_ENEMY_TYPE]) as Dictionary
+	var definitions: Dictionary = _active_enemy_definitions()
+	return definitions.get(_resolved_enemy_type(enemy_type), definitions[DEFAULT_ENEMY_TYPE]) as Dictionary
 
 
 func _resolved_enemy_type(enemy_type: String) -> String:
-	if SERVER_PROTOTYPE_ENEMY_DEFINITIONS.has(enemy_type):
-		return enemy_type
+	var resolved_enemy_type: String = enemy_type.strip_edges()
+	var definitions: Dictionary = _active_enemy_definitions()
+	if definitions.has(resolved_enemy_type):
+		return resolved_enemy_type
 	return DEFAULT_ENEMY_TYPE
+
+
+func _active_enemy_definitions() -> Dictionary:
+	if _server_enemy_definitions.has(DEFAULT_ENEMY_TYPE):
+		return _server_enemy_definitions
+	return SERVER_PROTOTYPE_ENEMY_DEFINITIONS
+
+
+func _extract_backend_enemy_definition_array(data: Variant) -> Array:
+	if data is Array:
+		return data as Array
+	if not (data is Dictionary):
+		return []
+
+	var response_data: Dictionary = data as Dictionary
+	for key in ["enemy_definitions", "definitions", "items", "results", "enemies"]:
+		if response_data.get(key, null) is Array:
+			return response_data.get(key, []) as Array
+	if response_data.get("data", null) is Dictionary:
+		return _extract_backend_enemy_definition_array(response_data.get("data", {}) as Dictionary)
+	return []
+
+
+func _normalize_backend_enemy_definition(source: Dictionary) -> Dictionary:
+	var enemy_type: String = str(source.get("enemy_type", source.get("key", source.get("type", source.get("id", ""))))).strip_edges()
+	if enemy_type == "":
+		return {}
+
+	var fallback_type: String = enemy_type if SERVER_PROTOTYPE_ENEMY_DEFINITIONS.has(enemy_type) else DEFAULT_ENEMY_TYPE
+	var definition: Dictionary = (SERVER_PROTOTYPE_ENEMY_DEFINITIONS[fallback_type] as Dictionary).duplicate(true)
+	definition["enemy_type"] = enemy_type
+	_copy_string_definition_value(source, definition, "display_name", ["display_name", "name"])
+	_copy_int_definition_value(source, definition, "level", ["level"])
+	_copy_int_definition_value(source, definition, "xp_reward", ["xp_reward", "xp", "experience_reward"])
+	_copy_int_definition_value(source, definition, "max_hp", ["max_hp", "max_health", "hp"])
+	_copy_float_definition_value(source, definition, "move_speed", ["move_speed", "movement_speed", "speed"])
+
+	for key in [
+		"aggro_radius",
+		"forced_aggro_seconds",
+		"proximity_aggro_seconds",
+		"home_return_distance",
+		"target_drop_distance",
+		"hard_return_distance",
+		"emergency_failsafe_distance",
+		"leash_reset_distance",
+		"idle_return_distance",
+		"idle_move_speed",
+		"return_speed_multiplier",
+		"return_regen_per_second",
+	]:
+		_copy_float_definition_value(source, definition, key, [key])
+
+	_copy_int_definition_value(source, definition, "contact_damage", ["contact_damage"])
+	_copy_string_definition_value(source, definition, "attack_type", ["attack_type"])
+	_copy_backend_attack_fields(source, definition)
+	_apply_backend_attack_type_defaults(definition)
+	definition["loot_table_entries"] = _extract_backend_loot_table_entries(source)
+	return definition
+
+
+func _apply_backend_attack_type_defaults(definition: Dictionary) -> void:
+	var attack_type: String = str(definition.get("attack_type", "melee")).strip_edges().to_lower()
+	if attack_type == "ranged":
+		definition["attack_type"] = "ranged"
+		definition["ranged_attack_enabled"] = bool(definition.get("ranged_attack_enabled", true))
+		definition["melee_attack_enabled"] = bool(definition.get("melee_attack_enabled", false))
+		return
+
+	definition["attack_type"] = "melee"
+	definition["melee_attack_enabled"] = bool(definition.get("melee_attack_enabled", true))
+
+
+func _copy_backend_attack_fields(source: Dictionary, definition: Dictionary) -> void:
+	var attacks: Array = []
+	if source.get("attacks", null) is Array:
+		attacks = source.get("attacks", []) as Array
+	elif source.get("attack", null) is Dictionary:
+		attacks = [source.get("attack", {}) as Dictionary]
+
+	for attack_variant in attacks:
+		if not (attack_variant is Dictionary):
+			continue
+
+		var attack: Dictionary = attack_variant as Dictionary
+		var attack_type: String = str(attack.get("attack_type", attack.get("type", ""))).strip_edges().to_lower()
+		if attack_type == "melee":
+			definition["attack_type"] = "melee"
+			definition["melee_attack_enabled"] = true
+			_copy_int_definition_value(attack, definition, "melee_attack_damage", ["damage", "attack_damage", "melee_attack_damage"])
+			_copy_float_definition_value(attack, definition, "melee_attack_range", ["range", "attack_range", "melee_attack_range"])
+			_copy_float_definition_value(attack, definition, "melee_attack_radius", ["radius", "melee_attack_radius"])
+			_copy_float_definition_value(attack, definition, "melee_attack_windup_seconds", ["windup_seconds", "windup", "melee_attack_windup_seconds"])
+			_copy_float_definition_value(attack, definition, "melee_attack_recovery_seconds", ["recovery_seconds", "cooldown_seconds", "recovery", "melee_attack_recovery_seconds"])
+		elif attack_type == "ranged":
+			definition["attack_type"] = "ranged"
+			definition["ranged_attack_enabled"] = true
+			definition["melee_attack_enabled"] = false
+			_copy_int_definition_value(attack, definition, "ranged_attack_damage", ["damage", "attack_damage", "ranged_attack_damage"])
+			_copy_float_definition_value(attack, definition, "ranged_attack_range", ["range", "attack_range", "ranged_attack_range"])
+			_copy_float_definition_value(attack, definition, "ranged_attack_preferred_distance", ["preferred_distance", "ranged_attack_preferred_distance"])
+			_copy_float_definition_value(attack, definition, "ranged_attack_windup_seconds", ["windup_seconds", "windup", "ranged_attack_windup_seconds"])
+			_copy_float_definition_value(attack, definition, "ranged_attack_recovery_seconds", ["recovery_seconds", "cooldown_seconds", "recovery", "ranged_attack_recovery_seconds"])
+			_copy_float_definition_value(attack, definition, "ranged_attack_width", ["width", "ranged_attack_width"])
+
+	for key in [
+		"melee_attack_damage",
+		"ranged_attack_damage",
+	]:
+		_copy_int_definition_value(source, definition, key, [key])
+	for key in [
+		"melee_attack_range",
+		"melee_attack_radius",
+		"melee_attack_windup_seconds",
+		"melee_attack_recovery_seconds",
+		"ranged_attack_range",
+		"ranged_attack_preferred_distance",
+		"ranged_attack_windup_seconds",
+		"ranged_attack_recovery_seconds",
+		"ranged_attack_width",
+	]:
+		_copy_float_definition_value(source, definition, key, [key])
+	for key in ["melee_attack_enabled", "ranged_attack_enabled"]:
+		_copy_bool_definition_value(source, definition, key, [key])
+
+
+func _extract_backend_loot_table_entries(source: Dictionary) -> Array:
+	for key in ["loot_table_entries", "loot_table", "loot"]:
+		if source.get(key, null) is Array:
+			return (source.get(key, []) as Array).duplicate(true)
+	return []
+
+
+func _copy_string_definition_value(source: Dictionary, target: Dictionary, target_key: String, source_keys: Array) -> void:
+	for source_key in source_keys:
+		if not source.has(source_key):
+			continue
+
+		var value: String = str(source.get(source_key, "")).strip_edges()
+		if value != "":
+			target[target_key] = value
+			return
+
+
+func _copy_int_definition_value(source: Dictionary, target: Dictionary, target_key: String, source_keys: Array) -> void:
+	for source_key in source_keys:
+		if source.has(source_key):
+			target[target_key] = int(source.get(source_key, target.get(target_key, 0)))
+			return
+
+
+func _copy_float_definition_value(source: Dictionary, target: Dictionary, target_key: String, source_keys: Array) -> void:
+	for source_key in source_keys:
+		if source.has(source_key):
+			target[target_key] = float(source.get(source_key, target.get(target_key, 0.0)))
+			return
+
+
+func _copy_bool_definition_value(source: Dictionary, target: Dictionary, target_key: String, source_keys: Array) -> void:
+	for source_key in source_keys:
+		if source.has(source_key):
+			target[target_key] = bool(source.get(source_key, target.get(target_key, false)))
+			return
 
 
 func _enemy_type_for_enemy(enemy_id: int) -> String:

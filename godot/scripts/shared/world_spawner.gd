@@ -87,9 +87,8 @@ const SPAWN_POSITIONS: Array[Vector3] = [
 
 const DEFAULT_LOADOUT: Array[String] = ["Slash", "HP Regen", "Damage Aura", "Firebolt"]
 
-# Temporary server-side prototype loot tables. Future loot tables should be
-# backend/database-backed and support player/party ownership, enemy level
-# scaling, item rarity, random affixes, and quest-specific drops.
+# Fallback prototype loot tables. Backend enemy definitions are durable data;
+# Godot keeps spawned loot orbs and pickup state server-owned as live simulation.
 const SERVER_PROTOTYPE_LOOT_TABLES: Dictionary = {
 	"grunt": [
 		{"payload_type": "currency", "min_quantity": 3, "max_quantity": 3, "drop_chance": 1.0},
@@ -355,6 +354,37 @@ func spawn_prototype_loot_drop(enemy_type: String, drop_position: Vector3, owner
 		rpc_id(owner_peer_id, "spawn_loot_orb", loot_orb_id, loot_position)
 
 
+func spawn_loot_drop_from_entries(loot_table_entries: Array, enemy_type: String, drop_position: Vector3, owner_peer_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	if not players.has(owner_peer_id):
+		return
+
+	var reward_payloads: Array = _loot_reward_payloads_from_entries(loot_table_entries, enemy_type)
+	if reward_payloads.is_empty():
+		return
+
+	for reward_index in reward_payloads.size():
+		var reward_payload: Dictionary = reward_payloads[reward_index] as Dictionary
+		if reward_payload.is_empty():
+			continue
+
+		var loot_position: Vector3 = drop_position + _prototype_loot_position_offset(reward_index, reward_payloads.size())
+		var loot_orb_id: int = _next_loot_orb_id
+		_next_loot_orb_id += 1
+		var loot_data: Dictionary = {
+			"loot_orb_id": loot_orb_id,
+			"position": loot_position,
+			"active": true,
+			"owner_peer_id": owner_peer_id,
+			"reward_payload": reward_payload,
+		}
+		_loot_orbs[loot_orb_id] = loot_data
+		# Loot definitions are durable backend data; the orb lifetime and pickup
+		# authorization remain live server simulation in Godot.
+		rpc_id(owner_peer_id, "spawn_loot_orb", loot_orb_id, loot_position)
+
+
 func _prototype_loot_reward_payloads_for_enemy_type(enemy_type: String) -> Array:
 	var reward_payloads: Array = []
 	var resolved_enemy_type: String = enemy_type.strip_edges()
@@ -378,18 +408,34 @@ func _prototype_loot_reward_payloads_for_enemy_type(enemy_type: String) -> Array
 	return reward_payloads
 
 
+func _loot_reward_payloads_from_entries(loot_table_entries: Array, enemy_type: String) -> Array:
+	if loot_table_entries.is_empty():
+		return _prototype_loot_reward_payloads_for_enemy_type(enemy_type)
+
+	var reward_payloads: Array = []
+	for entry_variant in loot_table_entries:
+		if not (entry_variant is Dictionary):
+			continue
+
+		var reward_payload: Dictionary = _prototype_loot_payload_from_entry(entry_variant as Dictionary)
+		if not reward_payload.is_empty():
+			reward_payloads.append(reward_payload)
+
+	return reward_payloads
+
+
 func _prototype_loot_payload_from_entry(entry: Dictionary) -> Dictionary:
-	var drop_chance: float = clamp(float(entry.get("drop_chance", 0.0)), 0.0, 1.0)
+	var drop_chance: float = clamp(float(entry.get("drop_chance", entry.get("chance", 1.0))), 0.0, 1.0)
 	if drop_chance <= 0.0:
 		return {}
 	if drop_chance < 1.0 and randf() > drop_chance:
 		return {}
 
-	var min_quantity: int = max(int(entry.get("min_quantity", 1)), 1)
-	var max_quantity: int = max(int(entry.get("max_quantity", min_quantity)), min_quantity)
+	var min_quantity: int = max(int(entry.get("min_quantity", entry.get("min_amount", entry.get("quantity", entry.get("gold_amount", 1))))), 1)
+	var max_quantity: int = max(int(entry.get("max_quantity", entry.get("max_amount", entry.get("quantity", entry.get("gold_amount", min_quantity))))), min_quantity)
 	var quantity: int = randi_range(min_quantity, max_quantity)
-	var payload_type: String = str(entry.get("payload_type", entry.get("type", ""))).strip_edges()
-	if payload_type == "currency":
+	var payload_type: String = str(entry.get("payload_type", entry.get("type", ""))).strip_edges().to_lower()
+	if payload_type == "currency" or payload_type == "gold":
 		return {
 			"type": "currency",
 			"gold_amount": quantity,

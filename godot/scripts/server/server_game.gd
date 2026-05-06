@@ -13,6 +13,7 @@ var connected_peers: Array[int] = []
 var peer_sessions: Dictionary = {}
 var _pending_join_validations: Dictionary = {}
 var _join_timing_start_msec_by_peer: Dictionary = {}
+var _enemy_definition_startup_request: HTTPRequest
 
 const BACKEND_ABILITY_NAME_BY_KEY: Dictionary = {
 	"slash": "Slash",
@@ -56,6 +57,69 @@ func _start_server() -> void:
 	world_spawner.equipment_update_requested.connect(_on_equipment_update_requested)
 	world_spawner.loot_reward_pickup_requested.connect(_on_loot_reward_pickup_requested)
 	enemy_spawner.connect("enemy_killed", Callable(self, "_on_enemy_killed"))
+	_load_enemy_definitions_for_startup()
+
+
+func _load_enemy_definitions_for_startup() -> void:
+	_enemy_definition_startup_request = HTTPRequest.new()
+	add_child(_enemy_definition_startup_request)
+	_enemy_definition_startup_request.request_completed.connect(_on_enemy_definitions_startup_completed)
+
+	var url: String = "%s/enemy-definitions" % _normalized_backend_base_url()
+	var error: Error = _enemy_definition_startup_request.request(url, PackedStringArray(["Content-Type: application/json"]), HTTPClient.METHOD_GET)
+	if error != OK:
+		print("Failed to start backend enemy definition load: %s. Falling back to Godot prototype definitions." % error)
+		_clear_enemy_definition_startup_request()
+		enemy_spawner.call("use_prototype_enemy_definitions")
+		_start_enet_server_after_enemy_definitions()
+
+
+func _on_enemy_definitions_startup_completed(
+	result: int,
+	response_code: int,
+	_headers: PackedStringArray,
+	body: PackedByteArray
+) -> void:
+	_clear_enemy_definition_startup_request()
+
+	var response_text: String = body.get_string_from_utf8()
+	if result != HTTPRequest.RESULT_SUCCESS:
+		print("Backend enemy definition load failed with HTTPRequest result %s. Falling back to Godot prototype definitions." % result)
+		enemy_spawner.call("use_prototype_enemy_definitions")
+		_start_enet_server_after_enemy_definitions()
+		return
+	if response_code < 200 or response_code >= 300:
+		print("Backend enemy definition load failed. status=%s response=%s. Falling back to Godot prototype definitions." % [response_code, response_text])
+		enemy_spawner.call("use_prototype_enemy_definitions")
+		_start_enet_server_after_enemy_definitions()
+		return
+
+	var json: JSON = JSON.new()
+	var parse_error: Error = json.parse(response_text)
+	if parse_error != OK:
+		print("Backend enemy definition load returned invalid JSON. status=%s response=%s. Falling back to Godot prototype definitions." % [response_code, response_text])
+		enemy_spawner.call("use_prototype_enemy_definitions")
+		_start_enet_server_after_enemy_definitions()
+		return
+
+	if not bool(enemy_spawner.call("load_backend_enemy_definitions", json.data)):
+		print("Backend enemy definition load produced no usable cache. Falling back to Godot prototype definitions.")
+		enemy_spawner.call("use_prototype_enemy_definitions")
+
+	_start_enet_server_after_enemy_definitions()
+
+
+func _clear_enemy_definition_startup_request() -> void:
+	if _enemy_definition_startup_request == null:
+		return
+
+	_enemy_definition_startup_request.queue_free()
+	_enemy_definition_startup_request = null
+
+
+func _start_enet_server_after_enemy_definitions() -> void:
+	# Backend enemy definitions are durable data loaded once at startup; Godot
+	# owns the live server simulation and uses the cached definition values.
 
 	var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
 	var error: Error = peer.create_server(server_port)
@@ -955,10 +1019,12 @@ func _on_enemy_killed(attacker_peer_id: int, enemy_id: int) -> void:
 	if not bool(session.get("joined", false)):
 		return
 
-	print("Peer %s earned kill credit for enemy %s." % [attacker_peer_id, enemy_id])
+	var enemy_level: int = int(enemy_spawner.call("get_enemy_level", enemy_id))
+	print("Peer %s earned kill credit for enemy %s level %s." % [attacker_peer_id, enemy_id, enemy_level])
 	var enemy_type: String = str(enemy_spawner.call("get_enemy_type", enemy_id))
 	var enemy_position: Vector3 = enemy_spawner.call("get_authoritative_enemy_position", enemy_id) as Vector3
-	world_spawner.call("spawn_prototype_loot_drop", enemy_type, enemy_position, attacker_peer_id)
+	var loot_table_entries: Array = enemy_spawner.call("get_enemy_loot_table", enemy_id) as Array
+	world_spawner.call("spawn_loot_drop_from_entries", loot_table_entries, enemy_type, enemy_position, attacker_peer_id)
 	_award_kill_xp(attacker_peer_id, enemy_id)
 
 
@@ -1317,7 +1383,7 @@ func _award_kill_xp(peer_id: int, enemy_id: int) -> void:
 
 	var xp_reward: int = int(enemy_spawner.call("get_enemy_xp_reward", enemy_id))
 	if xp_reward <= 0:
-		print("Cannot award XP for peer %s enemy %s: missing prototype enemy XP reward." % [peer_id, enemy_id])
+		print("Cannot award XP for peer %s enemy %s: missing enemy definition XP reward." % [peer_id, enemy_id])
 		return
 
 	var request: HTTPRequest = HTTPRequest.new()
@@ -1328,8 +1394,8 @@ func _award_kill_xp(peer_id: int, enemy_id: int) -> void:
 		"Content-Type: application/json",
 		"Authorization: Bearer %s" % access_token,
 	])
-	# Prototype only: future XP scaling should consider player level versus enemy
-	# level and backend/database-backed enemy definitions.
+	# Enemy XP comes from cached durable backend definitions; Godot only owns the
+	# live kill credit flow and asks the backend to persist character XP.
 	var body: String = JSON.stringify({"xp_amount": xp_reward})
 	var url: String = "%s/characters/%s/xp" % [_normalized_backend_base_url(), character_id]
 	var error: Error = request.request(url, headers, HTTPClient.METHOD_POST, body)
