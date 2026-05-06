@@ -45,9 +45,6 @@ class ItemStatModifier(Base):
 
 class CharacterInventory(Base):
     __tablename__ = "character_inventory"
-    __table_args__ = (
-        UniqueConstraint("character_id", "item_key", name="uq_character_inventory_character_item"),
-    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     character_id: Mapped[int] = mapped_column(ForeignKey("characters.id"), nullable=False)
@@ -56,6 +53,9 @@ class CharacterInventory(Base):
 
     character: Mapped["Character"] = relationship(back_populates="inventory")
     item_definition: Mapped["ItemDefinition"] = relationship(back_populates="inventory_entries")
+    equipment_entries: Mapped[list["CharacterEquipment"]] = relationship(
+        back_populates="inventory_entry",
+    )
 
 
 class CharacterEquipment(Base):
@@ -68,6 +68,13 @@ class CharacterEquipment(Base):
     character_id: Mapped[int] = mapped_column(ForeignKey("characters.id"), nullable=False)
     equip_slot: Mapped[str] = mapped_column(String(50), nullable=False)
     item_key: Mapped[str] = mapped_column(ForeignKey("item_definitions.item_key"), nullable=False)
+    inventory_entry_id: Mapped[int | None] = mapped_column(
+        ForeignKey("character_inventory.id"),
+        nullable=True,
+    )
 
     character: Mapped["Character"] = relationship(back_populates="equipment")
     item_definition: Mapped["ItemDefinition"] = relationship(back_populates="equipment_entries")
+    inventory_entry: Mapped["CharacterInventory | None"] = relationship(
+        back_populates="equipment_entries",
+    )

@@ -73,13 +73,21 @@ def _character_currency_response(character: Character) -> CharacterCurrencyRespo
 
 
 def _character_inventory_response(character_id: int, db: Session) -> CharacterInventoryResponse:
+    equipped_inventory_entry_ids = set(
+        db.scalars(
+            select(CharacterEquipment.inventory_entry_id).where(
+                CharacterEquipment.character_id == character_id,
+                CharacterEquipment.inventory_entry_id.is_not(None),
+            )
+        ).all()
+    )
     inventory_entries = list(
         db.scalars(
             select(CharacterInventory)
             .options(selectinload(CharacterInventory.item_definition))
             .join(CharacterInventory.item_definition)
             .where(CharacterInventory.character_id == character_id)
-            .order_by(ItemDefinition.display_name)
+            .order_by(ItemDefinition.display_name, CharacterInventory.id)
         ).all()
     )
 
@@ -87,8 +95,14 @@ def _character_inventory_response(character_id: int, db: Session) -> CharacterIn
         character_id=character_id,
         items=[
             CharacterInventoryEntryResponse(
+                inventory_entry_id=entry.id,
                 item_key=entry.item_key,
+                display_name=entry.item_definition.display_name,
+                item_type=entry.item_definition.item_type,
+                equip_slot=entry.item_definition.equip_slot,
+                stackable=entry.item_definition.stackable,
                 quantity=entry.quantity,
+                equipped=entry.id in equipped_inventory_entry_ids,
                 definition=entry.item_definition,
             )
             for entry in inventory_entries
@@ -116,6 +130,7 @@ def _character_equipment_response(character_id: int, db: Session) -> CharacterEq
         equipment=[
             CharacterEquipmentEntryResponse(
                 equip_slot=entry.equip_slot,
+                inventory_entry_id=entry.inventory_entry_id,
                 item_key=entry.item_key,
                 definition=entry.item_definition,
                 stat_modifiers=entry.item_definition.stat_modifiers,
@@ -391,6 +406,36 @@ def _validate_equip_slot(equip_slot: str) -> str:
     return equip_slot_text
 
 
+def _validate_equippable_inventory_entry(
+    character_id: int,
+    equip_slot: str,
+    inventory_entry: CharacterInventory,
+) -> ItemDefinition:
+    item_definition = inventory_entry.item_definition
+    if item_definition is None or not item_definition.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Inventory entry does not reference an active item.",
+        )
+    if item_definition.item_type != "equipment" or item_definition.equip_slot is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Item is not equippable: {inventory_entry.item_key}.",
+        )
+    if item_definition.equip_slot != equip_slot:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Item {inventory_entry.item_key} cannot be equipped in slot {equip_slot}.",
+        )
+    if inventory_entry.character_id != character_id or inventory_entry.quantity <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Inventory entry is not available for this character.",
+        )
+
+    return item_definition
+
+
 @router.get("", response_model=list[CharacterResponse])
 def list_characters(
     current_user: User = Depends(get_current_user),
@@ -445,13 +490,13 @@ def delete_character(
     character = _get_owned_character(character_id, current_user.id, db)
 
     db.execute(
-        delete(CharacterInventory).where(
-            CharacterInventory.character_id == character.id
+        delete(CharacterEquipment).where(
+            CharacterEquipment.character_id == character.id
         )
     )
     db.execute(
-        delete(CharacterEquipment).where(
-            CharacterEquipment.character_id == character.id
+        delete(CharacterInventory).where(
+            CharacterInventory.character_id == character.id
         )
     )
     db.execute(
@@ -548,6 +593,7 @@ def update_character_equipment(
 ) -> CharacterEquipmentResponse:
     character = _get_owned_character(character_id, current_user.id, db)
     equip_slot = _validate_equip_slot(payload.equip_slot)
+    inventory_entry_id = payload.inventory_entry_id
     item_key = payload.item_key.strip() if payload.item_key is not None else ""
 
     equipment_entry = db.scalar(
@@ -557,46 +603,97 @@ def update_character_equipment(
         )
     )
 
-    if item_key == "":
+    if inventory_entry_id is None and item_key == "":
         if equipment_entry is not None:
             db.delete(equipment_entry)
             db.commit()
         return _character_equipment_response(character.id, db)
 
-    item_definition = db.scalar(
-        select(ItemDefinition).where(
-            ItemDefinition.item_key == item_key,
-            ItemDefinition.is_active.is_(True),
+    inventory_entry: CharacterInventory | None = None
+    if inventory_entry_id is not None:
+        inventory_entry = db.scalar(
+            select(CharacterInventory)
+            .options(selectinload(CharacterInventory.item_definition))
+            .where(
+                CharacterInventory.id == inventory_entry_id,
+                CharacterInventory.character_id == character.id,
+                CharacterInventory.quantity > 0,
+            )
         )
-    )
-    if item_definition is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Unknown or inactive item_key: {item_key}.",
+        if inventory_entry is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Inventory entry is not in this character's inventory: {inventory_entry_id}.",
+            )
+        item_definition = _validate_equippable_inventory_entry(
+            character.id,
+            equip_slot,
+            inventory_entry,
         )
-    if item_definition.item_type != "equipment" or item_definition.equip_slot is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Item is not equippable: {item_key}.",
+        if item_key != "" and item_key != item_definition.item_key:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="inventory_entry_id and item_key refer to different items.",
+            )
+    else:
+        item_definition = db.scalar(
+            select(ItemDefinition).where(
+                ItemDefinition.item_key == item_key,
+                ItemDefinition.is_active.is_(True),
+            )
         )
-    if item_definition.equip_slot != equip_slot:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Item {item_key} cannot be equipped in slot {equip_slot}.",
-        )
+        if item_definition is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Unknown or inactive item_key: {item_key}.",
+            )
+        if item_definition.item_type != "equipment" or item_definition.equip_slot is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Item is not equippable: {item_key}.",
+            )
+        if item_definition.equip_slot != equip_slot:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Item {item_key} cannot be equipped in slot {equip_slot}.",
+            )
 
-    inventory_entry = db.scalar(
-        select(CharacterInventory).where(
-            CharacterInventory.character_id == character.id,
-            CharacterInventory.item_key == item_definition.item_key,
-            CharacterInventory.quantity > 0,
+        equipped_inventory_entry_ids = set(
+            db.scalars(
+                select(CharacterEquipment.inventory_entry_id).where(
+                    CharacterEquipment.character_id == character.id,
+                    CharacterEquipment.inventory_entry_id.is_not(None),
+                )
+            ).all()
         )
-    )
-    if inventory_entry is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Item is not in this character's inventory: {item_key}.",
+        inventory_entries = list(
+            db.scalars(
+                select(CharacterInventory)
+                .where(
+                    CharacterInventory.character_id == character.id,
+                    CharacterInventory.item_key == item_definition.item_key,
+                    CharacterInventory.quantity > 0,
+                )
+                .order_by(CharacterInventory.id)
+            ).all()
         )
+        inventory_entry = next(
+            (
+                entry
+                for entry in inventory_entries
+                if entry.id not in equipped_inventory_entry_ids
+                or (
+                    equipment_entry is not None
+                    and entry.id == equipment_entry.inventory_entry_id
+                )
+            ),
+            None,
+        )
+        if inventory_entry is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Item is not in this character's inventory: {item_key}.",
+            )
 
     if equipment_entry is None:
         db.add(
@@ -604,10 +701,12 @@ def update_character_equipment(
                 character_id=character.id,
                 equip_slot=equip_slot,
                 item_key=item_definition.item_key,
+                inventory_entry_id=inventory_entry.id,
             )
         )
     else:
         equipment_entry.item_key = item_definition.item_key
+        equipment_entry.inventory_entry_id = inventory_entry.id
 
     db.commit()
 
@@ -641,22 +740,35 @@ def add_character_inventory_item(
             detail=f"Unknown or inactive item_key: {item_key}.",
         )
 
-    inventory_entry = db.scalar(
-        select(CharacterInventory).where(
-            CharacterInventory.character_id == character.id,
-            CharacterInventory.item_key == item_definition.item_key,
-        )
-    )
-    if inventory_entry is None:
-        db.add(
-            CharacterInventory(
-                character_id=character.id,
-                item_key=item_definition.item_key,
-                quantity=payload.quantity,
+    if item_definition.stackable:
+        inventory_entry = db.scalar(
+            select(CharacterInventory).where(
+                CharacterInventory.character_id == character.id,
+                CharacterInventory.item_key == item_definition.item_key,
             )
         )
+        if inventory_entry is None:
+            db.add(
+                CharacterInventory(
+                    character_id=character.id,
+                    item_key=item_definition.item_key,
+                    quantity=min(payload.quantity, item_definition.max_stack),
+                )
+            )
+        else:
+            inventory_entry.quantity = min(
+                inventory_entry.quantity + payload.quantity,
+                item_definition.max_stack,
+            )
     else:
-        inventory_entry.quantity += payload.quantity
+        for _ in range(payload.quantity):
+            db.add(
+                CharacterInventory(
+                    character_id=character.id,
+                    item_key=item_definition.item_key,
+                    quantity=1,
+                )
+            )
 
     db.commit()
 

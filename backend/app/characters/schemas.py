@@ -72,8 +72,14 @@ class ItemStatModifierResponse(BaseModel):
 
 
 class CharacterInventoryEntryResponse(BaseModel):
+    inventory_entry_id: int
     item_key: str
+    display_name: str
+    item_type: str
+    equip_slot: str | None
+    stackable: bool
     quantity: int
+    equipped: bool
     definition: ItemDefinitionResponse
 
 
@@ -89,11 +95,13 @@ class CharacterInventoryItemAdd(BaseModel):
 
 class CharacterEquipmentUpdate(BaseModel):
     equip_slot: str
+    inventory_entry_id: int | None = None
     item_key: str | None = None
 
 
 class CharacterEquipmentEntryResponse(BaseModel):
     equip_slot: str
+    inventory_entry_id: int | None
     item_key: str
     definition: ItemDefinitionResponse
     stat_modifiers: list[ItemStatModifierResponse]

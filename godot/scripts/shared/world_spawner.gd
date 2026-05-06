@@ -1355,14 +1355,14 @@ func _is_valid_equipment_request(equipment_entries: Array) -> bool:
 
 		var entry: Dictionary = entry_variant as Dictionary
 		var slot_name: String = str(entry.get("slot", "")).strip_edges().to_lower()
-		var item_key_variant: Variant = entry.get("item_key", null)
-		var item_key: String = "" if item_key_variant == null else str(item_key_variant).strip_edges()
-		var is_unequip: bool = bool(entry.get("unequip", false)) or item_key_variant == null
+		var inventory_entry_id_variant: Variant = entry.get("inventory_entry_id", null)
+		var inventory_entry_id: String = "" if inventory_entry_id_variant == null else str(inventory_entry_id_variant).strip_edges()
+		var is_unequip: bool = bool(entry.get("unequip", false)) or inventory_entry_id_variant == null
 		if not allowed_slots.has(slot_name):
 			return false
 		if seen_slots.has(slot_name):
 			return false
-		if item_key == "" and not is_unequip:
+		if inventory_entry_id == "" and not is_unequip:
 			return false
 
 		seen_slots.append(slot_name)

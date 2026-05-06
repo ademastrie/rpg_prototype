@@ -491,13 +491,13 @@ func _on_equipment_update_requested(peer_id: int, equipment_entries: Array) -> v
 		if not EQUIPMENT_SLOTS.has(slot_name):
 			continue
 
-		var item_key_variant: Variant = entry.get("item_key", null)
-		var item_key: String = "" if item_key_variant == null else str(item_key_variant).strip_edges()
+		var inventory_entry_id_variant: Variant = entry.get("inventory_entry_id", null)
+		var inventory_entry_id: String = "" if inventory_entry_id_variant == null else str(inventory_entry_id_variant).strip_edges()
 		backend_entry = {"equip_slot": slot_name}
-		if item_key_variant == null or item_key == "":
-			backend_entry["item_key"] = null
+		if inventory_entry_id_variant == null or inventory_entry_id == "":
+			backend_entry["inventory_entry_id"] = null
 		else:
-			backend_entry["item_key"] = item_key
+			backend_entry["inventory_entry_id"] = inventory_entry_id
 		break
 
 	if backend_entry.is_empty():
@@ -513,10 +513,10 @@ func _on_equipment_update_requested(peer_id: int, equipment_entries: Array) -> v
 		"Authorization: Bearer %s" % access_token,
 	])
 	var body: String = JSON.stringify(backend_entry)
-	print("Equipment update request: character_id=%s equip_slot=%s item_key=%s body=%s" % [
+	print("Equipment update request: character_id=%s equip_slot=%s inventory_entry_id=%s body=%s" % [
 		character_id,
 		str(backend_entry.get("equip_slot", "")),
-		str(backend_entry.get("item_key", null)),
+		str(backend_entry.get("inventory_entry_id", null)),
 		body,
 	])
 	var url: String = "%s/characters/%s/equipment" % [_normalized_backend_base_url(), character_id]
@@ -601,6 +601,7 @@ func _extract_character_equipment(response_data: Dictionary) -> Dictionary:
 			continue
 
 		equipment[slot] = {
+			"inventory_entry_id": str(entry.get("inventory_entry_id", "")).strip_edges(),
 			"item_key": item_key,
 			"display_name": display_name if display_name != "" else item_key,
 			"stat_modifiers": _extract_stat_modifiers_from_item(entry),
@@ -645,6 +646,7 @@ func _equipment_entry_candidates(response_data: Dictionary) -> Array:
 
 func _normalize_equipment_entry(entry_data: Dictionary) -> Dictionary:
 	var slot: String = str(entry_data.get("equip_slot", entry_data.get("slot", entry_data.get("equipment_slot", entry_data.get("slot_key", ""))))).strip_edges()
+	var inventory_entry_id: String = _extract_inventory_entry_id(entry_data)
 	var item_key: String = str(entry_data.get("item_key", entry_data.get("key", ""))).strip_edges()
 	var display_name: String = str(entry_data.get("display_name", "")).strip_edges()
 	var stat_modifiers: Array = _extract_stat_modifiers_from_item(entry_data)
@@ -663,10 +665,25 @@ func _normalize_equipment_entry(entry_data: Dictionary) -> Dictionary:
 
 	return {
 		"slot": slot,
+		"inventory_entry_id": inventory_entry_id,
 		"item_key": item_key,
 		"display_name": display_name,
 		"stat_modifiers": stat_modifiers,
 	}
+
+
+func _extract_inventory_entry_id(item_data: Dictionary) -> String:
+	var inventory_entry_id: String = str(item_data.get("inventory_entry_id", item_data.get("entry_id", item_data.get("inventory_item_id", "")))).strip_edges()
+	if inventory_entry_id != "":
+		return inventory_entry_id
+
+	if item_data.get("item", null) is Dictionary:
+		var nested_item: Dictionary = item_data.get("item", {}) as Dictionary
+		inventory_entry_id = str(nested_item.get("inventory_entry_id", nested_item.get("entry_id", nested_item.get("inventory_item_id", "")))).strip_edges()
+		if inventory_entry_id != "":
+			return inventory_entry_id
+
+	return str(item_data.get("id", "")).strip_edges()
 
 
 func _extract_stat_modifiers_from_item(item_data: Dictionary) -> Array:
@@ -1169,37 +1186,50 @@ func _extract_inventory_items(response_data: Dictionary) -> Array:
 
 
 func _merge_confirmed_inventory_item(existing_inventory: Array, confirmed_item: Dictionary, fallback_item_key: String, fallback_quantity: int, fallback_display_name: String) -> Array:
-	var merged_by_key: Dictionary = {}
+	var merged_items: Dictionary = {}
 	for item_variant in existing_inventory:
 		if not (item_variant is Dictionary):
 			continue
 
 		var existing_item: Dictionary = _normalize_inventory_item(item_variant as Dictionary)
+		if existing_item.is_empty():
+			continue
+
+		var existing_inventory_entry_id: String = str(existing_item.get("inventory_entry_id", "")).strip_edges()
 		var existing_key: String = str(existing_item.get("item_key", "")).strip_edges()
 		if existing_key != "":
-			merged_by_key[existing_key] = existing_item
+			var existing_merge_key: String = "item:%s" % existing_key
+			if existing_inventory_entry_id != "":
+				existing_merge_key = "entry:%s" % existing_inventory_entry_id
+			merged_items[existing_merge_key] = existing_item
 
 	var item_key: String = str(confirmed_item.get("item_key", fallback_item_key)).strip_edges()
 	if item_key == "":
-		return merged_by_key.values()
+		return merged_items.values()
 
+	var inventory_entry_id: String = str(confirmed_item.get("inventory_entry_id", "")).strip_edges()
 	var quantity: int = int(confirmed_item.get("quantity", fallback_quantity))
 	var display_name: String = str(confirmed_item.get("display_name", _display_name_for_item_payload(item_key, fallback_display_name))).strip_edges()
 	var equip_slot: String = str(confirmed_item.get("equip_slot", "")).strip_edges().to_lower()
 	var item_type: String = str(confirmed_item.get("item_type", "")).strip_edges().to_lower()
 	if equip_slot == "":
 		equip_slot = _fallback_equip_slot_for_item_key(item_key)
-	merged_by_key[item_key] = {
+	var merge_key: String = "item:%s" % item_key
+	if inventory_entry_id != "":
+		merge_key = "entry:%s" % inventory_entry_id
+	merged_items[merge_key] = {
+		"inventory_entry_id": inventory_entry_id,
 		"item_key": item_key,
 		"display_name": display_name if display_name != "" else _display_name_for_item_payload(item_key, fallback_display_name),
 		"quantity": max(quantity, 0),
 		"equip_slot": equip_slot,
 		"item_type": item_type,
 	}
-	return merged_by_key.values()
+	return merged_items.values()
 
 
 func _normalize_inventory_item(item_data: Dictionary) -> Dictionary:
+	var inventory_entry_id: String = _extract_inventory_entry_id(item_data)
 	var item_key: String = str(item_data.get("item_key", item_data.get("key", ""))).strip_edges()
 	if item_key == "" and item_data.get("item", null) is Dictionary:
 		var nested_item: Dictionary = item_data.get("item", {}) as Dictionary
@@ -1239,6 +1269,7 @@ func _normalize_inventory_item(item_data: Dictionary) -> Dictionary:
 		equip_slot = _fallback_equip_slot_for_item_key(item_key)
 
 	return {
+		"inventory_entry_id": inventory_entry_id,
 		"item_key": item_key,
 		"display_name": display_name if display_name != "" else _display_name_for_item_payload(item_key, ""),
 		"quantity": quantity,

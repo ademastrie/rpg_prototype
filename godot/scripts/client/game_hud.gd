@@ -618,11 +618,16 @@ func _equipment_display_text(slot_name: String) -> String:
 		return "Empty"
 
 	var display_name: String = str(equipment_item.get("display_name", "")).strip_edges()
-	if display_name != "":
-		return display_name
-
 	var item_key: String = str(equipment_item.get("item_key", "")).strip_edges()
-	return item_key if item_key != "" else "Empty"
+	var label_text: String = display_name if display_name != "" else item_key
+	if label_text == "":
+		return "Empty"
+
+	var inventory_entry_id: String = _inventory_entry_id(equipment_item)
+	if inventory_entry_id != "":
+		return "%s (%s)" % [label_text, inventory_entry_id]
+
+	return label_text
 
 
 func _format_stat_number(value: float) -> String:
@@ -639,16 +644,16 @@ func _refresh_equipment_slot_options() -> void:
 			continue
 
 		var option: OptionButton = _equipment_slot_options[slot_name] as OptionButton
-		var confirmed_item_key: String = _confirmed_item_key_for_slot(slot_name)
+		var confirmed_inventory_entry_id: String = _confirmed_inventory_entry_id_for_slot(slot_name)
 		option.clear()
 		option.add_item("Empty / Unequip")
 		option.set_item_metadata(0, null)
 
 		var confirmed_item: Dictionary = _confirmed_equipment_item_for_slot(slot_name)
-		if not confirmed_item.is_empty() and confirmed_item_key != "":
-			_add_equipment_option(option, confirmed_item_key, _equipment_item_display_name(confirmed_item, confirmed_item_key), -1)
+		if not confirmed_item.is_empty():
+			_add_equipment_option(option, confirmed_item, -1)
 
-		var equipped_other_slot_keys: Array[String] = _confirmed_equipped_item_keys_except(slot_name)
+		var equipped_other_slot_entry_ids: Array[String] = _confirmed_equipped_inventory_entry_ids_except(slot_name)
 		for item_variant in _eligible_inventory_items_for_slot(slot_name):
 			if not (item_variant is Dictionary):
 				continue
@@ -657,14 +662,23 @@ func _refresh_equipment_slot_options() -> void:
 			var item_key: String = str(item.get("item_key", "")).strip_edges()
 			if item_key == "":
 				continue
-			if equipped_other_slot_keys.has(item_key):
+			var inventory_entry_id: String = _inventory_entry_id(item)
+			if inventory_entry_id != "" and equipped_other_slot_entry_ids.has(inventory_entry_id):
 				continue
 
-			_add_equipment_option(option, item_key, _equipment_item_display_name(item, item_key), max(int(item.get("quantity", 0)), 0))
+			_add_equipment_option(option, item, max(int(item.get("quantity", 0)), 0))
 
-		_select_equipment_option(option, confirmed_item_key)
+		_select_equipment_option(option, confirmed_inventory_entry_id, _confirmed_item_key_for_slot(slot_name))
 		option.disabled = _is_equipment_change_pending
 	_is_refreshing_equipment_ui = false
+
+
+func _confirmed_inventory_entry_id_for_slot(slot_name: String) -> String:
+	var slot_data: Variant = _confirmed_equipment.get(slot_name, {})
+	if not (slot_data is Dictionary):
+		return ""
+
+	return _inventory_entry_id(slot_data as Dictionary)
 
 
 func _confirmed_item_key_for_slot(slot_name: String) -> String:
@@ -683,16 +697,25 @@ func _confirmed_equipment_item_for_slot(slot_name: String) -> Dictionary:
 	return (slot_data as Dictionary).duplicate(true)
 
 
-func _add_equipment_option(option: OptionButton, item_key: String, display_name: String, quantity: int) -> void:
+func _add_equipment_option(option: OptionButton, item: Dictionary, quantity: int) -> void:
+	var inventory_entry_id: String = _inventory_entry_id(item)
+	var item_key: String = str(item.get("item_key", "")).strip_edges()
+	if item_key == "":
+		return
+
 	for item_index in range(option.get_item_count()):
-		if _equipment_metadata_item_key(option.get_item_metadata(item_index)) == item_key:
+		if _equipment_metadata_matches_item(option.get_item_metadata(item_index), inventory_entry_id, item_key):
 			return
 
+	var display_name: String = _equipment_item_display_name(item, item_key)
 	var option_text: String = display_name if display_name != "" else item_key
 	if quantity >= 0:
 		option_text = "%s x%s" % [option_text, quantity]
 	option.add_item(option_text)
-	option.set_item_metadata(option.get_item_count() - 1, item_key)
+	option.set_item_metadata(option.get_item_count() - 1, {
+		"inventory_entry_id": inventory_entry_id,
+		"item_key": item_key,
+	})
 
 
 func _equipment_item_display_name(item: Dictionary, item_key: String) -> String:
@@ -719,6 +742,20 @@ func _eligible_inventory_items_for_slot(slot_name: String) -> Array:
 	return eligible_items
 
 
+func _inventory_entry_id(item: Dictionary) -> String:
+	var inventory_entry_id: String = str(item.get("inventory_entry_id", item.get("entry_id", item.get("inventory_item_id", "")))).strip_edges()
+	if inventory_entry_id != "":
+		return inventory_entry_id
+
+	if item.get("item", null) is Dictionary:
+		var nested_item: Dictionary = item.get("item", {}) as Dictionary
+		inventory_entry_id = str(nested_item.get("inventory_entry_id", nested_item.get("entry_id", nested_item.get("inventory_item_id", "")))).strip_edges()
+		if inventory_entry_id != "":
+			return inventory_entry_id
+
+	return str(item.get("id", "")).strip_edges()
+
+
 func _inventory_item_equip_slot(item: Dictionary) -> String:
 	var slot_name: String = str(item.get("equip_slot", item.get("equipment_slot", item.get("slot", "")))).strip_edges().to_lower()
 	if slot_name != "":
@@ -742,18 +779,42 @@ func _inventory_item_equip_slot(item: Dictionary) -> String:
 	return slot_name
 
 
-func _select_equipment_option(option: OptionButton, item_key: String) -> void:
+func _select_equipment_option(option: OptionButton, inventory_entry_id: String, item_key: String = "") -> void:
 	for item_index in range(option.get_item_count()):
-		if _equipment_metadata_item_key(option.get_item_metadata(item_index)) == item_key:
+		var metadata: Variant = option.get_item_metadata(item_index)
+		var metadata_entry_id: String = _equipment_metadata_inventory_entry_id(metadata)
+		if inventory_entry_id != "" and metadata_entry_id == inventory_entry_id:
+			option.select(item_index)
+			return
+		if inventory_entry_id == "" and _equipment_metadata_item_key(metadata) == item_key:
 			option.select(item_index)
 			return
 
 	option.select(0)
 
 
+func _equipment_metadata_matches_item(metadata: Variant, inventory_entry_id: String, item_key: String) -> bool:
+	var metadata_entry_id: String = _equipment_metadata_inventory_entry_id(metadata)
+	if inventory_entry_id != "" and metadata_entry_id != "":
+		return metadata_entry_id == inventory_entry_id
+
+	return inventory_entry_id == "" and _equipment_metadata_item_key(metadata) == item_key
+
+
+func _equipment_metadata_inventory_entry_id(metadata: Variant) -> String:
+	if metadata == null:
+		return ""
+	if metadata is Dictionary:
+		return _inventory_entry_id(metadata as Dictionary)
+
+	return ""
+
+
 func _equipment_metadata_item_key(metadata: Variant) -> String:
 	if metadata == null:
 		return ""
+	if metadata is Dictionary:
+		return str((metadata as Dictionary).get("item_key", "")).strip_edges()
 
 	return str(metadata).strip_edges()
 
@@ -771,14 +832,15 @@ func _refresh_inventory_panel() -> void:
 		return
 
 	var visible_item_count: int = 0
-	var equipped_item_keys: Array[String] = _confirmed_equipped_item_keys()
+	var equipped_inventory_entry_ids: Array[String] = _confirmed_equipped_inventory_entry_ids()
 	for item_variant in _confirmed_inventory_items:
 		if not (item_variant is Dictionary):
 			continue
 
 		var item: Dictionary = item_variant as Dictionary
 		var item_key: String = str(item.get("item_key", "")).strip_edges()
-		if item_key != "" and equipped_item_keys.has(item_key):
+		var inventory_entry_id: String = _inventory_entry_id(item)
+		if inventory_entry_id != "" and equipped_inventory_entry_ids.has(inventory_entry_id):
 			continue
 
 		var display_name: String = str(item.get("display_name", item_key)).strip_edges()
@@ -792,27 +854,27 @@ func _refresh_inventory_panel() -> void:
 		_add_label(_inventory_list, "No unequipped items.")
 
 
-func _confirmed_equipped_item_keys() -> Array[String]:
-	var equipped_item_keys: Array[String] = []
+func _confirmed_equipped_inventory_entry_ids() -> Array[String]:
+	var equipped_inventory_entry_ids: Array[String] = []
 	for slot_name in EQUIPMENT_SLOTS:
-		var item_key: String = _confirmed_item_key_for_slot(slot_name)
-		if item_key != "" and not equipped_item_keys.has(item_key):
-			equipped_item_keys.append(item_key)
+		var inventory_entry_id: String = _confirmed_inventory_entry_id_for_slot(slot_name)
+		if inventory_entry_id != "" and not equipped_inventory_entry_ids.has(inventory_entry_id):
+			equipped_inventory_entry_ids.append(inventory_entry_id)
 
-	return equipped_item_keys
+	return equipped_inventory_entry_ids
 
 
-func _confirmed_equipped_item_keys_except(excluded_slot_name: String) -> Array[String]:
-	var equipped_item_keys: Array[String] = []
+func _confirmed_equipped_inventory_entry_ids_except(excluded_slot_name: String) -> Array[String]:
+	var equipped_inventory_entry_ids: Array[String] = []
 	for slot_name in EQUIPMENT_SLOTS:
 		if slot_name == excluded_slot_name:
 			continue
 
-		var item_key: String = _confirmed_item_key_for_slot(slot_name)
-		if item_key != "" and not equipped_item_keys.has(item_key):
-			equipped_item_keys.append(item_key)
+		var inventory_entry_id: String = _confirmed_inventory_entry_id_for_slot(slot_name)
+		if inventory_entry_id != "" and not equipped_inventory_entry_ids.has(inventory_entry_id):
+			equipped_inventory_entry_ids.append(inventory_entry_id)
 
-	return equipped_item_keys
+	return equipped_inventory_entry_ids
 
 
 func _refresh_ability_panel_options() -> void:
@@ -1247,11 +1309,12 @@ func _on_equipment_option_selected(_item_index: int, _slot_name: String) -> void
 	if selected_index >= 0 and selected_index < option.get_item_count():
 		selected_metadata = option.get_item_metadata(selected_index)
 
-	var item_key: String = _equipment_metadata_item_key(selected_metadata)
+	var inventory_entry_id: String = _equipment_metadata_inventory_entry_id(selected_metadata)
 	var equipment_entries: Array = [{
 		"slot": _slot_name,
-		"item_key": null if selected_metadata == null else item_key,
-		"unequip": item_key == "",
+		"inventory_entry_id": null if selected_metadata == null else inventory_entry_id,
+		"item_key": _equipment_metadata_item_key(selected_metadata),
+		"unequip": inventory_entry_id == "",
 	}]
 
 	_is_equipment_change_pending = true
