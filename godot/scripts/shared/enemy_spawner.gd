@@ -204,6 +204,10 @@ func get_enemy_xp_reward(enemy_id: int) -> int:
 	return _enemy_definition_int(enemy_id, "xp_reward", 0)
 
 
+func get_enemy_type(enemy_id: int) -> String:
+	return _enemy_type_for_enemy(enemy_id)
+
+
 func get_authoritative_enemy_position(enemy_id: int) -> Vector3:
 	if not multiplayer.is_server() or not enemies.has(enemy_id):
 		return Vector3.ZERO

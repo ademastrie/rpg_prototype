@@ -956,8 +956,9 @@ func _on_enemy_killed(attacker_peer_id: int, enemy_id: int) -> void:
 		return
 
 	print("Peer %s earned kill credit for enemy %s." % [attacker_peer_id, enemy_id])
+	var enemy_type: String = str(enemy_spawner.call("get_enemy_type", enemy_id))
 	var enemy_position: Vector3 = enemy_spawner.call("get_authoritative_enemy_position", enemy_id) as Vector3
-	world_spawner.call("spawn_prototype_loot_drop", enemy_position)
+	world_spawner.call("spawn_prototype_loot_drop", enemy_type, enemy_position)
 	_award_kill_xp(attacker_peer_id, enemy_id)
 
 

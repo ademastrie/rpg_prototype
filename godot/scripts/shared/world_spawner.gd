@@ -36,14 +36,7 @@ signal loot_reward_pickup_requested(peer_id: int, loot_orb_id: int, reward_paylo
 @export var enemy_contact_damage: int = 10
 @export var enemy_contact_damage_interval: float = 1.0
 @export var player_respawn_delay_seconds: float = 3.0
-@export var prototype_loot_drop_chance: float = 1.0
 @export var prototype_loot_pickup_radius: float = 1.5
-@export var prototype_loot_reward_type: String = "item"
-@export var prototype_loot_gold_amount: int = 3
-@export var prototype_loot_item_key: String = "slime_gel"
-@export var prototype_loot_item_display_name: String = "Slime Gel"
-@export var prototype_loot_item_quantity: int = 1
-@export var prototype_equipment_drop_chance: float = 0.15
 @export var debug_join_sync_logs: bool = false
 
 var players: Dictionary = {}
@@ -93,12 +86,32 @@ const SPAWN_POSITIONS: Array[Vector3] = [
 ]
 
 const DEFAULT_LOADOUT: Array[String] = ["Slash", "HP Regen", "Damage Aura", "Firebolt"]
-const PROTOTYPE_EQUIPMENT_DROP_ITEMS: Array[Dictionary] = [
-	{"item_key": "training_sword", "display_name": "Training Sword"},
-	{"item_key": "padded_chest", "display_name": "Padded Chest"},
-	{"item_key": "cloth_hood", "display_name": "Cloth Hood"},
-	{"item_key": "worn_boots", "display_name": "Worn Boots"},
-]
+
+# Temporary server-side prototype loot tables. Future loot tables should be
+# backend/database-backed and support player/party ownership, enemy level
+# scaling, item rarity, random affixes, and quest-specific drops.
+const SERVER_PROTOTYPE_LOOT_TABLES: Dictionary = {
+	"grunt": [
+		{"payload_type": "currency", "min_quantity": 3, "max_quantity": 3, "drop_chance": 1.0},
+		{"payload_type": "item", "item_key": "slime_gel", "min_quantity": 1, "max_quantity": 1, "drop_chance": 1.0},
+		{"payload_type": "item", "item_key": "training_sword", "min_quantity": 1, "max_quantity": 1, "drop_chance": 0.0375},
+		{"payload_type": "item", "item_key": "padded_chest", "min_quantity": 1, "max_quantity": 1, "drop_chance": 0.0375},
+		{"payload_type": "item", "item_key": "cloth_hood", "min_quantity": 1, "max_quantity": 1, "drop_chance": 0.0375},
+		{"payload_type": "item", "item_key": "worn_boots", "min_quantity": 1, "max_quantity": 1, "drop_chance": 0.0375},
+	],
+	"brute": [
+		{"payload_type": "currency", "min_quantity": 5, "max_quantity": 8, "drop_chance": 1.0},
+		{"payload_type": "item", "item_key": "slime_gel", "min_quantity": 1, "max_quantity": 2, "drop_chance": 1.0},
+		{"payload_type": "item", "item_key": "training_sword", "min_quantity": 1, "max_quantity": 1, "drop_chance": 0.05},
+		{"payload_type": "item", "item_key": "padded_chest", "min_quantity": 1, "max_quantity": 1, "drop_chance": 0.05},
+	],
+	"caster": [
+		{"payload_type": "currency", "min_quantity": 3, "max_quantity": 5, "drop_chance": 1.0},
+		{"payload_type": "item", "item_key": "slime_gel", "min_quantity": 1, "max_quantity": 1, "drop_chance": 1.0},
+		{"payload_type": "item", "item_key": "cloth_hood", "min_quantity": 1, "max_quantity": 1, "drop_chance": 0.075},
+		{"payload_type": "item", "item_key": "worn_boots", "min_quantity": 1, "max_quantity": 1, "drop_chance": 0.075},
+	],
+}
 const ABILITY_DEFINITIONS: Dictionary = {
 	"Slash": {
 		"cooldown": 1.25,
@@ -311,17 +324,11 @@ func apply_confirmed_character_equipment(peer_id: int, equipment: Dictionary) ->
 	rpc_id(peer_id, "apply_character_equipment_update", peer_id, confirmed_equipment)
 
 
-func spawn_prototype_loot_drop(drop_position: Vector3) -> void:
+func spawn_prototype_loot_drop(enemy_type: String, drop_position: Vector3) -> void:
 	if not multiplayer.is_server():
 		return
 
-	# Prototype world-drop flow only. Each pickup stays generic and server-owned:
-	# future loot should come from backend/database-backed loot tables, item
-	# rarity, affixes, inventory/equipment rules, and player/party ownership metadata.
-	var reward_payloads: Array = _prototype_loot_reward_payloads()
-	var equipment_payload: Dictionary = _prototype_equipment_reward_payload()
-	if not equipment_payload.is_empty():
-		reward_payloads.append(equipment_payload)
+	var reward_payloads: Array = _prototype_loot_reward_payloads_for_enemy_type(enemy_type)
 	if reward_payloads.is_empty():
 		return
 
@@ -343,49 +350,60 @@ func spawn_prototype_loot_drop(drop_position: Vector3) -> void:
 		rpc("spawn_loot_orb", loot_orb_id, loot_position)
 
 
-func _prototype_loot_reward_payloads() -> Array:
+func _prototype_loot_reward_payloads_for_enemy_type(enemy_type: String) -> Array:
 	var reward_payloads: Array = []
-	if prototype_loot_drop_chance <= 0.0:
-		return reward_payloads
-	if prototype_loot_drop_chance < 1.0 and randf() > prototype_loot_drop_chance:
+	var resolved_enemy_type: String = enemy_type.strip_edges()
+	if resolved_enemy_type == "":
+		print("Cannot spawn prototype loot: missing enemy type.")
 		return reward_payloads
 
-	var gold_amount: int = max(prototype_loot_gold_amount, 1)
-	reward_payloads.append({
-			"type": "currency",
-			"gold_amount": gold_amount,
-	})
+	if not SERVER_PROTOTYPE_LOOT_TABLES.has(resolved_enemy_type):
+		print("No prototype loot table for enemy type '%s'; no loot spawned." % resolved_enemy_type)
+		return reward_payloads
 
-	var item_key: String = prototype_loot_item_key.strip_edges()
-	if item_key != "":
-		reward_payloads.append({
-			"type": "item",
-			"item_key": item_key,
-			"display_name": prototype_loot_item_display_name.strip_edges(),
-			"quantity": max(prototype_loot_item_quantity, 1),
-		})
+	var loot_table: Array = SERVER_PROTOTYPE_LOOT_TABLES[resolved_enemy_type] as Array
+	for entry_variant in loot_table:
+		if not (entry_variant is Dictionary):
+			continue
+
+		var reward_payload: Dictionary = _prototype_loot_payload_from_entry(entry_variant as Dictionary)
+		if not reward_payload.is_empty():
+			reward_payloads.append(reward_payload)
 
 	return reward_payloads
 
 
-func _prototype_equipment_reward_payload() -> Dictionary:
-	if prototype_equipment_drop_chance <= 0.0 or PROTOTYPE_EQUIPMENT_DROP_ITEMS.is_empty():
+func _prototype_loot_payload_from_entry(entry: Dictionary) -> Dictionary:
+	var drop_chance: float = clamp(float(entry.get("drop_chance", 0.0)), 0.0, 1.0)
+	if drop_chance <= 0.0:
 		return {}
-	if prototype_equipment_drop_chance < 1.0 and randf() > prototype_equipment_drop_chance:
-		return {}
-
-	var item_index: int = randi_range(0, PROTOTYPE_EQUIPMENT_DROP_ITEMS.size() - 1)
-	var item_data: Dictionary = PROTOTYPE_EQUIPMENT_DROP_ITEMS[item_index] as Dictionary
-	var item_key: String = str(item_data.get("item_key", "")).strip_edges()
-	if item_key == "":
+	if drop_chance < 1.0 and randf() > drop_chance:
 		return {}
 
-	return {
-		"type": "item",
-		"item_key": item_key,
-		"display_name": str(item_data.get("display_name", "")).strip_edges(),
-		"quantity": 1,
-	}
+	var min_quantity: int = max(int(entry.get("min_quantity", 1)), 1)
+	var max_quantity: int = max(int(entry.get("max_quantity", min_quantity)), min_quantity)
+	var quantity: int = randi_range(min_quantity, max_quantity)
+	var payload_type: String = str(entry.get("payload_type", entry.get("type", ""))).strip_edges()
+	if payload_type == "currency":
+		return {
+			"type": "currency",
+			"gold_amount": quantity,
+		}
+
+	if payload_type == "item":
+		var item_key: String = str(entry.get("item_key", "")).strip_edges()
+		if item_key == "":
+			print("Skipping prototype loot item entry with missing item_key: %s" % entry)
+			return {}
+
+		return {
+			"type": "item",
+			"item_key": item_key,
+			"quantity": quantity,
+		}
+
+	print("Skipping unsupported prototype loot payload type '%s': %s" % [payload_type, entry])
+	return {}
 
 
 func _prototype_loot_position_offset(reward_index: int, reward_count: int) -> Vector3:
