@@ -9,9 +9,6 @@ signal initial_enemy_batch_received(count: int)
 @export var idle_speed: float = 0.6
 @export var snapshot_rate: float = 6.0
 @export var interpolation_speed: float = 8.0
-@export var basic_attack_damage: int = 10
-@export var basic_attack_range: float = 4.0
-@export var basic_attack_cone_dot: float = 0.65
 @export var respawn_delay_seconds: float = 5.0
 @export var debug_enemy_lifecycle_logs: bool = false
 @export var debug_enemy_join_sync_logs: bool = false
@@ -372,32 +369,32 @@ func _spawn_enemy(spawn_position: Vector3, enemy_type: String = DEFAULT_ENEMY_TY
 		print("Spawned enemy %s type=%s at %s." % [enemy_id, resolved_enemy_type, spawn_position])
 
 
-func resolve_basic_attack(_attacker_peer_id: int, attack_position: Vector3, facing_direction: Vector2) -> void:
-	if not multiplayer.is_server() or facing_direction.length_squared() <= 0.0001:
-		return
+func resolve_basic_attack(_attacker_peer_id: int, attack_position: Vector3, facing_direction: Vector2, slash_range: float, slash_arc_angle: float, damage: int) -> int:
+	if not multiplayer.is_server() or facing_direction.length_squared() <= 0.0001 or slash_range <= 0.0 or slash_arc_angle <= 0.0 or damage <= 0:
+		return 0
 
 	var normalized_facing: Vector2 = facing_direction.normalized()
-	var best_enemy_id: int = 0
-	var best_distance: float = basic_attack_range
-	for enemy_id in enemies:
+	var min_arc_dot: float = cos(deg_to_rad(clamp(slash_arc_angle, 0.0, 360.0) * 0.5))
+	var enemies_hit: int = 0
+	for enemy_id in enemies.keys():
 		var enemy_id_int: int = int(enemy_id)
-		var enemy_position: Vector3 = enemies[enemy_id] as Vector3
+		if not enemies.has(enemy_id_int):
+			continue
+
+		var enemy_position: Vector3 = enemies[enemy_id_int] as Vector3
 		var offset_xz: Vector2 = Vector2(enemy_position.x - attack_position.x, enemy_position.z - attack_position.z)
 		var distance: float = offset_xz.length()
-		if distance <= 0.001 or distance > basic_attack_range:
+		if distance <= 0.001 or distance > slash_range:
 			continue
 
 		var direction_to_enemy: Vector2 = offset_xz / distance
-		if normalized_facing.dot(direction_to_enemy) < basic_attack_cone_dot:
+		if normalized_facing.dot(direction_to_enemy) < min_arc_dot:
 			continue
-		if distance < best_distance:
-			best_distance = distance
-			best_enemy_id = enemy_id_int
 
-	if best_enemy_id <= 0:
-		return
+		_apply_damage_to_enemy(enemy_id_int, _attacker_peer_id, damage)
+		enemies_hit += 1
 
-	_apply_damage_to_enemy(best_enemy_id, _attacker_peer_id, basic_attack_damage)
+	return enemies_hit
 
 
 func resolve_damage_aura(_attacker_peer_id: int, aura_position: Vector3, radius: float, damage: int) -> void:

@@ -114,6 +114,9 @@ const SERVER_PROTOTYPE_LOOT_TABLES: Dictionary = {
 const ABILITY_DEFINITIONS: Dictionary = {
 	"Slash": {
 		"cooldown": 1.25,
+		"damage": 10,
+		"range": 3.5,
+		"arc_angle": 90.0,
 	},
 	"HP Regen": {
 		"cooldown": 2.0,
@@ -980,6 +983,11 @@ func _ability_range(ability_name: String) -> float:
 	return float(ability_definition.get("range", 0.0))
 
 
+func _ability_arc_angle(ability_name: String) -> float:
+	var ability_definition: Dictionary = ABILITY_DEFINITIONS.get(ability_name, {}) as Dictionary
+	return float(ability_definition.get("arc_angle", 0.0))
+
+
 func _ability_width(ability_name: String) -> float:
 	var ability_definition: Dictionary = ABILITY_DEFINITIONS.get(ability_name, {}) as Dictionary
 	return float(ability_definition.get("width", 0.0))
@@ -1508,29 +1516,38 @@ func _perform_slash(peer_id: int) -> void:
 
 	# Slash/basic attack uses server-owned position and facing; clients never decide hits.
 	var normalized_facing: Vector2 = facing_direction.normalized()
-	rpc("show_basic_attack", peer_id, attack_position, normalized_facing)
+	var slash_range: float = _ability_range("Slash")
+	var slash_arc_angle: float = _ability_arc_angle("Slash")
+	var slash_damage: int = _ability_damage_amount("Slash")
+	if slash_range <= 0.0 or slash_arc_angle <= 0.0 or slash_damage <= 0:
+		return
+
 	var enemy_spawner: Node = get_node_or_null("../EnemySpawner")
+	var enemies_hit: int = 0
 	if enemy_spawner != null:
-		enemy_spawner.call("resolve_basic_attack", peer_id, attack_position, normalized_facing)
+		enemies_hit = int(enemy_spawner.call("resolve_basic_attack", peer_id, attack_position, normalized_facing, slash_range, slash_arc_angle, slash_damage))
+
+	rpc("show_basic_attack", peer_id, attack_position, normalized_facing, slash_range, slash_arc_angle)
+	print("Slash resolved: peer_id=%s range=%s arc_angle=%s enemies_hit=%s" % [peer_id, slash_range, slash_arc_angle, enemies_hit])
 
 
 @rpc("authority", "call_remote", "reliable")
-func show_basic_attack(peer_id: int, attack_position: Vector3, facing_direction: Vector2) -> void:
-	if facing_direction.length_squared() <= 0.0001:
+func show_basic_attack(peer_id: int, attack_position: Vector3, facing_direction: Vector2, slash_range: float, slash_arc_angle: float) -> void:
+	if facing_direction.length_squared() <= 0.0001 or slash_range <= 0.0 or slash_arc_angle <= 0.0:
 		return
 
 	var normalized_facing: Vector2 = facing_direction.normalized()
 	var marker: MeshInstance3D = MeshInstance3D.new()
-	var marker_mesh: BoxMesh = BoxMesh.new()
-	marker_mesh.size = Vector3(0.7, 0.18, 1.4)
-	marker.mesh = marker_mesh
+	marker.mesh = _build_slash_arc_mesh(slash_range, slash_arc_angle)
 
 	var material: StandardMaterial3D = StandardMaterial3D.new()
 	material.albedo_color = Color(1.0, 0.75, 0.05, 0.75)
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	marker.material_override = material
 	marker.name = "BasicAttack_%s" % peer_id
-	marker.position = attack_position + Vector3(normalized_facing.x, 0.0, normalized_facing.y) * 1.2 + Vector3(0.0, 0.25, 0.0)
+	marker.position = attack_position + Vector3(0.0, 0.25, 0.0)
 	marker.rotation.y = atan2(-normalized_facing.x, -normalized_facing.y)
 	add_child(marker)
 
@@ -1540,6 +1557,32 @@ func show_basic_attack(peer_id: int, attack_position: Vector3, facing_direction:
 	marker.add_child(cleanup_timer)
 	cleanup_timer.timeout.connect(marker.queue_free)
 	cleanup_timer.start()
+
+
+func _build_slash_arc_mesh(slash_range: float, slash_arc_angle: float) -> ArrayMesh:
+	var mesh: ArrayMesh = ArrayMesh.new()
+	var segment_count: int = max(int(ceil(slash_arc_angle / 6.0)), 4)
+	var half_angle: float = deg_to_rad(slash_arc_angle * 0.5)
+	var vertices: PackedVector3Array = PackedVector3Array()
+	var indices: PackedInt32Array = PackedInt32Array()
+	vertices.append(Vector3.ZERO)
+
+	for segment_index in range(segment_count + 1):
+		var t: float = float(segment_index) / float(segment_count)
+		var angle: float = lerp(-half_angle, half_angle, t)
+		vertices.append(Vector3(sin(angle) * slash_range, 0.0, -cos(angle) * slash_range))
+
+	for segment_index in range(1, segment_count + 1):
+		indices.append(0)
+		indices.append(segment_index)
+		indices.append(segment_index + 1)
+
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_INDEX] = indices
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
 
 
 @rpc("authority", "call_remote", "reliable")
