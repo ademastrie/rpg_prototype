@@ -3,11 +3,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, with_loader_criteria
 
 from app.db import get_db
-from app.models.region import RegionDefinition, RegionEnemySpawn
+from app.models.region import RegionDefinition, RegionEnemySpawn, RegionPatrolPath
 from app.regions.schemas import (
     RegionDefinitionDetailResponse,
     RegionDefinitionResponse,
     RegionEnemySpawnsResponse,
+    RegionPatrolPathsResponse,
 )
 
 
@@ -19,9 +20,17 @@ def _region_options() -> tuple:
         selectinload(RegionDefinition.enemy_spawns).selectinload(
             RegionEnemySpawn.enemy_definition
         ),
+        selectinload(RegionDefinition.patrol_paths).selectinload(
+            RegionPatrolPath.points
+        ),
         with_loader_criteria(
             RegionEnemySpawn,
             RegionEnemySpawn.is_active.is_(True),
+            include_aliases=True,
+        ),
+        with_loader_criteria(
+            RegionPatrolPath,
+            RegionPatrolPath.is_active.is_(True),
             include_aliases=True,
         ),
     )
@@ -66,6 +75,14 @@ def get_region(
 
 @router.get("/{region_key}/enemy-spawns", response_model=RegionEnemySpawnsResponse)
 def list_region_enemy_spawns(
+    region_key: str,
+    db: Session = Depends(get_db),
+) -> RegionDefinition:
+    return _get_active_region(region_key, db)
+
+
+@router.get("/{region_key}/patrol-paths", response_model=RegionPatrolPathsResponse)
+def list_region_patrol_paths(
     region_key: str,
     db: Session = Depends(get_db),
 ) -> RegionDefinition:

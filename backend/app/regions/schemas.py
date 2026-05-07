@@ -23,6 +23,24 @@ class RegionEnemySpawnResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RegionPatrolPointResponse(BaseModel):
+    point_order: int
+    position_x: float
+    position_y: float
+    position_z: float
+    wait_seconds: float
+
+    model_config = {"from_attributes": True}
+
+
+class RegionPatrolPathResponse(BaseModel):
+    patrol_path_key: str
+    display_name: str
+    points: list[RegionPatrolPointResponse]
+
+    model_config = {"from_attributes": True}
+
+
 class RegionDefinitionResponse(BaseModel):
     region_key: str
     display_name: str
@@ -38,3 +56,7 @@ class RegionDefinitionDetailResponse(RegionDefinitionResponse):
 
 class RegionEnemySpawnsResponse(RegionDefinitionResponse):
     enemy_spawns: list[RegionEnemySpawnResponse]
+
+
+class RegionPatrolPathsResponse(RegionDefinitionResponse):
+    patrol_paths: list[RegionPatrolPathResponse]
