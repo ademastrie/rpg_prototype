@@ -45,6 +45,7 @@ var _enemy_melee_attack_positions: Dictionary = {}
 var _enemy_ranged_windup_until: Dictionary = {}
 var _enemy_ranged_recovery_until: Dictionary = {}
 var _enemy_ranged_target_peer: Dictionary = {}
+var _enemy_next_allowed_attack_time_by_key: Dictionary = {}
 var _next_enemy_id: int = 1
 var _idle_time: float = 0.0
 var _snapshot_accumulator: float = 0.0
@@ -56,6 +57,7 @@ var _enemy_region_spawn_key_by_id: Dictionary = {}
 
 const DEFAULT_ENEMY_TYPE: String = "grunt"
 const SUSPICIOUS_MOVEMENT_STEP: float = 6.0
+const DEFAULT_ENEMY_ATTACK_COOLDOWN_SECONDS: float = 1.0
 
 # Fallback prototype definitions. Backend enemy definitions are durable data;
 # Godot caches them at startup and owns only live simulation state such as HP,
@@ -89,6 +91,7 @@ const SERVER_PROTOTYPE_ENEMY_DEFINITIONS: Dictionary = {
 		"melee_attack_radius": 1.75,
 		"melee_attack_windup_seconds": 0.65,
 		"melee_attack_recovery_seconds": 0.75,
+		"melee_attack_cooldown_seconds": DEFAULT_ENEMY_ATTACK_COOLDOWN_SECONDS,
 		"visual_key": "red_placeholder",
 		"visual_color": Color(1.0, 0.18, 0.08, 1.0),
 	},
@@ -119,6 +122,7 @@ const SERVER_PROTOTYPE_ENEMY_DEFINITIONS: Dictionary = {
 		"melee_attack_radius": 2.2,
 		"melee_attack_windup_seconds": 0.85,
 		"melee_attack_recovery_seconds": 1.05,
+		"melee_attack_cooldown_seconds": DEFAULT_ENEMY_ATTACK_COOLDOWN_SECONDS,
 		"visual_key": "brute_placeholder",
 		"visual_color": Color(0.75, 0.14, 0.08, 1.0),
 	},
@@ -150,6 +154,7 @@ const SERVER_PROTOTYPE_ENEMY_DEFINITIONS: Dictionary = {
 		"ranged_attack_preferred_distance": 6.0,
 		"ranged_attack_windup_seconds": 0.75,
 		"ranged_attack_recovery_seconds": 1.35,
+		"ranged_attack_cooldown_seconds": DEFAULT_ENEMY_ATTACK_COOLDOWN_SECONDS,
 		"ranged_attack_width": 0.22,
 		"visual_key": "caster_placeholder",
 		"visual_color": Color(0.25, 0.45, 1.0, 1.0),
@@ -742,16 +747,25 @@ func _can_start_enemy_melee_attack(enemy_id: int, enemy_position: Vector3, targe
 	var recovery_until: float = float(_enemy_melee_recovery_until.get(enemy_id, 0.0))
 	if now_seconds < recovery_until:
 		return false
+	var attack_key: String = _enemy_melee_attack_key(enemy_id)
+	if now_seconds < _next_allowed_attack_time(enemy_id, attack_key):
+		return false
 
 	return _distance_xz(enemy_position, target_position) <= melee_attack_range
 
 
 func _start_enemy_melee_attack(enemy_id: int, enemy_position: Vector3, target_peer_id: int) -> void:
 	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
+	var attack_key: String = _enemy_melee_attack_key(enemy_id)
 	var windup_seconds: float = max(_enemy_definition_float(enemy_id, "melee_attack_windup_seconds", 0.65), 0.01)
+	var recovery_seconds: float = max(_enemy_definition_float(enemy_id, "melee_attack_recovery_seconds", 0.75), 0.0)
+	var cooldown_seconds: float = _enemy_attack_cooldown_seconds(enemy_id, "melee_attack_cooldown_seconds")
+	var next_allowed_attack_time: float = now_seconds + cooldown_seconds
+	_set_next_allowed_attack_time(enemy_id, attack_key, next_allowed_attack_time)
 	_enemy_melee_windup_until[enemy_id] = now_seconds + windup_seconds
 	_enemy_melee_target_peer[enemy_id] = target_peer_id
 	_enemy_melee_attack_positions[enemy_id] = enemy_position
+	_log_enemy_attack_started(enemy_id, attack_key, windup_seconds, recovery_seconds, cooldown_seconds, next_allowed_attack_time)
 	rpc("show_enemy_melee_telegraph", enemy_id, enemy_position, _enemy_definition_float(enemy_id, "melee_attack_radius", 1.75), windup_seconds)
 
 
@@ -816,15 +830,24 @@ func _can_start_enemy_ranged_attack(enemy_id: int, enemy_position: Vector3, targ
 	var recovery_until: float = float(_enemy_ranged_recovery_until.get(enemy_id, 0.0))
 	if now_seconds < recovery_until:
 		return false
+	var attack_key: String = _enemy_ranged_attack_key(enemy_id)
+	if now_seconds < _next_allowed_attack_time(enemy_id, attack_key):
+		return false
 
 	return _distance_xz(enemy_position, target_position) <= ranged_attack_range
 
 
 func _start_enemy_ranged_attack(enemy_id: int, enemy_position: Vector3, target_position: Vector3, target_peer_id: int) -> void:
 	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
+	var attack_key: String = _enemy_ranged_attack_key(enemy_id)
 	var windup_seconds: float = max(_enemy_definition_float(enemy_id, "ranged_attack_windup_seconds", 0.75), 0.01)
+	var recovery_seconds: float = max(_enemy_definition_float(enemy_id, "ranged_attack_recovery_seconds", 1.35), 0.0)
+	var cooldown_seconds: float = _enemy_attack_cooldown_seconds(enemy_id, "ranged_attack_cooldown_seconds")
+	var next_allowed_attack_time: float = now_seconds + cooldown_seconds
+	_set_next_allowed_attack_time(enemy_id, attack_key, next_allowed_attack_time)
 	_enemy_ranged_windup_until[enemy_id] = now_seconds + windup_seconds
 	_enemy_ranged_target_peer[enemy_id] = target_peer_id
+	_log_enemy_attack_started(enemy_id, attack_key, windup_seconds, recovery_seconds, cooldown_seconds, next_allowed_attack_time)
 	rpc("show_enemy_ranged_telegraph", enemy_id, enemy_position, target_position, _enemy_definition_float(enemy_id, "ranged_attack_width", 0.22), windup_seconds)
 
 
@@ -875,6 +898,58 @@ func _clear_enemy_ranged_attack(enemy_id: int) -> void:
 func _clear_enemy_attacks(enemy_id: int) -> void:
 	_clear_enemy_melee_attack(enemy_id)
 	_clear_enemy_ranged_attack(enemy_id)
+	_clear_enemy_attack_cooldowns(enemy_id)
+
+
+func _enemy_melee_attack_key(enemy_id: int) -> String:
+	var attack_key: String = str(_enemy_definition_for_enemy(enemy_id).get("melee_attack_key", "melee")).strip_edges()
+	if attack_key == "":
+		return "melee"
+	return attack_key
+
+
+func _enemy_ranged_attack_key(enemy_id: int) -> String:
+	var attack_key: String = str(_enemy_definition_for_enemy(enemy_id).get("ranged_attack_key", "ranged")).strip_edges()
+	if attack_key == "":
+		return "ranged"
+	return attack_key
+
+
+func _enemy_attack_cooldown_seconds(enemy_id: int, definition_key: String) -> float:
+	var cooldown_seconds: float = _enemy_definition_float(enemy_id, definition_key, DEFAULT_ENEMY_ATTACK_COOLDOWN_SECONDS)
+	if cooldown_seconds <= 0.0:
+		return DEFAULT_ENEMY_ATTACK_COOLDOWN_SECONDS
+	return cooldown_seconds
+
+
+func _next_allowed_attack_time(enemy_id: int, attack_key: String) -> float:
+	return float(_enemy_next_allowed_attack_time_by_key.get(_enemy_attack_cooldown_state_key(enemy_id, attack_key), 0.0))
+
+
+func _set_next_allowed_attack_time(enemy_id: int, attack_key: String, next_allowed_attack_time: float) -> void:
+	_enemy_next_allowed_attack_time_by_key[_enemy_attack_cooldown_state_key(enemy_id, attack_key)] = next_allowed_attack_time
+
+
+func _clear_enemy_attack_cooldowns(enemy_id: int) -> void:
+	var state_key_prefix: String = "%s:" % enemy_id
+	for state_key in _enemy_next_allowed_attack_time_by_key.keys():
+		if str(state_key).begins_with(state_key_prefix):
+			_enemy_next_allowed_attack_time_by_key.erase(state_key)
+
+
+func _enemy_attack_cooldown_state_key(enemy_id: int, attack_key: String) -> String:
+	return "%s:%s" % [enemy_id, attack_key]
+
+
+func _log_enemy_attack_started(enemy_id: int, attack_key: String, windup_seconds: float, recovery_seconds: float, cooldown_seconds: float, next_allowed_attack_time: float) -> void:
+	print("Enemy attack started: enemy_id=%s attack_key=%s windup_seconds=%s recovery_seconds=%s cooldown_seconds=%s next_allowed_attack_time=%s." % [
+		enemy_id,
+		attack_key,
+		windup_seconds,
+		recovery_seconds,
+		cooldown_seconds,
+		next_allowed_attack_time,
+	])
 
 
 func _should_hold_ranged_position(enemy_id: int, enemy_position: Vector3, target_position: Vector3) -> bool:
@@ -1336,7 +1411,9 @@ func _apply_backend_attack_type_defaults(definition: Dictionary) -> void:
 
 func _copy_backend_attack_fields(source: Dictionary, definition: Dictionary) -> void:
 	var attacks: Array = []
-	if source.get("attacks", null) is Array:
+	if source.get("enemy_attacks", null) is Array:
+		attacks = source.get("enemy_attacks", []) as Array
+	elif source.get("attacks", null) is Array:
 		attacks = source.get("attacks", []) as Array
 	elif source.get("attack", null) is Dictionary:
 		attacks = [source.get("attack", {}) as Dictionary]
@@ -1354,20 +1431,24 @@ func _copy_backend_attack_fields(source: Dictionary, definition: Dictionary) -> 
 		if attack_type == "melee":
 			definition["attack_type"] = "melee"
 			definition["melee_attack_enabled"] = true
+			_copy_string_definition_value(attack, definition, "melee_attack_key", ["attack_key", "key", "id", "slug", "melee_attack_key"])
 			_copy_int_definition_value(attack, definition, "melee_attack_damage", ["damage", "damage_amount", "attack_damage", "melee_attack_damage"])
 			_copy_float_definition_value(attack, definition, "melee_attack_range", ["range", "max_range", "range_radius", "attack_range", "melee_attack_range"])
 			_copy_float_definition_value(attack, definition, "melee_attack_radius", ["radius", "attack_radius", "hit_radius", "impact_radius", "effect_radius", "melee_attack_radius"])
 			_copy_float_definition_value(attack, definition, "melee_attack_windup_seconds", ["windup_seconds", "windup", "melee_attack_windup_seconds"])
-			_copy_float_definition_value(attack, definition, "melee_attack_recovery_seconds", ["recovery_seconds", "cooldown_seconds", "cooldown", "recovery", "melee_attack_recovery_seconds"])
+			_copy_float_definition_value(attack, definition, "melee_attack_recovery_seconds", ["recovery_seconds", "recovery", "melee_attack_recovery_seconds"])
+			_copy_float_definition_value(attack, definition, "melee_attack_cooldown_seconds", ["cooldown_seconds", "cooldown", "melee_attack_cooldown_seconds"])
 		elif attack_type == "ranged":
 			definition["attack_type"] = "ranged"
 			definition["ranged_attack_enabled"] = true
 			definition["melee_attack_enabled"] = false
+			_copy_string_definition_value(attack, definition, "ranged_attack_key", ["attack_key", "key", "id", "slug", "ranged_attack_key"])
 			_copy_int_definition_value(attack, definition, "ranged_attack_damage", ["damage", "damage_amount", "attack_damage", "ranged_attack_damage"])
 			_copy_float_definition_value(attack, definition, "ranged_attack_range", ["range", "max_range", "range_radius", "attack_range", "ranged_attack_range"])
 			_copy_float_definition_value(attack, definition, "ranged_attack_preferred_distance", ["preferred_distance", "ranged_attack_preferred_distance"])
 			_copy_float_definition_value(attack, definition, "ranged_attack_windup_seconds", ["windup_seconds", "windup", "ranged_attack_windup_seconds"])
-			_copy_float_definition_value(attack, definition, "ranged_attack_recovery_seconds", ["recovery_seconds", "cooldown_seconds", "cooldown", "recovery", "ranged_attack_recovery_seconds"])
+			_copy_float_definition_value(attack, definition, "ranged_attack_recovery_seconds", ["recovery_seconds", "recovery", "ranged_attack_recovery_seconds"])
+			_copy_float_definition_value(attack, definition, "ranged_attack_cooldown_seconds", ["cooldown_seconds", "cooldown", "ranged_attack_cooldown_seconds"])
 			_copy_float_definition_value(attack, definition, "ranged_attack_width", ["width", "radius", "attack_radius", "projectile_width", "ranged_attack_width"])
 
 	for key in [
@@ -1380,10 +1461,12 @@ func _copy_backend_attack_fields(source: Dictionary, definition: Dictionary) -> 
 		"melee_attack_radius",
 		"melee_attack_windup_seconds",
 		"melee_attack_recovery_seconds",
+		"melee_attack_cooldown_seconds",
 		"ranged_attack_range",
 		"ranged_attack_preferred_distance",
 		"ranged_attack_windup_seconds",
 		"ranged_attack_recovery_seconds",
+		"ranged_attack_cooldown_seconds",
 		"ranged_attack_width",
 	]:
 		_copy_float_definition_value(source, definition, key, [key])
@@ -1424,7 +1507,9 @@ func _backend_has_any_attack_key(source: Dictionary, keys: Array) -> bool:
 		return true
 
 	var attacks: Array = []
-	if source.get("attacks", null) is Array:
+	if source.get("enemy_attacks", null) is Array:
+		attacks = source.get("enemy_attacks", []) as Array
+	elif source.get("attacks", null) is Array:
 		attacks = source.get("attacks", []) as Array
 	elif source.get("attack", null) is Dictionary:
 		attacks = [source.get("attack", {}) as Dictionary]
@@ -1444,7 +1529,8 @@ func _log_backend_enemy_definition_tuning(definition: Dictionary) -> void:
 	var attack_radius: float = _definition_attack_radius(definition)
 	var windup: float = _definition_attack_windup(definition)
 	var recovery: float = _definition_attack_recovery(definition)
-	print("Backend enemy definition tuning: enemy_key=%s move_speed=%s attack_type=%s attack_range=%s attack_radius=%s windup=%s recovery=%s aggro_radius=%s leash_radius=%s behavior_profile_key=%s." % [
+	var cooldown: float = _definition_attack_cooldown(definition)
+	print("Backend enemy definition tuning: enemy_key=%s move_speed=%s attack_type=%s attack_range=%s attack_radius=%s windup=%s recovery=%s cooldown=%s aggro_radius=%s leash_radius=%s behavior_profile_key=%s." % [
 		enemy_type,
 		float(definition.get("move_speed", 0.0)),
 		attack_type,
@@ -1452,6 +1538,7 @@ func _log_backend_enemy_definition_tuning(definition: Dictionary) -> void:
 		attack_radius,
 		windup,
 		recovery,
+		cooldown,
 		float(definition.get("aggro_radius", 0.0)),
 		float(definition.get("home_return_distance", 0.0)),
 		str(definition.get("behavior_profile_key", "")),
@@ -1464,7 +1551,7 @@ func _log_backend_enemy_spawn_tuning(enemy_id: int, spawn_position: Vector3) -> 
 		return
 
 	var attack_type: String = str(definition.get("attack_type", "melee"))
-	print("Backend enemy spawned: enemy_id=%s enemy_key=%s move_speed=%s chase_speed=%s attack_type=%s attack_range=%s attack_radius=%s windup=%s recovery=%s aggro_radius=%s leash_radius=%s behavior_profile_key=%s spawn_position=%s." % [
+	print("Backend enemy spawned: enemy_id=%s enemy_key=%s move_speed=%s chase_speed=%s attack_type=%s attack_range=%s attack_radius=%s windup=%s recovery=%s cooldown=%s aggro_radius=%s leash_radius=%s behavior_profile_key=%s spawn_position=%s." % [
 		enemy_id,
 		_enemy_type_for_enemy(enemy_id),
 		float(definition.get("move_speed", 0.0)),
@@ -1474,6 +1561,7 @@ func _log_backend_enemy_spawn_tuning(enemy_id: int, spawn_position: Vector3) -> 
 		_definition_attack_radius(definition),
 		_definition_attack_windup(definition),
 		_definition_attack_recovery(definition),
+		_definition_attack_cooldown(definition),
 		float(definition.get("aggro_radius", 0.0)),
 		float(definition.get("home_return_distance", 0.0)),
 		str(definition.get("behavior_profile_key", "")),
@@ -1505,6 +1593,19 @@ func _definition_attack_recovery(definition: Dictionary) -> float:
 	return float(definition.get("melee_attack_recovery_seconds", 0.0))
 
 
+func _definition_attack_cooldown(definition: Dictionary) -> float:
+	if str(definition.get("attack_type", "melee")) == "ranged":
+		var ranged_cooldown: float = float(definition.get("ranged_attack_cooldown_seconds", DEFAULT_ENEMY_ATTACK_COOLDOWN_SECONDS))
+		if ranged_cooldown <= 0.0:
+			return DEFAULT_ENEMY_ATTACK_COOLDOWN_SECONDS
+		return ranged_cooldown
+
+	var melee_cooldown: float = float(definition.get("melee_attack_cooldown_seconds", DEFAULT_ENEMY_ATTACK_COOLDOWN_SECONDS))
+	if melee_cooldown <= 0.0:
+		return DEFAULT_ENEMY_ATTACK_COOLDOWN_SECONDS
+	return melee_cooldown
+
+
 func _extract_backend_loot_table_entries(source: Dictionary) -> Array:
 	for key in ["loot_table_entries", "loot_entries", "loot_table", "loot"]:
 		if source.get(key, null) is Array:
@@ -1513,7 +1614,7 @@ func _extract_backend_loot_table_entries(source: Dictionary) -> Array:
 
 
 func _looks_like_backend_enemy_definition(source: Dictionary) -> bool:
-	for key in ["enemy_key", "enemy_type", "max_hp", "xp_reward", "attacks", "loot_entries"]:
+	for key in ["enemy_key", "enemy_type", "max_hp", "xp_reward", "enemy_attacks", "attacks", "loot_entries"]:
 		if source.has(key):
 			return true
 	return false
