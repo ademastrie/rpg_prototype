@@ -16,11 +16,13 @@ class AbilityDefinition(Base):
     ability_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    behavior_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     trigger_type: Mapped[str] = mapped_column(String(50), nullable=False)
     targeting_type: Mapped[str] = mapped_column(String(50), nullable=False)
     cooldown_seconds: Mapped[float] = mapped_column(Float, default=0, server_default="0", nullable=False)
     range: Mapped[float | None] = mapped_column(Float, nullable=True)
     radius: Mapped[float | None] = mapped_column(Float, nullable=True)
+    arc_angle_degrees: Mapped[float | None] = mapped_column(Float, nullable=True)
     visual_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
 
@@ -28,6 +30,27 @@ class AbilityDefinition(Base):
         back_populates="ability",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def damage(self) -> float | None:
+        return self._effect_value("damage")
+
+    @property
+    def healing(self) -> float | None:
+        return self._effect_value("healing")
+
+    @property
+    def tick_seconds(self) -> float | None:
+        for effect in self.effects:
+            if effect.tick_interval_seconds is not None:
+                return effect.tick_interval_seconds
+        return None
+
+    def _effect_value(self, effect_type: str) -> float | None:
+        for effect in self.effects:
+            if effect.effect_type == effect_type:
+                return effect.value
+        return None
 
 
 class AbilityEffect(Base):

@@ -127,11 +127,16 @@ class AbilityDefinitionResponse(BaseModel):
     ability_key: str
     display_name: str
     description: str | None
+    behavior_key: str | None
     trigger_type: str
     targeting_type: str
     cooldown_seconds: float
+    damage: float | None
+    healing: float | None
     range: float | None
     radius: float | None
+    arc_angle_degrees: float | None
+    tick_seconds: float | None
     visual_key: str | None
     is_active: bool
     effects: list[AbilityEffectResponse]

@@ -342,3 +342,56 @@ Delete Character, and confirm that the list refreshes with no selected character
 - `backend/scripts/setup_dev.ps1` may install or update dependencies inside an existing `.venv`, but must not replace it.
 - If sandbox Python launchers fail, do not change `.venv`; tell the developer the local command to run.
 - If a sandbox-specific environment is needed, use `backend/.codex_venv`.
+
+
+# Backend Testing Notes
+
+Enemy definitions are database-backed static content only. They should not create or update live enemy HP, position, aggro, cooldown, or other runtime state.
+
+Region definitions and region enemy spawn definitions are also database-backed static content only. They describe where enemies may spawn, but they should not store live enemy HP, position, target, cooldown, aggro, or respawn runtime state.
+
+Migration steps:
+
+- From `backend/`, run `alembic upgrade head`.
+- In Swagger, open `/docs` and inspect `GET /enemy-definitions`, `GET /enemy-definitions/{enemy_key}`, `GET /regions`, `GET /regions/{region_key}`, `GET /regions/{region_key}/enemy-spawns`, and `GET /characters/{character_id}/abilities`.
+- For ability runtime fields, create or use a character, authorize Swagger with a bearer token, and call `GET /characters/{character_id}/abilities`.
+
+PowerShell smoke checks:
+
+```powershell
+$baseUrl = "http://127.0.0.1:8000"
+Invoke-RestMethod "$baseUrl/enemy-definitions"
+Invoke-RestMethod "$baseUrl/enemy-definitions/grunt"
+Invoke-RestMethod "$baseUrl/enemy-definitions/caster"
+Invoke-RestMethod "$baseUrl/regions"
+Invoke-RestMethod "$baseUrl/regions/starter_field"
+Invoke-RestMethod "$baseUrl/regions/starter_field/enemy-spawns"
+
+$token = "<access token>"
+$characterId = 1
+$headers = @{ Authorization = "Bearer $token" }
+Invoke-RestMethod "$baseUrl/characters/$characterId/abilities" -Headers $headers
+```
+
+Expected static-review shape:
+
+- `GET /enemy-definitions` should return active prototype enemies with nested `attacks` and `loot_entries`.
+- `GET /enemy-definitions/grunt` should include melee attack data and gold/currency plus item loot entries.
+- Currency loot entries should have `payload_type` set to `currency` and `item_key` set to `null`.
+- Item loot entries should reference already seeded item definitions such as `slime_gel`, `training_sword`, or `padded_chest`.
+- `GET /regions/starter_field` should return `Starter Field` with active static enemy spawn definitions.
+- `GET /regions/starter_field/enemy-spawns` should include `grunt`, `brute`, and `caster` spawn definitions with referenced enemy display names when those enemy definitions are active.
+- Region enemy spawn definitions should include only static spawn config such as spawn position, radius, max alive count, respawn seconds, behavior profile, patrol path key, and optional leash/aggro overrides.
+- `GET /characters/{character_id}/abilities` should keep unlock/loadout behavior unchanged while each nested ability `definition` includes runtime fields: `behavior_key`, `visual_key`, `damage`, `healing`, `range`, `radius`, `arc_angle_degrees`, `tick_seconds`, and `cooldown_seconds`.
+- Current prototype ability definitions should be keyed by `slash`, `hp_regen`, `damage_aura`, and `firebolt`; display names remain UI labels, while `ability_key` remains the stable identifier.
+- `slash` should include `behavior_key` `melee_arc_damage`, `visual_key` `slash_arc`, `damage` `10.0`, `range` `3.5`, `arc_angle_degrees` `90.0`, and `cooldown_seconds` `1.25`.
+- `hp_regen` should include `behavior_key` `periodic_heal`, `visual_key` `hp_regen`, `healing` `8.0`, `tick_seconds` `2.0`, and `cooldown_seconds` `2.0`.
+- `damage_aura` should include `behavior_key` `point_blank_aoe_damage`, `visual_key` `damage_aura`, `damage` `5.0`, `radius` `4.0`, `tick_seconds` `1.0`, and `cooldown_seconds` `1.0`.
+- `firebolt` should include `behavior_key` `line_projectile_damage`, `visual_key` `firebolt`, `damage` `12.0`, `range` `8.0`, and `cooldown_seconds` `1.3`.
+
+Static-review scenarios for inventory instances:
+
+- Add `slime_gel` twice through `POST /characters/{character_id}/inventory/items`; the existing `slime_gel` inventory entry should remain one row and its `quantity` should increase up to `max_stack`.
+- Add `training_sword` twice through `POST /characters/{character_id}/inventory/items`; the response should include two separate inventory entries with different `inventory_entry_id` values and `quantity` set to `1`.
+- Equip one `training_sword` through `PUT /characters/{character_id}/equipment` using its `inventory_entry_id`; the other `training_sword` entry should remain in inventory and should not be marked equipped.
+- Add another `training_sword` while one is equipped; the new sword should create another separate inventory entry and the equipped sword should remain equipped.
