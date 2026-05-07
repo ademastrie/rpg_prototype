@@ -48,9 +48,14 @@ var _idle_time: float = 0.0
 var _snapshot_accumulator: float = 0.0
 var _server_enemy_definitions: Dictionary = {}
 var _server_region_enemy_spawns: Array[Dictionary] = []
+var _server_region_patrol_paths_by_key: Dictionary = {}
 var _enemy_definition_overrides_by_id: Dictionary = {}
 var _enemy_spawn_respawn_seconds_by_id: Dictionary = {}
 var _enemy_region_spawn_key_by_id: Dictionary = {}
+var _enemy_patrol_path_key_by_id: Dictionary = {}
+var _enemy_patrol_points_by_id: Dictionary = {}
+var _enemy_patrol_point_index_by_id: Dictionary = {}
+var _enemy_patrol_wait_until_by_id: Dictionary = {}
 
 const DEFAULT_ENEMY_TYPE: String = "grunt"
 const SUSPICIOUS_MOVEMENT_STEP: float = 6.0
@@ -58,11 +63,13 @@ const DEFAULT_ENEMY_ATTACK_COOLDOWN_SECONDS: float = 1.0
 const DEFAULT_BEHAVIOR_PROFILE_KEY: String = "wander"
 const BEHAVIOR_PROFILE_STATIONARY: String = "stationary"
 const BEHAVIOR_PROFILE_WANDER: String = "wander"
+const BEHAVIOR_PROFILE_PATROL: String = "patrol"
 const BEHAVIOR_PROFILE_RANGED_GUARD: String = "ranged_guard"
 const BEHAVIOR_PROFILE_AGGRESSIVE: String = "aggressive"
 const SUPPORTED_BEHAVIOR_PROFILE_KEYS: Array[String] = [
 	BEHAVIOR_PROFILE_STATIONARY,
 	BEHAVIOR_PROFILE_WANDER,
+	BEHAVIOR_PROFILE_PATROL,
 	BEHAVIOR_PROFILE_RANGED_GUARD,
 	BEHAVIOR_PROFILE_AGGRESSIVE,
 ]
@@ -280,6 +287,33 @@ func use_prototype_region_enemy_spawns() -> void:
 	print("Using fallback Godot prototype enemy spawns.")
 
 
+func load_backend_region_patrol_paths(data: Variant) -> bool:
+	var paths_array: Array = _extract_backend_region_patrol_path_array(data)
+	var loaded_paths: Dictionary = {}
+	for path_variant in paths_array:
+		if not (path_variant is Dictionary):
+			continue
+
+		var patrol_path: Dictionary = _normalize_backend_region_patrol_path(path_variant as Dictionary)
+		if patrol_path.is_empty():
+			continue
+
+		loaded_paths[str(patrol_path.get("patrol_path_key", ""))] = patrol_path
+
+	_server_region_patrol_paths_by_key = loaded_paths
+	print("Loaded %s backend region patrol paths into Godot server cache." % _server_region_patrol_paths_by_key.size())
+	for patrol_path_key in _server_region_patrol_paths_by_key:
+		var patrol_path_data: Dictionary = _server_region_patrol_paths_by_key[patrol_path_key] as Dictionary
+		var points: Array = patrol_path_data.get("points", []) as Array
+		print("Backend patrol path loaded: patrol_path_key=%s point_count=%s." % [patrol_path_key, points.size()])
+	return not _server_region_patrol_paths_by_key.is_empty()
+
+
+func clear_backend_region_patrol_paths() -> void:
+	_server_region_patrol_paths_by_key = {}
+	print("Loaded 0 backend region patrol paths into Godot server cache.")
+
+
 func sync_peer(peer_id: int) -> void:
 	if not multiplayer.is_server():
 		return
@@ -371,6 +405,7 @@ func _spawn_enemy(spawn_position: Vector3, enemy_type: String = DEFAULT_ENEMY_TY
 	if not spawn_definition.is_empty():
 		_enemy_region_spawn_key_by_id[enemy_id] = spawn_key
 		_enemy_spawn_respawn_seconds_by_id[enemy_id] = max(float(spawn_definition.get("respawn_seconds", respawn_delay_seconds)), 0.0)
+		_assign_patrol_path_to_enemy(enemy_id, spawn_definition)
 		var definition_overrides: Dictionary = spawn_definition.get("definition_overrides", {}) as Dictionary
 		if not definition_overrides.is_empty():
 			_enemy_definition_overrides_by_id[enemy_id] = definition_overrides.duplicate(true)
@@ -486,6 +521,8 @@ func _despawn_enemy(enemy_id: int) -> void:
 	_enemy_return_log_last_seconds.erase(enemy_id)
 	_enemy_suspicious_movement_log_last_seconds.erase(enemy_id)
 	_enemy_previous_authoritative_positions.erase(enemy_id)
+	_enemy_patrol_point_index_by_id.erase(enemy_id)
+	_enemy_patrol_wait_until_by_id.erase(enemy_id)
 	_dead_enemy_ids[enemy_id] = true
 	rpc("despawn_enemy", enemy_id)
 	_schedule_enemy_respawn(enemy_id)
@@ -530,6 +567,7 @@ func _respawn_enemy(enemy_id: int, spawn_position: Vector3) -> void:
 	_returning_enemy_ids.erase(enemy_id)
 	_enemy_return_regen_progress.erase(enemy_id)
 	_enemy_return_log_last_seconds.erase(enemy_id)
+	_enemy_patrol_wait_until_by_id.erase(enemy_id)
 	_dead_enemy_ids.erase(enemy_id)
 	rpc("spawn_enemy", enemy_id, spawn_position, max_hp, max_hp, enemy_type, _enemy_display_name(enemy_id), _enemy_visual_color(enemy_id))
 	if debug_enemy_lifecycle_logs:
@@ -604,7 +642,7 @@ func _update_enemy_positions(delta: float) -> void:
 
 		var idle_return_distance: float = _enemy_definition_float(enemy_id_int, "idle_return_distance", 5.0)
 		var distance_from_spawn: float = _distance_xz(enemy_position, spawn_position)
-		if distance_from_spawn > idle_return_distance:
+		if not _enemy_has_valid_patrol(enemy_id_int) and distance_from_spawn > idle_return_distance:
 			_begin_return_to_spawn(enemy_id_int, "idle redirected to return because enemy is far from home", enemy_position, spawn_position, Vector3.ZERO, false)
 			var idle_return_position: Vector3 = _return_position(enemy_id_int, enemy_position, spawn_position, delta)
 			enemies[enemy_id] = idle_return_position
@@ -1086,6 +1124,7 @@ func _finish_leash_reset(enemy_id: int, enemy_position: Vector3) -> Vector3:
 	var max_hp: int = int(_enemy_max_hp_by_id.get(enemy_id, _max_hp_for_enemy(enemy_id)))
 	# Full leash reset restores HP so a pulled enemy returns to its spawn state.
 	_enemy_current_hp_by_id[enemy_id] = max_hp
+	_resume_patrol_near_position(enemy_id, enemy_position)
 	rpc("show_enemy_hit", enemy_id, max_hp, max_hp)
 	return enemy_position
 
@@ -1100,6 +1139,7 @@ func _emergency_leash_snap(enemy_id: int, spawn_position: Vector3) -> Vector3:
 	_enemy_return_log_last_seconds.erase(enemy_id)
 	var max_hp: int = int(_enemy_max_hp_by_id.get(enemy_id, _max_hp_for_enemy(enemy_id)))
 	_enemy_current_hp_by_id[enemy_id] = max_hp
+	_resume_patrol_near_position(enemy_id, spawn_position)
 	rpc("show_enemy_hit", enemy_id, max_hp, max_hp)
 	return spawn_position
 
@@ -1235,6 +1275,8 @@ func _profile_idle_position(enemy_id: int, enemy_position: Vector3, spawn_positi
 		if _distance_xz(enemy_position, spawn_position) <= _enemy_definition_float(enemy_id, "leash_reset_distance", 0.75):
 			return enemy_position
 		return _move_toward_position(enemy_position, spawn_position, _enemy_definition_float(enemy_id, "idle_move_speed", 0.8), delta)
+	if behavior_profile_key == BEHAVIOR_PROFILE_PATROL and _enemy_has_valid_patrol(enemy_id):
+		return _patrol_idle_position(enemy_id, enemy_position, delta)
 
 	var origin_position: Vector3 = _enemy_origin_positions[enemy_id] as Vector3
 	var profile_idle_radius: float = idle_radius
@@ -1245,6 +1287,85 @@ func _profile_idle_position(enemy_id: int, enemy_position: Vector3, spawn_positi
 	var angle: float = _idle_time * idle_speed + float(enemy_id)
 	var idle_target_position: Vector3 = origin_position + Vector3(cos(angle) * profile_idle_radius, 0.0, sin(angle) * profile_idle_radius)
 	return _move_toward_position(enemy_position, idle_target_position, _enemy_definition_float(enemy_id, "idle_move_speed", 0.8), delta)
+
+
+func _assign_patrol_path_to_enemy(enemy_id: int, spawn_definition: Dictionary) -> void:
+	var behavior_profile_key: String = str(spawn_definition.get("behavior_profile_key", DEFAULT_BEHAVIOR_PROFILE_KEY)).strip_edges().to_lower()
+	var patrol_path_key: String = str(spawn_definition.get("patrol_path_key", "")).strip_edges()
+	if behavior_profile_key != BEHAVIOR_PROFILE_PATROL:
+		return
+	if patrol_path_key == "":
+		print("Warning: patrol enemy missing patrol_path_key; falling back to wander. enemy_id=%s spawn_key=%s." % [enemy_id, str(spawn_definition.get("spawn_key", ""))])
+		return
+	if not _server_region_patrol_paths_by_key.has(patrol_path_key):
+		print("Warning: patrol path not found; falling back to wander. enemy_id=%s patrol_path_key=%s." % [enemy_id, patrol_path_key])
+		return
+
+	var patrol_path: Dictionary = _server_region_patrol_paths_by_key[patrol_path_key] as Dictionary
+	var points: Array = patrol_path.get("points", []) as Array
+	if points.size() < 2:
+		print("Warning: patrol path invalid; falling back to wander. enemy_id=%s patrol_path_key=%s point_count=%s." % [enemy_id, patrol_path_key, points.size()])
+		return
+
+	_enemy_patrol_path_key_by_id[enemy_id] = patrol_path_key
+	_enemy_patrol_points_by_id[enemy_id] = points.duplicate(true)
+	_resume_patrol_near_position(enemy_id, enemies.get(enemy_id, Vector3.ZERO) as Vector3)
+	print("Enemy patrol assigned: enemy_id=%s patrol_path_key=%s point_count=%s." % [enemy_id, patrol_path_key, points.size()])
+
+
+func _enemy_has_valid_patrol(enemy_id: int) -> bool:
+	if not _enemy_patrol_points_by_id.has(enemy_id):
+		return false
+
+	var points: Array = _enemy_patrol_points_by_id[enemy_id] as Array
+	return points.size() >= 2
+
+
+func _patrol_idle_position(enemy_id: int, enemy_position: Vector3, delta: float) -> Vector3:
+	var points: Array = _enemy_patrol_points_by_id[enemy_id] as Array
+	if points.size() < 2:
+		return enemy_position
+
+	var point_index: int = int(_enemy_patrol_point_index_by_id.get(enemy_id, 0))
+	point_index = clampi(point_index, 0, points.size() - 1)
+	var patrol_point: Dictionary = points[point_index] as Dictionary
+	var target_position: Vector3 = patrol_point.get("position", enemy_position) as Vector3
+	var arrive_distance: float = max(_enemy_definition_float(enemy_id, "leash_reset_distance", 0.75), 0.1)
+	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
+
+	if _distance_xz(enemy_position, target_position) <= arrive_distance:
+		if not _enemy_patrol_wait_until_by_id.has(enemy_id):
+			var wait_seconds: float = max(float(patrol_point.get("wait_seconds", 0.0)), 0.0)
+			if wait_seconds > 0.0:
+				_enemy_patrol_wait_until_by_id[enemy_id] = now_seconds + wait_seconds
+				return enemy_position
+		elif now_seconds < float(_enemy_patrol_wait_until_by_id.get(enemy_id, 0.0)):
+			return enemy_position
+
+		_enemy_patrol_wait_until_by_id.erase(enemy_id)
+		_enemy_patrol_point_index_by_id[enemy_id] = (point_index + 1) % points.size()
+		return enemy_position
+
+	return _move_toward_position(enemy_position, target_position, _enemy_definition_float(enemy_id, "idle_move_speed", 0.8), delta)
+
+
+func _resume_patrol_near_position(enemy_id: int, position: Vector3) -> void:
+	if not _enemy_has_valid_patrol(enemy_id):
+		return
+
+	var points: Array = _enemy_patrol_points_by_id[enemy_id] as Array
+	var nearest_index: int = 0
+	var nearest_distance: float = INF
+	for index in range(points.size()):
+		var patrol_point: Dictionary = points[index] as Dictionary
+		var point_position: Vector3 = patrol_point.get("position", position) as Vector3
+		var distance: float = _distance_xz(position, point_position)
+		if distance < nearest_distance:
+			nearest_distance = distance
+			nearest_index = index
+
+	_enemy_patrol_point_index_by_id[enemy_id] = nearest_index
+	_enemy_patrol_wait_until_by_id.erase(enemy_id)
 
 
 func _profile_aggro_radius(enemy_id: int) -> float:
@@ -1428,6 +1549,73 @@ func _extract_backend_region_enemy_spawn_array(data: Variant) -> Array:
 	return []
 
 
+func _extract_backend_region_patrol_path_array(data: Variant) -> Array:
+	if data is Array:
+		return data as Array
+	if not (data is Dictionary):
+		return []
+
+	var response_data: Dictionary = data as Dictionary
+	for key in ["patrol_paths", "paths", "items", "results", "region_patrol_paths"]:
+		if response_data.get(key, null) is Array:
+			return response_data.get(key, []) as Array
+	if response_data.get("data", null) is Dictionary:
+		return _extract_backend_region_patrol_path_array(response_data.get("data", {}) as Dictionary)
+	return []
+
+
+func _normalize_backend_region_patrol_path(source: Dictionary) -> Dictionary:
+	var patrol_path_key: String = str(source.get("patrol_path_key", source.get("key", source.get("id", "")))).strip_edges()
+	if patrol_path_key == "":
+		print("Warning: skipping backend patrol path with missing patrol_path_key.")
+		return {}
+
+	var raw_points: Array = []
+	if source.get("points", null) is Array:
+		raw_points = source.get("points", []) as Array
+	elif source.get("patrol_points", null) is Array:
+		raw_points = source.get("patrol_points", []) as Array
+	elif source.get("region_patrol_points", null) is Array:
+		raw_points = source.get("region_patrol_points", []) as Array
+
+	var points: Array = []
+	for point_variant in raw_points:
+		if not (point_variant is Dictionary):
+			continue
+
+		var point: Dictionary = _normalize_backend_region_patrol_point(point_variant as Dictionary)
+		if point.is_empty():
+			continue
+
+		points.append(point)
+
+	points.sort_custom(Callable(self, "_sort_patrol_points_by_order"))
+	if points.size() < 2:
+		print("Warning: backend patrol path '%s' has fewer than 2 usable points." % patrol_path_key)
+		return {}
+
+	return {
+		"patrol_path_key": patrol_path_key,
+		"points": points,
+	}
+
+
+func _normalize_backend_region_patrol_point(source: Dictionary) -> Dictionary:
+	var point_order: int = int(source.get("point_order", source.get("order", source.get("sort_order", source.get("index", 0)))))
+	var position_x: float = _optional_float_value(source.get("position_x", source.get("x", 0.0)), "position_x", 0.0)
+	var position_y: float = _optional_float_value(source.get("position_y", source.get("y", 0.0)), "position_y", 0.0)
+	var position_z: float = _optional_float_value(source.get("position_z", source.get("z", 0.0)), "position_z", 0.0)
+	return {
+		"point_order": point_order,
+		"position": Vector3(position_x, position_y, position_z),
+		"wait_seconds": max(_optional_float_value(source.get("wait_seconds", 0.0), "wait_seconds", 0.0), 0.0),
+	}
+
+
+func _sort_patrol_points_by_order(a: Dictionary, b: Dictionary) -> bool:
+	return int(a.get("point_order", 0)) < int(b.get("point_order", 0))
+
+
 func _normalize_backend_region_enemy_spawn(source: Dictionary) -> Dictionary:
 	var spawn_key: String = str(source.get("spawn_key", source.get("key", source.get("id", "")))).strip_edges()
 	var enemy_type: String = str(source.get("enemy_key", source.get("enemy_type", source.get("enemy_definition_key", "")))).strip_edges()
@@ -1441,6 +1629,7 @@ func _normalize_backend_region_enemy_spawn(source: Dictionary) -> Dictionary:
 	var spawn_radius: float = max(_optional_float_value(source.get("spawn_radius", 0.0), "spawn_radius", 0.0), 0.0)
 	var respawn_seconds: float = max(_optional_float_value(source.get("respawn_seconds", respawn_delay_seconds), "respawn_seconds", respawn_delay_seconds), 0.0)
 	var behavior_profile_key: String = _resolved_behavior_profile_key(str(source.get("behavior_profile_key", "")).strip_edges(), spawn_key, enemy_type)
+	var patrol_path_key: String = str(source.get("patrol_path_key", "")).strip_edges()
 	var definition_overrides: Dictionary = _backend_region_spawn_definition_overrides(source)
 	definition_overrides["behavior_profile_key"] = behavior_profile_key
 	var position: Vector3 = Vector3(
@@ -1456,6 +1645,7 @@ func _normalize_backend_region_enemy_spawn(source: Dictionary) -> Dictionary:
 		"max_alive": max(int(source.get("max_alive", 1)), 1),
 		"respawn_seconds": respawn_seconds,
 		"behavior_profile_key": behavior_profile_key,
+		"patrol_path_key": patrol_path_key,
 		"definition_overrides": definition_overrides,
 	}
 	return spawn_definition
@@ -1687,11 +1877,12 @@ func _log_backend_enemy_spawn_tuning(enemy_id: int, spawn_position: Vector3) -> 
 		return
 
 	var attack_type: String = str(definition.get("attack_type", "melee"))
-	print("Backend enemy spawned: enemy_id=%s enemy_key=%s spawn_key=%s behavior_profile_key=%s." % [
+	print("Backend enemy spawned: enemy_id=%s enemy_key=%s spawn_key=%s behavior_profile_key=%s patrol_path_key=%s." % [
 		enemy_id,
 		_enemy_type_for_enemy(enemy_id),
 		spawn_key,
 		_enemy_behavior_profile_key(enemy_id),
+		str(_enemy_patrol_path_key_by_id.get(enemy_id, "")),
 	])
 	if debug_enemy_lifecycle_logs:
 		print("Backend enemy spawn tuning: enemy_id=%s attack_type=%s attack_range=%s attack_radius=%s aggro_radius=%s leash_radius=%s spawn_position=%s." % [
