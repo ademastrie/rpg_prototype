@@ -111,24 +111,44 @@ const SERVER_PROTOTYPE_LOOT_TABLES: Dictionary = {
 		{"payload_type": "item", "item_key": "worn_boots", "min_quantity": 1, "max_quantity": 1, "drop_chance": 0.075},
 	],
 }
-const ABILITY_DEFINITIONS: Dictionary = {
-	"Slash": {
-		"cooldown": 1.25,
+const ABILITY_KEY_BY_DISPLAY_NAME: Dictionary = {
+	"Slash": "slash",
+	"HP Regen": "hp_regen",
+	"Damage Aura": "damage_aura",
+	"Firebolt": "firebolt",
+}
+
+# Temporary server-owned prototype ability config. These values should later be
+# hydrated from backend ability definitions/effects while Godot keeps combat
+# execution authoritative.
+const SERVER_ABILITY_CONFIGS: Dictionary = {
+	"slash": {
+		"behavior_key": "melee_arc_damage",
+		"visual_key": "slash_arc",
+		"cooldown_seconds": 1.25,
 		"damage": 10,
 		"range": 3.5,
 		"arc_angle": 90.0,
 	},
-	"HP Regen": {
-		"cooldown": 2.0,
+	"hp_regen": {
+		"behavior_key": "periodic_heal",
+		"visual_key": "hp_regen",
+		"tick_seconds": 2.0,
+		"cooldown_seconds": 2.0,
 		"heal": 8,
 	},
-	"Damage Aura": {
-		"cooldown": 1.0,
+	"damage_aura": {
+		"behavior_key": "point_blank_aoe_damage",
+		"visual_key": "damage_aura",
+		"tick_seconds": 1.0,
+		"cooldown_seconds": 1.0,
 		"damage": 5,
 		"radius": 4.0,
 	},
-	"Firebolt": {
-		"cooldown": 1.3,
+	"firebolt": {
+		"behavior_key": "line_projectile_damage",
+		"visual_key": "firebolt",
+		"cooldown_seconds": 1.3,
 		"damage": 12,
 		"range": 8.0,
 		"width": 0.7,
@@ -959,38 +979,56 @@ func _set_ability_used(peer_id: int, ability_name: String, now_seconds: float) -
 
 
 func _ability_cooldown(ability_name: String) -> float:
-	var ability_definition: Dictionary = ABILITY_DEFINITIONS.get(ability_name, {}) as Dictionary
-	return float(ability_definition.get("cooldown", 1.0))
+	var ability_config: Dictionary = _server_ability_config(ability_name)
+	return float(ability_config.get("cooldown_seconds", 1.0))
 
 
 func _ability_heal_amount(ability_name: String) -> int:
-	var ability_definition: Dictionary = ABILITY_DEFINITIONS.get(ability_name, {}) as Dictionary
-	return int(ability_definition.get("heal", 0))
+	var ability_config: Dictionary = _server_ability_config(ability_name)
+	return int(ability_config.get("heal", 0))
 
 
 func _ability_damage_amount(ability_name: String) -> int:
-	var ability_definition: Dictionary = ABILITY_DEFINITIONS.get(ability_name, {}) as Dictionary
-	return int(ability_definition.get("damage", 0))
+	var ability_config: Dictionary = _server_ability_config(ability_name)
+	return int(ability_config.get("damage", 0))
 
 
 func _ability_radius(ability_name: String) -> float:
-	var ability_definition: Dictionary = ABILITY_DEFINITIONS.get(ability_name, {}) as Dictionary
-	return float(ability_definition.get("radius", 0.0))
+	var ability_config: Dictionary = _server_ability_config(ability_name)
+	return float(ability_config.get("radius", 0.0))
 
 
 func _ability_range(ability_name: String) -> float:
-	var ability_definition: Dictionary = ABILITY_DEFINITIONS.get(ability_name, {}) as Dictionary
-	return float(ability_definition.get("range", 0.0))
+	var ability_config: Dictionary = _server_ability_config(ability_name)
+	return float(ability_config.get("range", 0.0))
 
 
 func _ability_arc_angle(ability_name: String) -> float:
-	var ability_definition: Dictionary = ABILITY_DEFINITIONS.get(ability_name, {}) as Dictionary
-	return float(ability_definition.get("arc_angle", 0.0))
+	var ability_config: Dictionary = _server_ability_config(ability_name)
+	return float(ability_config.get("arc_angle", 0.0))
 
 
 func _ability_width(ability_name: String) -> float:
-	var ability_definition: Dictionary = ABILITY_DEFINITIONS.get(ability_name, {}) as Dictionary
-	return float(ability_definition.get("width", 0.0))
+	var ability_config: Dictionary = _server_ability_config(ability_name)
+	return float(ability_config.get("width", 0.0))
+
+
+func _ability_visual_key(ability_name: String) -> String:
+	var ability_config: Dictionary = _server_ability_config(ability_name)
+	return str(ability_config.get("visual_key", ""))
+
+
+func _server_ability_config(ability_name: String) -> Dictionary:
+	var ability_key: String = _server_ability_key(ability_name)
+	return SERVER_ABILITY_CONFIGS.get(ability_key, {}) as Dictionary
+
+
+func _server_ability_key(ability_name: String) -> String:
+	var normalized_name: String = ability_name.strip_edges()
+	if SERVER_ABILITY_CONFIGS.has(normalized_name):
+		return normalized_name
+
+	return str(ABILITY_KEY_BY_DISPLAY_NAME.get(normalized_name, normalized_name.to_snake_case()))
 
 
 func _apply_hp_regen(peer_id: int) -> void:
@@ -1006,12 +1044,13 @@ func _apply_hp_regen(peer_id: int) -> void:
 
 func _perform_damage_aura(peer_id: int) -> void:
 	var aura_position: Vector3 = players[peer_id] as Vector3
-	var radius: float = _ability_radius("Damage Aura")
-	var damage: int = _ability_damage_amount("Damage Aura")
+	var ability_config: Dictionary = _server_ability_config("Damage Aura")
+	var radius: float = float(ability_config.get("radius", 0.0))
+	var damage: int = int(ability_config.get("damage", 0))
 	if radius <= 0.0 or damage <= 0:
 		return
 
-	rpc("show_damage_aura", peer_id, aura_position, radius)
+	rpc("show_damage_aura", peer_id, aura_position, radius, _ability_visual_key("Damage Aura"))
 	var enemy_spawner: Node = get_node_or_null("../EnemySpawner")
 	if enemy_spawner != null:
 		enemy_spawner.call("resolve_damage_aura", peer_id, aura_position, radius, damage)
@@ -1024,13 +1063,14 @@ func _perform_firebolt(peer_id: int) -> void:
 		aim_direction = Vector2(0.0, -1.0)
 
 	var normalized_aim: Vector2 = aim_direction.normalized()
-	var firebolt_range: float = _ability_range("Firebolt")
-	var firebolt_width: float = _ability_width("Firebolt")
-	var damage: int = _ability_damage_amount("Firebolt")
+	var ability_config: Dictionary = _server_ability_config("Firebolt")
+	var firebolt_range: float = float(ability_config.get("range", 0.0))
+	var firebolt_width: float = float(ability_config.get("width", 0.0))
+	var damage: int = int(ability_config.get("damage", 0))
 	if firebolt_range <= 0.0 or firebolt_width <= 0.0 or damage <= 0:
 		return
 
-	rpc("show_firebolt", peer_id, firebolt_position, normalized_aim, firebolt_range)
+	rpc("show_firebolt", peer_id, firebolt_position, normalized_aim, firebolt_range, _ability_visual_key("Firebolt"))
 	var enemy_spawner: Node = get_node_or_null("../EnemySpawner")
 	if enemy_spawner != null:
 		enemy_spawner.call("resolve_firebolt", peer_id, firebolt_position, normalized_aim, firebolt_range, firebolt_width, damage)
@@ -1516,9 +1556,10 @@ func _perform_slash(peer_id: int) -> void:
 
 	# Slash/basic attack uses server-owned position and facing; clients never decide hits.
 	var normalized_facing: Vector2 = facing_direction.normalized()
-	var slash_range: float = _ability_range("Slash")
-	var slash_arc_angle: float = _ability_arc_angle("Slash")
-	var slash_damage: int = _ability_damage_amount("Slash")
+	var ability_config: Dictionary = _server_ability_config("Slash")
+	var slash_range: float = float(ability_config.get("range", 0.0))
+	var slash_arc_angle: float = float(ability_config.get("arc_angle", 0.0))
+	var slash_damage: int = int(ability_config.get("damage", 0))
 	if slash_range <= 0.0 or slash_arc_angle <= 0.0 or slash_damage <= 0:
 		return
 
@@ -1527,12 +1568,12 @@ func _perform_slash(peer_id: int) -> void:
 	if enemy_spawner != null:
 		enemies_hit = int(enemy_spawner.call("resolve_basic_attack", peer_id, attack_position, normalized_facing, slash_range, slash_arc_angle, slash_damage))
 
-	rpc("show_basic_attack", peer_id, attack_position, normalized_facing, slash_range, slash_arc_angle)
+	rpc("show_basic_attack", peer_id, attack_position, normalized_facing, slash_range, slash_arc_angle, _ability_visual_key("Slash"))
 	print("Slash resolved: peer_id=%s range=%s arc_angle=%s enemies_hit=%s" % [peer_id, slash_range, slash_arc_angle, enemies_hit])
 
 
 @rpc("authority", "call_remote", "reliable")
-func show_basic_attack(peer_id: int, attack_position: Vector3, facing_direction: Vector2, slash_range: float, slash_arc_angle: float) -> void:
+func show_basic_attack(peer_id: int, attack_position: Vector3, facing_direction: Vector2, slash_range: float, slash_arc_angle: float, visual_key: String = "slash_arc") -> void:
 	if facing_direction.length_squared() <= 0.0001 or slash_range <= 0.0 or slash_arc_angle <= 0.0:
 		return
 
@@ -1546,7 +1587,7 @@ func show_basic_attack(peer_id: int, attack_position: Vector3, facing_direction:
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	marker.material_override = material
-	marker.name = "BasicAttack_%s" % peer_id
+	marker.name = "%s_%s" % [visual_key, peer_id]
 	marker.position = attack_position + Vector3(0.0, 0.25, 0.0)
 	marker.rotation.y = atan2(-normalized_facing.x, -normalized_facing.y)
 	add_child(marker)
@@ -1586,7 +1627,7 @@ func _build_slash_arc_mesh(slash_range: float, slash_arc_angle: float) -> ArrayM
 
 
 @rpc("authority", "call_remote", "reliable")
-func show_damage_aura(peer_id: int, aura_position: Vector3, radius: float) -> void:
+func show_damage_aura(peer_id: int, aura_position: Vector3, radius: float, visual_key: String = "damage_aura") -> void:
 	var marker: MeshInstance3D = MeshInstance3D.new()
 	var marker_mesh: CylinderMesh = CylinderMesh.new()
 	marker_mesh.top_radius = radius
@@ -1599,7 +1640,7 @@ func show_damage_aura(peer_id: int, aura_position: Vector3, radius: float) -> vo
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	marker.material_override = material
-	marker.name = "DamageAura_%s" % peer_id
+	marker.name = "%s_%s" % [visual_key, peer_id]
 	marker.position = aura_position + Vector3(0.0, 0.06, 0.0)
 	add_child(marker)
 
@@ -1612,7 +1653,7 @@ func show_damage_aura(peer_id: int, aura_position: Vector3, radius: float) -> vo
 
 
 @rpc("authority", "call_remote", "reliable")
-func show_firebolt(peer_id: int, firebolt_position: Vector3, aim_direction: Vector2, firebolt_range: float) -> void:
+func show_firebolt(peer_id: int, firebolt_position: Vector3, aim_direction: Vector2, firebolt_range: float, visual_key: String = "firebolt") -> void:
 	if aim_direction.length_squared() <= 0.0001 or firebolt_range <= 0.0:
 		return
 
@@ -1629,7 +1670,7 @@ func show_firebolt(peer_id: int, firebolt_position: Vector3, aim_direction: Vect
 	material.emission = Color(1.0, 0.22, 0.02, 1.0)
 	material.emission_energy_multiplier = 0.8
 	marker.material_override = material
-	marker.name = "Firebolt_%s" % peer_id
+	marker.name = "%s_%s" % [visual_key, peer_id]
 	var forward: Vector3 = Vector3(normalized_aim.x, 0.0, normalized_aim.y)
 	marker.position = firebolt_position + forward * (firebolt_range * 0.5) + Vector3(0.0, 0.45, 0.0)
 	marker.rotation.y = atan2(-normalized_aim.x, -normalized_aim.y)
