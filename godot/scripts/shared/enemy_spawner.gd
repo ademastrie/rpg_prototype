@@ -55,6 +55,17 @@ var _enemy_region_spawn_key_by_id: Dictionary = {}
 const DEFAULT_ENEMY_TYPE: String = "grunt"
 const SUSPICIOUS_MOVEMENT_STEP: float = 6.0
 const DEFAULT_ENEMY_ATTACK_COOLDOWN_SECONDS: float = 1.0
+const DEFAULT_BEHAVIOR_PROFILE_KEY: String = "wander"
+const BEHAVIOR_PROFILE_STATIONARY: String = "stationary"
+const BEHAVIOR_PROFILE_WANDER: String = "wander"
+const BEHAVIOR_PROFILE_RANGED_GUARD: String = "ranged_guard"
+const BEHAVIOR_PROFILE_AGGRESSIVE: String = "aggressive"
+const SUPPORTED_BEHAVIOR_PROFILE_KEYS: Array[String] = [
+	BEHAVIOR_PROFILE_STATIONARY,
+	BEHAVIOR_PROFILE_WANDER,
+	BEHAVIOR_PROFILE_RANGED_GUARD,
+	BEHAVIOR_PROFILE_AGGRESSIVE,
+]
 
 # Fallback prototype definitions. Backend enemy definitions are durable data;
 # Godot caches them at startup and owns only live simulation state such as HP,
@@ -575,6 +586,10 @@ func _update_enemy_positions(delta: float) -> void:
 				_log_server_enemy_snap(enemy_id_int, enemy_position, enemy_position, delta, "ranged_hold", target_peer_id)
 				continue
 
+			if _should_ranged_guard_hold_near_spawn(enemy_id_int, enemy_position, target_position):
+				_log_server_enemy_snap(enemy_id_int, enemy_position, enemy_position, delta, "ranged_guard_hold", target_peer_id)
+				continue
+
 			var chase_position: Vector3 = _chase_position(enemy_id_int, enemy_position, target_position, delta)
 			enemies[enemy_id] = chase_position
 			_log_server_enemy_snap(enemy_id_int, enemy_position, chase_position, delta, "chasing", target_peer_id)
@@ -596,10 +611,7 @@ func _update_enemy_positions(delta: float) -> void:
 			_log_server_enemy_snap(enemy_id_int, enemy_position, idle_return_position, delta, "idle_redirected_to_return", 0)
 			continue
 
-		var origin_position: Vector3 = _enemy_origin_positions[enemy_id] as Vector3
-		var angle: float = _idle_time * idle_speed + float(enemy_id_int)
-		var idle_target_position: Vector3 = origin_position + Vector3(cos(angle) * idle_radius, 0.0, sin(angle) * idle_radius)
-		var idle_position: Vector3 = _move_toward_position(enemy_position, idle_target_position, _enemy_definition_float(enemy_id_int, "idle_move_speed", 0.8), delta)
+		var idle_position: Vector3 = _profile_idle_position(enemy_id_int, enemy_position, spawn_position, delta)
 		enemies[enemy_id] = idle_position
 		_log_server_enemy_snap(enemy_id_int, enemy_position, idle_position, delta, "idle", 0)
 
@@ -662,9 +674,9 @@ func _proximity_aggro_target(enemy_id: int, enemy_position: Vector3, alive_playe
 		return {"has_target": false, "position": Vector3.ZERO}
 
 	var player_position: Vector3 = alive_player_positions[peer_id] as Vector3
-	var aggro_radius: float = _enemy_definition_float(enemy_id, "aggro_radius", 8.0)
+	var aggro_radius: float = _profile_aggro_radius(enemy_id)
 	if _distance_xz(enemy_position, player_position) <= aggro_radius:
-		aggro_until = now_seconds + _enemy_definition_float(enemy_id, "proximity_aggro_seconds", 11.0)
+		aggro_until = now_seconds + _profile_proximity_aggro_seconds(enemy_id)
 		_proximity_aggro_until_by_enemy[enemy_id] = aggro_until
 
 	if now_seconds > aggro_until:
@@ -680,7 +692,7 @@ func _proximity_aggro_target(enemy_id: int, enemy_position: Vector3, alive_playe
 
 
 func _nearest_aggro_player(enemy_id: int, enemy_position: Vector3, alive_player_positions: Dictionary) -> Dictionary:
-	var aggro_radius: float = _enemy_definition_float(enemy_id, "aggro_radius", 8.0)
+	var aggro_radius: float = _profile_aggro_radius(enemy_id)
 	var nearest_position: Vector3 = Vector3.ZERO
 	var nearest_distance: float = aggro_radius
 	var nearest_peer_id: int = 0
@@ -709,7 +721,7 @@ func _set_proximity_aggro(enemy_id: int, peer_id: int) -> void:
 
 	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
 	_proximity_aggro_peer_by_enemy[enemy_id] = peer_id
-	_proximity_aggro_until_by_enemy[enemy_id] = now_seconds + _enemy_definition_float(enemy_id, "proximity_aggro_seconds", 11.0)
+	_proximity_aggro_until_by_enemy[enemy_id] = now_seconds + _profile_proximity_aggro_seconds(enemy_id)
 
 
 func _set_forced_aggro(enemy_id: int, attacker_peer_id: int) -> void:
@@ -725,7 +737,7 @@ func _set_forced_aggro(enemy_id: int, attacker_peer_id: int) -> void:
 	_proximity_aggro_until_by_enemy.erase(enemy_id)
 	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
 	_forced_aggro_peer_by_enemy[enemy_id] = attacker_peer_id
-	_forced_aggro_until_by_enemy[enemy_id] = now_seconds + _enemy_definition_float(enemy_id, "forced_aggro_seconds", 16.0)
+	_forced_aggro_until_by_enemy[enemy_id] = now_seconds + _profile_forced_aggro_seconds(enemy_id)
 
 
 func _can_start_enemy_melee_attack(enemy_id: int, enemy_position: Vector3, target_position: Vector3) -> bool:
@@ -813,7 +825,7 @@ func _clear_enemy_melee_attack(enemy_id: int) -> void:
 
 
 func _can_start_enemy_ranged_attack(enemy_id: int, enemy_position: Vector3, target_position: Vector3) -> bool:
-	if _enemy_attack_type(enemy_id) != "ranged":
+	if not _enemy_can_use_ranged_attack(enemy_id):
 		return false
 
 	var ranged_attack_range: float = _enemy_definition_float(enemy_id, "ranged_attack_range", 8.0)
@@ -950,7 +962,7 @@ func _log_enemy_attack_started(enemy_id: int, attack_key: String, windup_seconds
 
 
 func _should_hold_ranged_position(enemy_id: int, enemy_position: Vector3, target_position: Vector3) -> bool:
-	if _enemy_attack_type(enemy_id) != "ranged":
+	if not _enemy_can_use_ranged_attack(enemy_id):
 		return false
 	if not _enemy_definition_bool(enemy_id, "ranged_attack_enabled", false):
 		return false
@@ -961,6 +973,23 @@ func _should_hold_ranged_position(enemy_id: int, enemy_position: Vector3, target
 		preferred_distance = ranged_attack_range
 
 	return _distance_xz(enemy_position, target_position) <= min(preferred_distance, ranged_attack_range)
+
+
+func _should_ranged_guard_hold_near_spawn(enemy_id: int, enemy_position: Vector3, target_position: Vector3) -> bool:
+	if _enemy_behavior_profile_key(enemy_id) != BEHAVIOR_PROFILE_RANGED_GUARD:
+		return false
+	if not _enemy_can_use_ranged_attack(enemy_id) or not _enemy_definition_bool(enemy_id, "ranged_attack_enabled", false):
+		return false
+
+	var ranged_attack_range: float = _enemy_definition_float(enemy_id, "ranged_attack_range", 8.0)
+	if ranged_attack_range <= 0.0:
+		return false
+
+	var distance_to_target: float = _distance_xz(enemy_position, target_position)
+	if distance_to_target > ranged_attack_range:
+		return false
+
+	return true
 
 
 func _should_hold_melee_recovery_position(enemy_id: int, enemy_position: Vector3, target_position: Vector3) -> bool:
@@ -991,17 +1020,17 @@ func _target_peer_for_enemy(enemy_id: int) -> int:
 	return 0
 
 
-func _should_return_with_target(_enemy_id: int, enemy_position: Vector3, spawn_position: Vector3, target_position: Vector3) -> bool:
-	var target_drop_distance: float = _enemy_definition_float(_enemy_id, "target_drop_distance", 65.0)
+func _should_return_with_target(enemy_id: int, enemy_position: Vector3, spawn_position: Vector3, target_position: Vector3) -> bool:
+	var target_drop_distance: float = _profile_target_drop_distance(enemy_id)
 	if _distance_xz(enemy_position, target_position) > target_drop_distance:
 		return true
 
-	var hard_return_distance: float = _enemy_definition_float(_enemy_id, "hard_return_distance", 160.0)
+	var hard_return_distance: float = _profile_hard_return_distance(enemy_id)
 	return _distance_xz(enemy_position, spawn_position) > hard_return_distance
 
 
 func _should_return_without_target(enemy_id: int, enemy_position: Vector3, spawn_position: Vector3) -> bool:
-	var home_return_distance: float = _enemy_definition_float(enemy_id, "home_return_distance", 70.0)
+	var home_return_distance: float = _profile_home_return_distance(enemy_id)
 	return _distance_xz(enemy_position, spawn_position) > home_return_distance
 
 
@@ -1200,6 +1229,94 @@ func _chase_position(enemy_id: int, enemy_position: Vector3, target_position: Ve
 	return enemy_position + offset.normalized() * max_step
 
 
+func _profile_idle_position(enemy_id: int, enemy_position: Vector3, spawn_position: Vector3, delta: float) -> Vector3:
+	var behavior_profile_key: String = _enemy_behavior_profile_key(enemy_id)
+	if behavior_profile_key == BEHAVIOR_PROFILE_STATIONARY:
+		if _distance_xz(enemy_position, spawn_position) <= _enemy_definition_float(enemy_id, "leash_reset_distance", 0.75):
+			return enemy_position
+		return _move_toward_position(enemy_position, spawn_position, _enemy_definition_float(enemy_id, "idle_move_speed", 0.8), delta)
+
+	var origin_position: Vector3 = _enemy_origin_positions[enemy_id] as Vector3
+	var profile_idle_radius: float = idle_radius
+	if behavior_profile_key == BEHAVIOR_PROFILE_RANGED_GUARD:
+		profile_idle_radius = min(idle_radius, max(_profile_aggro_radius(enemy_id) * 0.25, 0.75))
+	elif behavior_profile_key == BEHAVIOR_PROFILE_AGGRESSIVE:
+		profile_idle_radius = idle_radius * 1.25
+	var angle: float = _idle_time * idle_speed + float(enemy_id)
+	var idle_target_position: Vector3 = origin_position + Vector3(cos(angle) * profile_idle_radius, 0.0, sin(angle) * profile_idle_radius)
+	return _move_toward_position(enemy_position, idle_target_position, _enemy_definition_float(enemy_id, "idle_move_speed", 0.8), delta)
+
+
+func _profile_aggro_radius(enemy_id: int) -> float:
+	var aggro_radius: float = _enemy_definition_float(enemy_id, "aggro_radius", 8.0)
+	if _enemy_behavior_profile_key(enemy_id) == BEHAVIOR_PROFILE_AGGRESSIVE:
+		return aggro_radius * 1.35
+	return aggro_radius
+
+
+func _profile_forced_aggro_seconds(enemy_id: int) -> float:
+	var aggro_seconds: float = _enemy_definition_float(enemy_id, "forced_aggro_seconds", 16.0)
+	if _enemy_behavior_profile_key(enemy_id) == BEHAVIOR_PROFILE_AGGRESSIVE:
+		return aggro_seconds * 1.25
+	return aggro_seconds
+
+
+func _profile_proximity_aggro_seconds(enemy_id: int) -> float:
+	var aggro_seconds: float = _enemy_definition_float(enemy_id, "proximity_aggro_seconds", 11.0)
+	if _enemy_behavior_profile_key(enemy_id) == BEHAVIOR_PROFILE_AGGRESSIVE:
+		return aggro_seconds * 1.25
+	return aggro_seconds
+
+
+func _profile_home_return_distance(enemy_id: int) -> float:
+	var home_return_distance: float = _enemy_definition_float(enemy_id, "home_return_distance", 70.0)
+	var aggro_radius: float = _profile_aggro_radius(enemy_id)
+	var behavior_profile_key: String = _enemy_behavior_profile_key(enemy_id)
+	if behavior_profile_key == BEHAVIOR_PROFILE_STATIONARY:
+		return min(home_return_distance, max(aggro_radius * 1.25, 4.0))
+	if behavior_profile_key == BEHAVIOR_PROFILE_RANGED_GUARD:
+		var ranged_range: float = _enemy_definition_float(enemy_id, "ranged_attack_range", aggro_radius)
+		return min(home_return_distance, max(ranged_range + 3.0, aggro_radius))
+	if behavior_profile_key == BEHAVIOR_PROFILE_AGGRESSIVE:
+		return home_return_distance * 1.3
+	return home_return_distance
+
+
+func _profile_target_drop_distance(enemy_id: int) -> float:
+	var target_drop_distance: float = _enemy_definition_float(enemy_id, "target_drop_distance", 65.0)
+	var aggro_radius: float = _profile_aggro_radius(enemy_id)
+	var behavior_profile_key: String = _enemy_behavior_profile_key(enemy_id)
+	if behavior_profile_key == BEHAVIOR_PROFILE_STATIONARY:
+		return min(target_drop_distance, max(aggro_radius * 1.5, 5.0))
+	if behavior_profile_key == BEHAVIOR_PROFILE_RANGED_GUARD:
+		var ranged_range: float = _enemy_definition_float(enemy_id, "ranged_attack_range", aggro_radius)
+		return min(target_drop_distance, max(ranged_range + 4.0, aggro_radius * 1.25))
+	if behavior_profile_key == BEHAVIOR_PROFILE_AGGRESSIVE:
+		return target_drop_distance * 1.35
+	return target_drop_distance
+
+
+func _profile_hard_return_distance(enemy_id: int) -> float:
+	var hard_return_distance: float = _enemy_definition_float(enemy_id, "hard_return_distance", 160.0)
+	var aggro_radius: float = _profile_aggro_radius(enemy_id)
+	var behavior_profile_key: String = _enemy_behavior_profile_key(enemy_id)
+	if behavior_profile_key == BEHAVIOR_PROFILE_STATIONARY:
+		return min(hard_return_distance, max(aggro_radius * 2.0, 8.0))
+	if behavior_profile_key == BEHAVIOR_PROFILE_RANGED_GUARD:
+		var ranged_range: float = _enemy_definition_float(enemy_id, "ranged_attack_range", aggro_radius)
+		return min(hard_return_distance, max(ranged_range + 6.0, aggro_radius * 1.5))
+	if behavior_profile_key == BEHAVIOR_PROFILE_AGGRESSIVE:
+		return hard_return_distance * 1.35
+	return hard_return_distance
+
+
+func _enemy_behavior_profile_key(enemy_id: int) -> String:
+	var profile_key: String = str(_enemy_definition_for_enemy(enemy_id).get("behavior_profile_key", DEFAULT_BEHAVIOR_PROFILE_KEY)).strip_edges().to_lower()
+	if SUPPORTED_BEHAVIOR_PROFILE_KEYS.has(profile_key):
+		return profile_key
+	return DEFAULT_BEHAVIOR_PROFILE_KEY
+
+
 func _log_suspicious_movement_step(enemy_id: int, chase_speed: float, delta: float, max_step: float, distance_to_target: float) -> void:
 	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
 	var last_log_seconds: float = float(_enemy_suspicious_movement_log_last_seconds.get(enemy_id, -999.0))
@@ -1229,6 +1346,12 @@ func _enemy_definition_bool(enemy_id: int, key: String, fallback: bool) -> bool:
 	return bool(_enemy_definition_for_enemy(enemy_id).get(key, fallback))
 
 
+func _enemy_can_use_ranged_attack(enemy_id: int) -> bool:
+	if _enemy_attack_type(enemy_id) == "ranged":
+		return true
+	return _enemy_behavior_profile_key(enemy_id) == BEHAVIOR_PROFILE_RANGED_GUARD and _enemy_definition_bool(enemy_id, "ranged_attack_enabled", false)
+
+
 func _enemy_attack_type(enemy_id: int) -> String:
 	return str(_enemy_definition_for_enemy(enemy_id).get("attack_type", "melee"))
 
@@ -1253,6 +1376,18 @@ func _resolved_enemy_type(enemy_type: String) -> String:
 	if definitions.has(resolved_enemy_type):
 		return resolved_enemy_type
 	return DEFAULT_ENEMY_TYPE
+
+
+func _resolved_behavior_profile_key(profile_key: String, spawn_key: String, enemy_key: String) -> String:
+	var resolved_profile_key: String = profile_key.strip_edges().to_lower()
+	if resolved_profile_key == "":
+		print("Warning: region enemy spawn missing behavior_profile_key; defaulting to wander. spawn_key=%s enemy_key=%s." % [spawn_key, enemy_key])
+		return DEFAULT_BEHAVIOR_PROFILE_KEY
+	if SUPPORTED_BEHAVIOR_PROFILE_KEYS.has(resolved_profile_key):
+		return resolved_profile_key
+
+	print("Warning: unknown region enemy behavior_profile_key '%s'; defaulting to wander. spawn_key=%s enemy_key=%s." % [profile_key, spawn_key, enemy_key])
+	return DEFAULT_BEHAVIOR_PROFILE_KEY
 
 
 func _active_enemy_definitions() -> Dictionary:
@@ -1305,6 +1440,9 @@ func _normalize_backend_region_enemy_spawn(source: Dictionary) -> Dictionary:
 	var position_z: float = _optional_float_value(source.get("position_z", source.get("z", 0.0)), "position_z", 0.0)
 	var spawn_radius: float = max(_optional_float_value(source.get("spawn_radius", 0.0), "spawn_radius", 0.0), 0.0)
 	var respawn_seconds: float = max(_optional_float_value(source.get("respawn_seconds", respawn_delay_seconds), "respawn_seconds", respawn_delay_seconds), 0.0)
+	var behavior_profile_key: String = _resolved_behavior_profile_key(str(source.get("behavior_profile_key", "")).strip_edges(), spawn_key, enemy_type)
+	var definition_overrides: Dictionary = _backend_region_spawn_definition_overrides(source)
+	definition_overrides["behavior_profile_key"] = behavior_profile_key
 	var position: Vector3 = Vector3(
 		position_x,
 		position_y,
@@ -1317,14 +1455,14 @@ func _normalize_backend_region_enemy_spawn(source: Dictionary) -> Dictionary:
 		"spawn_radius": spawn_radius,
 		"max_alive": max(int(source.get("max_alive", 1)), 1),
 		"respawn_seconds": respawn_seconds,
-		"definition_overrides": _backend_region_spawn_definition_overrides(source),
+		"behavior_profile_key": behavior_profile_key,
+		"definition_overrides": definition_overrides,
 	}
 	return spawn_definition
 
 
 func _backend_region_spawn_definition_overrides(source: Dictionary) -> Dictionary:
 	var overrides: Dictionary = {}
-	_copy_string_definition_value(source, overrides, "behavior_profile_key", ["behavior_profile_key"])
 	_copy_float_definition_value(source, overrides, "aggro_radius", ["aggro_radius", "aggro_radius_override", "override_aggro_radius"])
 	_copy_float_definition_value(source, overrides, "forced_aggro_seconds", ["forced_aggro_seconds", "forced_aggro_seconds_override", "override_forced_aggro_seconds"])
 	_copy_float_definition_value(source, overrides, "proximity_aggro_seconds", ["proximity_aggro_seconds", "proximity_aggro_seconds_override", "override_proximity_aggro_seconds"])
@@ -1544,26 +1682,27 @@ func _log_backend_enemy_definition_tuning(definition: Dictionary) -> void:
 
 func _log_backend_enemy_spawn_tuning(enemy_id: int, spawn_position: Vector3) -> void:
 	var definition: Dictionary = _enemy_definition_for_enemy(enemy_id)
-	if not bool(definition.get("backend_loaded", false)):
+	var spawn_key: String = str(_enemy_region_spawn_key_by_id.get(enemy_id, ""))
+	if spawn_key == "" and not bool(definition.get("backend_loaded", false)):
 		return
 
 	var attack_type: String = str(definition.get("attack_type", "melee"))
-	print("Backend enemy spawned: enemy_id=%s enemy_key=%s move_speed=%s chase_speed=%s attack_type=%s attack_range=%s attack_radius=%s windup=%s recovery=%s cooldown=%s aggro_radius=%s leash_radius=%s behavior_profile_key=%s spawn_position=%s." % [
+	print("Backend enemy spawned: enemy_id=%s enemy_key=%s spawn_key=%s behavior_profile_key=%s." % [
 		enemy_id,
 		_enemy_type_for_enemy(enemy_id),
-		float(definition.get("move_speed", 0.0)),
-		float(definition.get("move_speed", 0.0)),
-		attack_type,
-		_definition_attack_range(definition),
-		_definition_attack_radius(definition),
-		_definition_attack_windup(definition),
-		_definition_attack_recovery(definition),
-		_definition_attack_cooldown(definition),
-		float(definition.get("aggro_radius", 0.0)),
-		float(definition.get("home_return_distance", 0.0)),
-		str(definition.get("behavior_profile_key", "")),
-		spawn_position,
+		spawn_key,
+		_enemy_behavior_profile_key(enemy_id),
 	])
+	if debug_enemy_lifecycle_logs:
+		print("Backend enemy spawn tuning: enemy_id=%s attack_type=%s attack_range=%s attack_radius=%s aggro_radius=%s leash_radius=%s spawn_position=%s." % [
+			enemy_id,
+			attack_type,
+			_definition_attack_range(definition),
+			_definition_attack_radius(definition),
+			_profile_aggro_radius(enemy_id),
+			_profile_home_return_distance(enemy_id),
+			spawn_position,
+		])
 
 
 func _definition_attack_range(definition: Dictionary) -> float:
