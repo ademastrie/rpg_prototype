@@ -460,33 +460,25 @@ func resolve_damage_aura(_attacker_peer_id: int, aura_position: Vector3, radius:
 		_apply_damage_to_enemy(enemy_id_int, _attacker_peer_id, damage)
 
 
-func resolve_firebolt(_attacker_peer_id: int, firebolt_position: Vector3, aim_direction: Vector2, firebolt_range: float, firebolt_width: float, damage: int) -> void:
-	if not multiplayer.is_server() or aim_direction.length_squared() <= 0.0001 or firebolt_range <= 0.0 or firebolt_width <= 0.0 or damage <= 0:
-		return
+func resolve_fireball_aoe(_attacker_peer_id: int, impact_position: Vector3, radius: float, damage: int) -> int:
+	if not multiplayer.is_server() or radius <= 0.0 or damage <= 0:
+		return 0
 
-	var normalized_aim: Vector2 = aim_direction.normalized()
-	var best_enemy_id: int = 0
-	var best_distance_along: float = firebolt_range
-	for enemy_id in enemies:
+	var enemies_hit: int = 0
+	for enemy_id in enemies.keys():
 		var enemy_id_int: int = int(enemy_id)
-		var enemy_position: Vector3 = enemies[enemy_id] as Vector3
-		var offset_xz: Vector2 = Vector2(enemy_position.x - firebolt_position.x, enemy_position.z - firebolt_position.z)
-		var distance_along: float = normalized_aim.dot(offset_xz)
-		if distance_along < 0.0 or distance_along > firebolt_range:
+		if not enemies.has(enemy_id_int):
 			continue
 
-		var closest_point: Vector2 = normalized_aim * distance_along
-		var distance_from_line: float = (offset_xz - closest_point).length()
-		if distance_from_line > firebolt_width:
+		var enemy_position: Vector3 = enemies[enemy_id_int] as Vector3
+		var offset_xz: Vector2 = Vector2(enemy_position.x - impact_position.x, enemy_position.z - impact_position.z)
+		if offset_xz.length() > radius:
 			continue
-		if distance_along < best_distance_along:
-			best_distance_along = distance_along
-			best_enemy_id = enemy_id_int
 
-	if best_enemy_id <= 0:
-		return
+		_apply_damage_to_enemy(enemy_id_int, _attacker_peer_id, damage)
+		enemies_hit += 1
 
-	_apply_damage_to_enemy(best_enemy_id, _attacker_peer_id, damage)
+	return enemies_hit
 
 
 func _apply_damage_to_enemy(enemy_id: int, attacker_peer_id: int, damage: int) -> void:

@@ -1,0 +1,58 @@
+[
+  {
+    "ability_key": "damage_aura",
+    "display_name": "Damage Aura",
+    "description": "Damages nearby enemies around the character.",
+    "behavior_key": "point_blank_aoe_damage",
+    "trigger_type": "periodic",
+    "targeting_type": "radius_around_self",
+    "cooldown_seconds": 1.0,
+    "range": null,
+    "radius": 4.0,
+    "arc_angle_degrees": null,
+    "visual_key": "damage_aura",
+    "is_active": true
+  },
+  {
+    "ability_key": "firebolt",
+    "display_name": "Firebolt",
+    "description": "A ranged attack that hits the first enemy in an aimed line.",
+    "behavior_key": "line_projectile_damage",
+    "trigger_type": "cooldown",
+    "targeting_type": "aimed_line",
+    "cooldown_seconds": 1.3,
+    "range": 8.0,
+    "radius": null,
+    "arc_angle_degrees": null,
+    "visual_key": "firebolt",
+    "is_active": true
+  },
+  {
+    "ability_key": "hp_regen",
+    "display_name": "HP Regen",
+    "description": "Periodically restores health while active.",
+    "behavior_key": "periodic_heal",
+    "trigger_type": "periodic",
+    "targeting_type": "self",
+    "cooldown_seconds": 2.0,
+    "range": null,
+    "radius": null,
+    "arc_angle_degrees": null,
+    "visual_key": "hp_regen",
+    "is_active": true
+  },
+  {
+    "ability_key": "slash",
+    "display_name": "Slash",
+    "description": "A short-range weapon attack in the aimed direction.",
+    "behavior_key": "melee_arc_damage",
+    "trigger_type": "cooldown",
+    "targeting_type": "aimed_cone",
+    "cooldown_seconds": 1.25,
+    "range": 3.5,
+    "radius": null,
+    "arc_angle_degrees": 90.0,
+    "visual_key": "slash_arc",
+    "is_active": true
+  }
+]

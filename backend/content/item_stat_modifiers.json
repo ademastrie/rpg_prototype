@@ -1,0 +1,68 @@
+[
+  {
+    "item_key": "apprentice_staff",
+    "stat_key": "spell_power",
+    "value": 2.0,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "cloth_hood",
+    "stat_key": "max_hp",
+    "value": 3.0,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "cloth_pants",
+    "stat_key": "max_hp",
+    "value": 5.0,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "cloth_wraps",
+    "stat_key": "max_hp",
+    "value": 4.0,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "padded_chest",
+    "stat_key": "damage_reduction",
+    "value": 1.0,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "padded_chest",
+    "stat_key": "max_hp",
+    "value": 8.0,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "simple_bow",
+    "stat_key": "attack_power",
+    "value": 1.0,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "simple_bow",
+    "stat_key": "move_speed",
+    "value": 0.02,
+    "modifier_type": "percent"
+  },
+  {
+    "item_key": "training_gloves",
+    "stat_key": "damage_reduction",
+    "value": 0.5,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "training_sword",
+    "stat_key": "attack_power",
+    "value": 2.0,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "worn_boots",
+    "stat_key": "max_hp",
+    "value": 3.0,
+    "modifier_type": "flat"
+  }
+]

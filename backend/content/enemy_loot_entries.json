@@ -1,0 +1,56 @@
+[
+  {
+    "enemy_key": "grunt",
+    "payload_type": "currency",
+    "item_key": null,
+    "min_quantity": 1,
+    "max_quantity": 4,
+    "drop_chance": 0.8,
+    "is_active": true
+  },
+  {
+    "enemy_key": "grunt",
+    "payload_type": "item",
+    "item_key": "slime_gel",
+    "min_quantity": 1,
+    "max_quantity": 2,
+    "drop_chance": 0.35,
+    "is_active": true
+  },
+  {
+    "enemy_key": "brute",
+    "payload_type": "currency",
+    "item_key": null,
+    "min_quantity": 4,
+    "max_quantity": 10,
+    "drop_chance": 0.9,
+    "is_active": true
+  },
+  {
+    "enemy_key": "brute",
+    "payload_type": "item",
+    "item_key": "padded_chest",
+    "min_quantity": 1,
+    "max_quantity": 1,
+    "drop_chance": 0.08,
+    "is_active": true
+  },
+  {
+    "enemy_key": "caster",
+    "payload_type": "currency",
+    "item_key": null,
+    "min_quantity": 2,
+    "max_quantity": 7,
+    "drop_chance": 0.85,
+    "is_active": true
+  },
+  {
+    "enemy_key": "caster",
+    "payload_type": "item",
+    "item_key": "training_sword",
+    "min_quantity": 1,
+    "max_quantity": 1,
+    "drop_chance": 0.05,
+    "is_active": true
+  }
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "ability_key": "damage_aura",
+    "effect_type": "damage",
+    "target_team": "enemy",
+    "stat_key": "hp",
+    "value": 5.0,
+    "tick_interval_seconds": 1.0,
+    "duration_seconds": null
+  },
+  {
+    "ability_key": "firebolt",
+    "effect_type": "damage",
+    "target_team": "enemy",
+    "stat_key": "hp",
+    "value": 12.0,
+    "tick_interval_seconds": null,
+    "duration_seconds": null
+  },
+  {
+    "ability_key": "hp_regen",
+    "effect_type": "healing",
+    "target_team": "self",
+    "stat_key": "hp",
+    "value": 8.0,
+    "tick_interval_seconds": 2.0,
+    "duration_seconds": null
+  },
+  {
+    "ability_key": "slash",
+    "effect_type": "damage",
+    "target_team": "enemy",
+    "stat_key": "hp",
+    "value": 10.0,
+    "tick_interval_seconds": null,
+    "duration_seconds": null
+  }
+]

@@ -1,5 +1,16 @@
 # Backend Testing
 
+## Prototype content sync
+
+Run migrations and sync source-controlled prototype content from `backend/`:
+
+```powershell
+alembic upgrade head
+python .\scripts\sync_content.py
+```
+
+The sync prints inserted and updated row counts for each content table. It is designed to be run repeatedly without dropping tables or deleting player-owned data.
+
 ## Region patrol paths
 
 Run migrations from `backend/` after activating your local environment:

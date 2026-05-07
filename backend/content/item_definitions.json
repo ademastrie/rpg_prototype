@@ -1,0 +1,134 @@
+[
+  {
+    "item_key": "apprentice_staff",
+    "display_name": "Apprentice Staff",
+    "description": "A simple focus used by new spellcasters.",
+    "item_type": "equipment",
+    "equip_slot": "weapon",
+    "stackable": false,
+    "max_stack": 1,
+    "icon_key": "apprentice_staff",
+    "is_active": true
+  },
+  {
+    "item_key": "cloth_hood",
+    "display_name": "Cloth Hood",
+    "description": "A soft hood with light padding.",
+    "item_type": "equipment",
+    "equip_slot": "head",
+    "stackable": false,
+    "max_stack": 1,
+    "icon_key": "cloth_hood",
+    "is_active": true
+  },
+  {
+    "item_key": "cloth_pants",
+    "display_name": "Cloth Pants",
+    "description": "Plain pants reinforced at the knees.",
+    "item_type": "equipment",
+    "equip_slot": "legs",
+    "stackable": false,
+    "max_stack": 1,
+    "icon_key": "cloth_pants",
+    "is_active": true
+  },
+  {
+    "item_key": "cloth_wraps",
+    "display_name": "Cloth Wraps",
+    "description": "Layered wraps that soften glancing blows.",
+    "item_type": "equipment",
+    "equip_slot": "arms",
+    "stackable": false,
+    "max_stack": 1,
+    "icon_key": "cloth_wraps",
+    "is_active": true
+  },
+  {
+    "item_key": "cracked_bone",
+    "display_name": "Cracked Bone",
+    "description": "A brittle bone fragment from a roaming skeleton.",
+    "item_type": "material",
+    "equip_slot": null,
+    "stackable": true,
+    "max_stack": 99,
+    "icon_key": "cracked_bone",
+    "is_active": true
+  },
+  {
+    "item_key": "padded_chest",
+    "display_name": "Padded Chest",
+    "description": "A stitched chest piece for basic protection.",
+    "item_type": "equipment",
+    "equip_slot": "chest",
+    "stackable": false,
+    "max_stack": 1,
+    "icon_key": "padded_chest",
+    "is_active": true
+  },
+  {
+    "item_key": "simple_bow",
+    "display_name": "Simple Bow",
+    "description": "A plain shortbow suitable for field practice.",
+    "item_type": "equipment",
+    "equip_slot": "weapon",
+    "stackable": false,
+    "max_stack": 1,
+    "icon_key": "simple_bow",
+    "is_active": true
+  },
+  {
+    "item_key": "slime_gel",
+    "display_name": "Slime Gel",
+    "description": "A sticky glob from a defeated slime.",
+    "item_type": "material",
+    "equip_slot": null,
+    "stackable": true,
+    "max_stack": 99,
+    "icon_key": "slime_gel",
+    "is_active": true
+  },
+  {
+    "item_key": "training_gloves",
+    "display_name": "Training Gloves",
+    "description": "Light gloves made for weapon practice.",
+    "item_type": "equipment",
+    "equip_slot": "hands",
+    "stackable": false,
+    "max_stack": 1,
+    "icon_key": "training_gloves",
+    "is_active": true
+  },
+  {
+    "item_key": "training_sword",
+    "display_name": "Training Sword",
+    "description": "A blunt practice blade balanced for beginner drills.",
+    "item_type": "equipment",
+    "equip_slot": "weapon",
+    "stackable": false,
+    "max_stack": 1,
+    "icon_key": "training_sword",
+    "is_active": true
+  },
+  {
+    "item_key": "wolf_pelt",
+    "display_name": "Wolf Pelt",
+    "description": "A rough pelt gathered from a wild wolf.",
+    "item_type": "material",
+    "equip_slot": null,
+    "stackable": true,
+    "max_stack": 99,
+    "icon_key": "wolf_pelt",
+    "is_active": true
+  },
+  {
+    "item_key": "worn_boots",
+    "display_name": "Worn Boots",
+    "description": "Scuffed boots that still have a little road left in them.",
+    "item_type": "equipment",
+    "equip_slot": "feet",
+    "stackable": false,
+    "max_stack": 1,
+    "icon_key": "worn_boots",
+    "is_active": true
+  }
+]

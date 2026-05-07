@@ -65,12 +65,15 @@ var _unlocked_abilities_by_peer: Dictionary = {}
 var _ability_enabled_by_peer: Dictionary = {}
 var _last_ability_time_by_peer: Dictionary = {}
 var _server_ability_configs: Dictionary = {}
+var _server_projectiles: Dictionary = {}
+var _spawned_projectile_nodes: Dictionary = {}
 var _loot_orbs: Dictionary = {}
 var _spawned_loot_orb_nodes: Dictionary = {}
 var _local_prediction_input: Vector2 = Vector2.ZERO
 var _simulation_accumulator := 0.0
 var _snapshot_accumulator := 0.0
 var _next_spawn_index := 0
+var _next_projectile_id := 1
 var _next_loot_orb_id := 1
 var _character_names_by_peer: Dictionary = {}
 
@@ -146,15 +149,18 @@ const SERVER_ABILITY_CONFIGS: Dictionary = {
 		"radius": 4.0,
 	},
 	"firebolt": {
-		"behavior_key": "line_projectile_damage",
+		"behavior_key": "projectile_aoe_damage",
 		"visual_key": "firebolt",
 		"cooldown_seconds": 1.3,
 		"damage": 12,
 		"range": 8.0,
-		"width": 0.7,
+		"radius": 2.0,
+		# Godot-side fallback until projectile_speed is added to backend ability runtime fields.
+		"projectile_speed": 12.0,
 	},
 }
 const PLAYER_DAMAGE_REDUCTION_CAP: float = 0.80
+const FIREBALL_COLLISION_RADIUS: float = 0.45
 const SUPPORTED_EQUIPMENT_STAT_KEYS: Array[String] = ["max_hp", "damage_reduction", "attack_power", "spell_power", "move_speed"]
 
 
@@ -191,6 +197,7 @@ func _register_peer(peer_id: int, character_name: String, use_custom_spawn: bool
 	_broadcast_hp_regen_active_state(peer_id)
 	_send_position_snapshots(peer_id)
 	_sync_loot_orbs_to_peer(peer_id)
+	_sync_projectiles_to_peer(peer_id)
 
 
 func _sync_existing_players_to_peer(peer_id: int) -> void:
@@ -238,6 +245,7 @@ func unregister_peer(peer_id: int) -> void:
 	_ability_enabled_by_peer.erase(peer_id)
 	_last_ability_time_by_peer.erase(peer_id)
 	_character_names_by_peer.erase(peer_id)
+	_clear_projectiles_for_peer(peer_id)
 	rpc("despawn_player", peer_id)
 
 
@@ -496,6 +504,7 @@ func _prototype_loot_position_offset(reward_index: int, reward_count: int) -> Ve
 func _process(delta: float) -> void:
 	if not multiplayer.is_server():
 		_smooth_spawned_players(delta)
+		_animate_projectile_visuals(delta)
 		return
 
 	_simulation_accumulator += delta
@@ -506,6 +515,7 @@ func _process(delta: float) -> void:
 		_simulate(tick_delta)
 		_apply_enemy_contact_damage(tick_delta)
 		_process_prototype_loot_pickups()
+		_process_fireball_projectiles(tick_delta)
 		_process_combat_abilities()
 		_simulation_accumulator -= tick_delta
 
@@ -943,6 +953,8 @@ func load_backend_ability_runtime_configs(response_data: Dictionary) -> void:
 			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "range", "range") or used_fallback
 		if fallback_config.has("radius"):
 			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "radius", "radius") or used_fallback
+		if fallback_config.has("projectile_speed"):
+			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "projectile_speed", "projectile_speed") or used_fallback
 		if fallback_config.has("width"):
 			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "radius", "width") or used_fallback
 		if fallback_config.has("arc_angle"):
@@ -1189,6 +1201,11 @@ func _ability_width(ability_name: String) -> float:
 	return float(ability_config.get("width", 0.0))
 
 
+func _ability_projectile_speed(ability_name: String) -> float:
+	var ability_config: Dictionary = _server_ability_config(ability_name)
+	return float(ability_config.get("projectile_speed", 12.0))
+
+
 func _ability_visual_key(ability_name: String) -> String:
 	var ability_config: Dictionary = _server_ability_config(ability_name)
 	return str(ability_config.get("visual_key", ""))
@@ -1233,23 +1250,171 @@ func _perform_damage_aura(peer_id: int) -> void:
 
 
 func _perform_firebolt(peer_id: int) -> void:
-	var firebolt_position: Vector3 = players[peer_id] as Vector3
+	if not multiplayer.is_server() or not players.has(peer_id):
+		return
+
+	var player_position: Vector3 = players[peer_id] as Vector3
 	var aim_direction: Vector2 = _aim_direction_by_peer.get(peer_id, Vector2(0.0, -1.0)) as Vector2
 	if aim_direction.length_squared() <= 0.0001:
 		aim_direction = Vector2(0.0, -1.0)
 
-	var normalized_aim: Vector2 = aim_direction.normalized()
+	var fixed_direction: Vector2 = aim_direction.normalized()
 	var ability_config: Dictionary = _server_ability_config("Firebolt")
-	var firebolt_range: float = float(ability_config.get("range", 0.0))
-	var firebolt_width: float = float(ability_config.get("width", 0.0))
+	var projectile_range: float = float(ability_config.get("range", 0.0))
+	var explosion_radius: float = float(ability_config.get("radius", 0.0))
+	var projectile_speed: float = _ability_projectile_speed("Firebolt")
 	var damage: int = int(ability_config.get("damage", 0))
-	if firebolt_range <= 0.0 or firebolt_width <= 0.0 or damage <= 0:
+	if projectile_range <= 0.0 or explosion_radius <= 0.0 or projectile_speed <= 0.0 or damage <= 0:
 		return
 
-	rpc("show_firebolt", peer_id, firebolt_position, normalized_aim, firebolt_range, _ability_visual_key("Firebolt"))
+	var projectile_id: int = _next_projectile_id
+	_next_projectile_id += 1
+	var start_position: Vector3 = player_position + Vector3(fixed_direction.x, 0.0, fixed_direction.y) * 0.65
+	var visual_key: String = _ability_visual_key("Firebolt")
+	_server_projectiles[projectile_id] = {
+		"projectile_id": projectile_id,
+		"owner_peer_id": peer_id,
+		"position": start_position,
+		"fixed_direction": fixed_direction,
+		"speed": projectile_speed,
+		"max_range": projectile_range,
+		"radius": explosion_radius,
+		"damage": damage,
+		"visual_key": visual_key,
+		"distance_traveled": 0.0,
+	}
+	rpc("spawn_fireball_projectile", projectile_id, start_position, fixed_direction, projectile_speed, projectile_range, visual_key)
+	print("Fireball spawned: peer_id=%s projectile_id=%s start_position=%s fixed_direction=%s speed=%s range=%s radius=%s" % [peer_id, projectile_id, start_position, fixed_direction, projectile_speed, projectile_range, explosion_radius])
+
+
+func _process_fireball_projectiles(delta: float) -> void:
+	if _server_projectiles.is_empty():
+		return
+
+	var projectile_ids: Array = _server_projectiles.keys()
+	for projectile_id_variant in projectile_ids:
+		var projectile_id: int = int(projectile_id_variant)
+		if not _server_projectiles.has(projectile_id):
+			continue
+
+		var projectile: Dictionary = _server_projectiles[projectile_id] as Dictionary
+		var fixed_direction: Vector2 = projectile.get("fixed_direction", Vector2.ZERO) as Vector2
+		var speed: float = float(projectile.get("speed", 0.0))
+		var max_range: float = float(projectile.get("max_range", 0.0))
+		if fixed_direction.length_squared() <= 0.0001 or speed <= 0.0 or max_range <= 0.0:
+			_expire_fireball_projectile(projectile_id, projectile.get("position", Vector3.ZERO) as Vector3)
+			continue
+
+		var previous_position: Vector3 = projectile.get("position", Vector3.ZERO) as Vector3
+		var step_distance: float = speed * delta
+		var distance_traveled: float = float(projectile.get("distance_traveled", 0.0))
+		var remaining_distance: float = max(max_range - distance_traveled, 0.0)
+		if remaining_distance <= 0.0:
+			_expire_fireball_projectile(projectile_id, previous_position)
+			continue
+
+		step_distance = min(step_distance, remaining_distance)
+		var direction_3d: Vector3 = Vector3(fixed_direction.x, 0.0, fixed_direction.y).normalized()
+		var next_position: Vector3 = previous_position + direction_3d * step_distance
+		var collision: Dictionary = _first_fireball_collision(previous_position, next_position)
+		if not collision.is_empty():
+			_impact_fireball_projectile(projectile_id, projectile, collision.get("position", next_position) as Vector3)
+			continue
+
+		distance_traveled += step_distance
+		if distance_traveled >= max_range:
+			_expire_fireball_projectile(projectile_id, next_position)
+			continue
+
+		projectile["position"] = next_position
+		projectile["distance_traveled"] = distance_traveled
+		_server_projectiles[projectile_id] = projectile
+
+
+func _first_fireball_collision(previous_position: Vector3, next_position: Vector3) -> Dictionary:
 	var enemy_spawner: Node = get_node_or_null("../EnemySpawner")
-	if enemy_spawner != null:
-		enemy_spawner.call("resolve_firebolt", peer_id, firebolt_position, normalized_aim, firebolt_range, firebolt_width, damage)
+	if enemy_spawner == null:
+		return {}
+
+	var enemy_positions: Dictionary = enemy_spawner.call("get_active_enemy_positions") as Dictionary
+	if enemy_positions.is_empty():
+		return {}
+
+	var start_xz: Vector2 = Vector2(previous_position.x, previous_position.z)
+	var end_xz: Vector2 = Vector2(next_position.x, next_position.z)
+	var segment: Vector2 = end_xz - start_xz
+	var segment_length_squared: float = segment.length_squared()
+	var best_t: float = 1.0
+	var best_position: Vector3 = Vector3.ZERO
+	var has_collision: bool = false
+	for enemy_id in enemy_positions:
+		var enemy_position: Vector3 = enemy_positions[enemy_id] as Vector3
+		var enemy_xz: Vector2 = Vector2(enemy_position.x, enemy_position.z)
+		var t: float = 0.0
+		if segment_length_squared > 0.0001:
+			t = clamp((enemy_xz - start_xz).dot(segment) / segment_length_squared, 0.0, 1.0)
+
+		var closest_xz: Vector2 = start_xz + segment * t
+		if closest_xz.distance_to(enemy_xz) > FIREBALL_COLLISION_RADIUS:
+			continue
+		if has_collision and t >= best_t:
+			continue
+
+		best_t = t
+		best_position = enemy_position
+		has_collision = true
+
+	if not has_collision:
+		return {}
+
+	return {"position": best_position}
+
+
+func _impact_fireball_projectile(projectile_id: int, projectile: Dictionary, impact_position: Vector3) -> void:
+	if not _server_projectiles.has(projectile_id):
+		return
+
+	_server_projectiles.erase(projectile_id)
+	var owner_peer_id: int = int(projectile.get("owner_peer_id", 0))
+	var radius: float = float(projectile.get("radius", 0.0))
+	var damage: int = int(projectile.get("damage", 0))
+	var visual_key: String = str(projectile.get("visual_key", _ability_visual_key("Firebolt")))
+	var enemies_hit: int = 0
+	var enemy_spawner: Node = get_node_or_null("../EnemySpawner")
+	if enemy_spawner != null and radius > 0.0 and damage > 0:
+		enemies_hit = int(enemy_spawner.call("resolve_fireball_aoe", owner_peer_id, impact_position, radius, damage))
+
+	rpc("despawn_fireball_projectile", projectile_id, impact_position, radius, visual_key)
+	print("Fireball impacted: peer_id=%s projectile_id=%s impact_position=%s enemies_hit=%s" % [owner_peer_id, projectile_id, impact_position, enemies_hit])
+
+
+func _expire_fireball_projectile(projectile_id: int, expire_position: Vector3) -> void:
+	if not _server_projectiles.has(projectile_id):
+		return
+
+	var projectile: Dictionary = _server_projectiles[projectile_id] as Dictionary
+	_server_projectiles.erase(projectile_id)
+	var owner_peer_id: int = int(projectile.get("owner_peer_id", 0))
+	var visual_key: String = str(projectile.get("visual_key", _ability_visual_key("Firebolt")))
+	rpc("despawn_fireball_projectile", projectile_id, expire_position, 0.0, visual_key)
+	print("Fireball expired: peer_id=%s projectile_id=%s expire_position=%s enemies_hit=0" % [owner_peer_id, projectile_id, expire_position])
+
+
+func _clear_projectiles_for_peer(peer_id: int) -> void:
+	if _server_projectiles.is_empty():
+		return
+
+	var projectile_ids: Array = _server_projectiles.keys()
+	for projectile_id_variant in projectile_ids:
+		var projectile_id: int = int(projectile_id_variant)
+		if not _server_projectiles.has(projectile_id):
+			continue
+
+		var projectile: Dictionary = _server_projectiles[projectile_id] as Dictionary
+		if int(projectile.get("owner_peer_id", 0)) != peer_id:
+			continue
+
+		_expire_fireball_projectile(projectile_id, projectile.get("position", Vector3.ZERO) as Vector3)
 
 
 func _loadout_entries(peer_id: int) -> Array:
@@ -1304,6 +1469,28 @@ func _sync_loot_orbs_to_peer(peer_id: int) -> void:
 		rpc_id(peer_id, "spawn_loot_orb", int(loot_orb_id), loot_position)
 
 
+func _sync_projectiles_to_peer(peer_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+
+	for projectile_id in _server_projectiles:
+		var projectile: Dictionary = _server_projectiles[projectile_id] as Dictionary
+		var projectile_position: Vector3 = projectile.get("position", Vector3.ZERO) as Vector3
+		var fixed_direction: Vector2 = projectile.get("fixed_direction", Vector2.ZERO) as Vector2
+		var remaining_range: float = max(float(projectile.get("max_range", 0.0)) - float(projectile.get("distance_traveled", 0.0)), 0.0)
+		var visual_key: String = str(projectile.get("visual_key", _ability_visual_key("Firebolt")))
+		rpc_id(
+			peer_id,
+			"spawn_fireball_projectile",
+			int(projectile_id),
+			projectile_position,
+			fixed_direction,
+			float(projectile.get("speed", 0.0)),
+			remaining_range,
+			visual_key
+		)
+
+
 func _smooth_spawned_players(delta: float) -> void:
 	var weight: float = clamp(interpolation_speed * delta, 0.0, 1.0)
 	for peer_id in _spawned_nodes:
@@ -1320,6 +1507,23 @@ func _smooth_spawned_players(delta: float) -> void:
 		if _target_facing_directions.has(peer_id):
 			var facing_direction: Vector2 = _target_facing_directions[peer_id] as Vector2
 			_apply_player_facing(player, facing_direction)
+
+
+func _animate_projectile_visuals(delta: float) -> void:
+	for projectile_id in _spawned_projectile_nodes.keys():
+		var projectile_data: Dictionary = _spawned_projectile_nodes[projectile_id] as Dictionary
+		var projectile_node: Node3D = projectile_data.get("node", null) as Node3D
+		if projectile_node == null:
+			_spawned_projectile_nodes.erase(projectile_id)
+			continue
+
+		var fixed_direction: Vector2 = projectile_data.get("fixed_direction", Vector2.ZERO) as Vector2
+		var speed: float = float(projectile_data.get("speed", 0.0))
+		if fixed_direction.length_squared() <= 0.0001 or speed <= 0.0:
+			continue
+
+		var direction_3d: Vector3 = Vector3(fixed_direction.x, 0.0, fixed_direction.y).normalized()
+		projectile_node.position += direction_3d * speed * delta
 
 
 func _predict_and_reconcile_local_player(player: Node3D, peer_id: int, delta: float) -> void:
@@ -1830,32 +2034,76 @@ func show_damage_aura(peer_id: int, aura_position: Vector3, radius: float, visua
 
 
 @rpc("authority", "call_remote", "reliable")
-func show_firebolt(peer_id: int, firebolt_position: Vector3, aim_direction: Vector2, firebolt_range: float, visual_key: String = "firebolt") -> void:
-	if aim_direction.length_squared() <= 0.0001 or firebolt_range <= 0.0:
+func spawn_fireball_projectile(projectile_id: int, start_position: Vector3, fixed_direction: Vector2, speed: float, max_range: float, visual_key: String = "firebolt") -> void:
+	if fixed_direction.length_squared() <= 0.0001 or speed <= 0.0 or max_range <= 0.0:
+		return
+	if _spawned_projectile_nodes.has(projectile_id):
+		var existing_data: Dictionary = _spawned_projectile_nodes[projectile_id] as Dictionary
+		var existing_node: Node3D = existing_data.get("node", null) as Node3D
+		if existing_node != null:
+			existing_node.position = start_position + Vector3(0.0, 0.45, 0.0)
 		return
 
-	var normalized_aim: Vector2 = aim_direction.normalized()
+	var normalized_direction: Vector2 = fixed_direction.normalized()
 	var marker: MeshInstance3D = MeshInstance3D.new()
-	var marker_mesh: BoxMesh = BoxMesh.new()
-	marker_mesh.size = Vector3(0.18, 0.18, firebolt_range)
+	var marker_mesh: SphereMesh = SphereMesh.new()
+	marker_mesh.radius = 0.18
+	marker_mesh.height = 0.36
 	marker.mesh = marker_mesh
 
 	var material: StandardMaterial3D = StandardMaterial3D.new()
-	material.albedo_color = Color(1.0, 0.25, 0.05, 0.85)
+	material.albedo_color = Color(1.0, 0.28, 0.04, 0.95)
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.emission_enabled = true
 	material.emission = Color(1.0, 0.22, 0.02, 1.0)
-	material.emission_energy_multiplier = 0.8
+	material.emission_energy_multiplier = 1.2
 	marker.material_override = material
-	marker.name = "%s_%s" % [visual_key, peer_id]
-	var forward: Vector3 = Vector3(normalized_aim.x, 0.0, normalized_aim.y)
-	marker.position = firebolt_position + forward * (firebolt_range * 0.5) + Vector3(0.0, 0.45, 0.0)
-	marker.rotation.y = atan2(-normalized_aim.x, -normalized_aim.y)
+	marker.name = "%s_projectile_%s" % [visual_key, projectile_id]
+	marker.position = start_position + Vector3(0.0, 0.45, 0.0)
+	marker.rotation.y = atan2(-normalized_direction.x, -normalized_direction.y)
+	add_child(marker)
+	_spawned_projectile_nodes[projectile_id] = {
+		"node": marker,
+		"fixed_direction": normalized_direction,
+		"speed": speed,
+		"max_range": max_range,
+	}
+
+
+@rpc("authority", "call_remote", "reliable")
+func despawn_fireball_projectile(projectile_id: int, impact_position: Vector3, radius: float, visual_key: String = "firebolt") -> void:
+	if _spawned_projectile_nodes.has(projectile_id):
+		var projectile_data: Dictionary = _spawned_projectile_nodes[projectile_id] as Dictionary
+		var projectile_node: Node3D = projectile_data.get("node", null) as Node3D
+		if projectile_node != null:
+			projectile_node.queue_free()
+		_spawned_projectile_nodes.erase(projectile_id)
+
+	if radius <= 0.0:
+		return
+
+	var marker: MeshInstance3D = MeshInstance3D.new()
+	var marker_mesh: CylinderMesh = CylinderMesh.new()
+	marker_mesh.top_radius = radius
+	marker_mesh.bottom_radius = radius
+	marker_mesh.height = 0.08
+	marker.mesh = marker_mesh
+
+	var material: StandardMaterial3D = StandardMaterial3D.new()
+	material.albedo_color = Color(1.0, 0.32, 0.04, 0.35)
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.emission_enabled = true
+	material.emission = Color(1.0, 0.18, 0.02, 1.0)
+	material.emission_energy_multiplier = 0.7
+	marker.material_override = material
+	marker.name = "%s_impact_%s" % [visual_key, projectile_id]
+	marker.position = impact_position + Vector3(0.0, 0.08, 0.0)
 	add_child(marker)
 
 	var cleanup_timer: Timer = Timer.new()
 	cleanup_timer.one_shot = true
-	cleanup_timer.wait_time = 0.18
+	cleanup_timer.wait_time = 0.25
 	marker.add_child(cleanup_timer)
 	cleanup_timer.timeout.connect(marker.queue_free)
 	cleanup_timer.start()

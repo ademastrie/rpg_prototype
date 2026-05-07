@@ -1,0 +1,38 @@
+[
+  {
+    "enemy_key": "grunt",
+    "attack_key": "claw_swipe",
+    "attack_type": "melee_circle",
+    "damage": 6,
+    "range": 34.0,
+    "radius": 24.0,
+    "windup_seconds": 0.2,
+    "recovery_seconds": 0.35,
+    "cooldown_seconds": 1.2,
+    "visual_key": "claw_swipe"
+  },
+  {
+    "enemy_key": "brute",
+    "attack_key": "heavy_slam",
+    "attack_type": "melee_circle",
+    "damage": 14,
+    "range": 42.0,
+    "radius": 36.0,
+    "windup_seconds": 0.45,
+    "recovery_seconds": 0.75,
+    "cooldown_seconds": 2.4,
+    "visual_key": "heavy_slam"
+  },
+  {
+    "enemy_key": "caster",
+    "attack_key": "shadow_bolt",
+    "attack_type": "ranged_bolt",
+    "damage": 9,
+    "range": 240.0,
+    "radius": 8.0,
+    "windup_seconds": 0.35,
+    "recovery_seconds": 0.45,
+    "cooldown_seconds": 1.8,
+    "visual_key": "shadow_bolt"
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "patrol_path_key": "starter_field_grunt_patrol_1",
+    "point_order": 1,
+    "position_x": -8.0,
+    "position_y": 0.0,
+    "position_z": 8.0,
+    "wait_seconds": 1.0
+  },
+  {
+    "patrol_path_key": "starter_field_grunt_patrol_1",
+    "point_order": 2,
+    "position_x": -2.0,
+    "position_y": 0.0,
+    "position_z": 10.0,
+    "wait_seconds": 0.5
+  },
+  {
+    "patrol_path_key": "starter_field_grunt_patrol_1",
+    "point_order": 3,
+    "position_x": 3.0,
+    "position_y": 0.0,
+    "position_z": 6.0,
+    "wait_seconds": 1.0
+  },
+  {
+    "patrol_path_key": "starter_field_grunt_patrol_1",
+    "point_order": 4,
+    "position_x": -4.0,
+    "position_y": 0.0,
+    "position_z": 4.0,
+    "wait_seconds": 0.5
+  }
+]

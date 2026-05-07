@@ -1,0 +1,8 @@
+[
+  {
+    "region_key": "starter_field",
+    "display_name": "Starter Field",
+    "description": "Prototype outdoor field used for early combat testing.",
+    "is_active": true
+  }
+]
