@@ -481,6 +481,16 @@ func resolve_fireball_aoe(_attacker_peer_id: int, impact_position: Vector3, radi
 	return enemies_hit
 
 
+func resolve_projectile_single_target(_attacker_peer_id: int, enemy_id: int, damage: int) -> bool:
+	if not multiplayer.is_server() or damage <= 0:
+		return false
+	if not enemies.has(enemy_id):
+		return false
+
+	_apply_damage_to_enemy(enemy_id, _attacker_peer_id, damage)
+	return true
+
+
 func _apply_damage_to_enemy(enemy_id: int, attacker_peer_id: int, damage: int) -> void:
 	if not enemies.has(enemy_id) or damage <= 0:
 		return

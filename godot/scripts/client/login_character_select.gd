@@ -252,11 +252,16 @@ func _show_characters(data: Variant) -> void:
 
 func _setup_starter_ability_options() -> void:
 	starter_ability_option.clear()
-	starter_ability_option.add_item("Slash")
-	starter_ability_option.set_item_metadata(0, "slash")
-	starter_ability_option.add_item("Firebolt")
-	starter_ability_option.set_item_metadata(1, "firebolt")
+	_add_starter_ability_option("slash", "Slash")
+	_add_starter_ability_option("firebolt", "Firebolt")
+	_add_starter_ability_option("shoot", "Shoot")
 	starter_ability_option.select(0)
+
+
+func _add_starter_ability_option(ability_key: String, display_name: String) -> void:
+	var option_index: int = starter_ability_option.get_item_count()
+	starter_ability_option.add_item(display_name)
+	starter_ability_option.set_item_metadata(option_index, ability_key)
 
 
 func _selected_starter_ability_key() -> String:

@@ -23,6 +23,7 @@ const BACKEND_ABILITY_NAME_BY_KEY: Dictionary = {
 	"hp_regen": "HP Regen",
 	"damage_aura": "Damage Aura",
 	"firebolt": "Firebolt",
+	"shoot": "Shoot",
 }
 const LEVEL_UNLOCK_REWARDS: Array[Dictionary] = [
 	{"level": 2, "ability_key": "hp_regen"},
@@ -1058,7 +1059,7 @@ func _backend_ability_display_names(response_data: Dictionary) -> Dictionary:
 
 
 func _is_supported_godot_ability(ability_name: String) -> bool:
-	return ability_name == "Slash" or ability_name == "HP Regen" or ability_name == "Damage Aura" or ability_name == "Firebolt"
+	return ability_name == "Slash" or ability_name == "HP Regen" or ability_name == "Damage Aura" or ability_name == "Firebolt" or ability_name == "Shoot"
 
 
 func _on_ability_loadout_update_requested(peer_id: int, loadout_entries: Array) -> void:

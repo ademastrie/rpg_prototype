@@ -120,6 +120,7 @@ const ABILITY_KEY_BY_DISPLAY_NAME: Dictionary = {
 	"HP Regen": "hp_regen",
 	"Damage Aura": "damage_aura",
 	"Firebolt": "firebolt",
+	"Shoot": "shoot",
 }
 
 # Safe fallback prototype ability config. Backend runtime values can override
@@ -158,10 +159,23 @@ const SERVER_ABILITY_CONFIGS: Dictionary = {
 		# Godot-side fallback until projectile_speed is added to backend ability runtime fields.
 		"projectile_speed": 12.0,
 	},
+	"shoot": {
+		"behavior_key": "projectile_single_target",
+		"visual_key": "arrow",
+		"cooldown_seconds": 1.0,
+		"damage": 9,
+		"range": 12.0,
+		"radius": 0.35,
+		# Godot-side fallback until projectile_speed is added to backend ability runtime fields.
+		"projectile_speed": 22.0,
+		"stat_modifiers": [],
+	},
 }
 const PLAYER_DAMAGE_REDUCTION_CAP: float = 0.80
 const FIREBALL_COLLISION_RADIUS: float = 0.45
-const SUPPORTED_EQUIPMENT_STAT_KEYS: Array[String] = ["max_hp", "damage_reduction", "attack_power", "spell_power", "move_speed"]
+const MIN_PLAYER_MOVE_SPEED: float = 1.0
+const MAX_PLAYER_MOVE_SPEED: float = 10.0
+const SUPPORTED_PLAYER_STAT_KEYS: Array[String] = ["max_hp", "damage_reduction", "attack_power", "spell_power", "move_speed"]
 
 
 func _ready() -> void:
@@ -535,8 +549,9 @@ func _simulate(delta: float) -> void:
 			input_direction = input_direction.normalized()
 
 		var position: Vector3 = players[peer_id] as Vector3
-		position.x += input_direction.x * movement_speed * delta
-		position.z += input_direction.y * movement_speed * delta
+		var confirmed_move_speed: float = _computed_player_move_speed(int(peer_id))
+		position.x += input_direction.x * confirmed_move_speed * delta
+		position.z += input_direction.y * confirmed_move_speed * delta
 		players[peer_id] = position
 
 
@@ -623,12 +638,46 @@ func _recalculate_player_combat_stats(peer_id: int, restore_current_hp_to_max: b
 		combat_stats["damage_reduction"] = float(combat_stats["damage_reduction"]) + 0.20
 		combat_stats["max_hp"] = int(combat_stats["max_hp"]) + 25
 
+	_apply_ability_stat_modifiers(peer_id, combat_stats)
+	var ability_move_speed_bonus: float = float(combat_stats.get("move_speed", movement_speed)) - movement_speed
 	_apply_equipped_item_stat_modifiers(peer_id, combat_stats)
+	var equipment_move_speed_bonus: float = float(combat_stats.get("move_speed", movement_speed)) - movement_speed - ability_move_speed_bonus
 	combat_stats["damage_reduction"] = clamp(float(combat_stats.get("damage_reduction", 0.0)), 0.0, PLAYER_DAMAGE_REDUCTION_CAP)
 	combat_stats["max_hp"] = max(int(round(float(combat_stats.get("max_hp", player_max_hp)))), 1)
+	var previous_combat_stats: Dictionary = _player_combat_stats_by_peer.get(peer_id, {}) as Dictionary
+	var previous_move_speed: float = float(previous_combat_stats.get("move_speed", movement_speed))
+	combat_stats["move_speed"] = clamp(float(combat_stats.get("move_speed", movement_speed)), MIN_PLAYER_MOVE_SPEED, MAX_PLAYER_MOVE_SPEED)
 	_player_combat_stats_by_peer[peer_id] = combat_stats
 	_apply_computed_player_max_hp(peer_id, int(combat_stats.get("max_hp", player_max_hp)), restore_current_hp_to_max)
 	rpc_id(peer_id, "apply_player_combat_stats_update", peer_id, combat_stats)
+	var new_move_speed: float = float(combat_stats.get("move_speed", movement_speed))
+	if not is_equal_approx(previous_move_speed, new_move_speed):
+		print("Player move_speed recomputed: peer_id=%s base_move_speed=%s ability_move_speed_bonus=%s equipment_move_speed_bonus=%s final_move_speed=%s" % [
+			peer_id,
+			movement_speed,
+			ability_move_speed_bonus,
+			equipment_move_speed_bonus,
+			new_move_speed,
+		])
+
+
+func _computed_player_move_speed(peer_id: int) -> float:
+	var combat_stats: Dictionary = _player_combat_stats_by_peer.get(peer_id, _default_player_combat_stats()) as Dictionary
+	return clamp(float(combat_stats.get("move_speed", movement_speed)), MIN_PLAYER_MOVE_SPEED, MAX_PLAYER_MOVE_SPEED)
+
+
+func _apply_ability_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> void:
+	var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
+	var ability_keys: Dictionary = _ability_keys_by_peer.get(peer_id, {}) as Dictionary
+	for ability_name in loadout:
+		var ability_name_text: String = str(ability_name)
+		var ability_key: String = str(ability_keys.get(ability_name_text, _server_ability_key(ability_name_text))).strip_edges()
+		var stat_modifiers: Array = _ability_stat_modifiers(ability_key)
+		for modifier_variant in stat_modifiers:
+			if not (modifier_variant is Dictionary):
+				continue
+
+			_apply_stat_modifier_to_combat_stats(combat_stats, modifier_variant as Dictionary)
 
 
 func _apply_equipped_item_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> void:
@@ -667,7 +716,7 @@ func _equipment_item_stat_modifiers(equipment_item: Dictionary) -> Array:
 
 func _apply_stat_modifier_to_combat_stats(combat_stats: Dictionary, modifier: Dictionary) -> void:
 	var stat_key: String = str(modifier.get("stat_key", modifier.get("key", modifier.get("stat", "")))).strip_edges().to_lower()
-	if not SUPPORTED_EQUIPMENT_STAT_KEYS.has(stat_key):
+	if not SUPPORTED_PLAYER_STAT_KEYS.has(stat_key):
 		return
 
 	var modifier_type: String = str(modifier.get("modifier_type", modifier.get("type", "flat"))).strip_edges().to_lower()
@@ -869,6 +918,10 @@ func _process_combat_abilities() -> void:
 			_set_ability_used(peer_id_int, "Firebolt", now_seconds)
 			_send_ability_state(peer_id_int, "Firebolt")
 			_perform_firebolt(peer_id_int)
+		if loadout.has("Shoot") and _is_ability_enabled(peer_id_int, "Shoot") and _is_ability_ready(peer_id_int, "Shoot", now_seconds):
+			_set_ability_used(peer_id_int, "Shoot", now_seconds)
+			_send_ability_state(peer_id_int, "Shoot")
+			_perform_shoot(peer_id_int)
 
 
 func _default_ability_enabled_state() -> Dictionary:
@@ -955,6 +1008,12 @@ func load_backend_ability_runtime_configs(response_data: Dictionary) -> void:
 			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "radius", "radius") or used_fallback
 		if fallback_config.has("projectile_speed"):
 			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "projectile_speed", "projectile_speed") or used_fallback
+		if fallback_config.has("stat_modifiers"):
+			var loaded_stat_modifiers: Array = _extract_ability_stat_modifiers(backend_ability)
+			if loaded_stat_modifiers.is_empty():
+				used_fallback = true
+			else:
+				merged_config["stat_modifiers"] = loaded_stat_modifiers
 		if fallback_config.has("width"):
 			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "radius", "width") or used_fallback
 		if fallback_config.has("arc_angle"):
@@ -1206,6 +1265,99 @@ func _ability_projectile_speed(ability_name: String) -> float:
 	return float(ability_config.get("projectile_speed", 12.0))
 
 
+func _ability_stat_modifiers(ability_name: String) -> Array:
+	var ability_config: Dictionary = _server_ability_config(ability_name)
+	return _extract_ability_stat_modifiers(ability_config)
+
+
+func _extract_ability_stat_modifiers(ability_data: Dictionary) -> Array:
+	var modifier_candidates: Array = []
+	for container_variant in _ability_stat_modifier_containers(ability_data):
+		if not (container_variant is Dictionary):
+			continue
+
+		var container: Dictionary = container_variant as Dictionary
+		if _is_stat_modifier_data(container):
+			modifier_candidates.append(container)
+		var raw_modifiers: Variant = container.get("stat_modifiers", container.get("modifiers", container.get("stats", [])))
+		if raw_modifiers is Array:
+			modifier_candidates.append_array(raw_modifiers as Array)
+		elif raw_modifiers is Dictionary:
+			var raw_modifier_dictionary: Dictionary = raw_modifiers as Dictionary
+			for stat_key in raw_modifier_dictionary.keys():
+				modifier_candidates.append({
+					"stat_key": str(stat_key),
+					"modifier_type": "flat",
+					"value": raw_modifier_dictionary[stat_key],
+				})
+
+	var modifiers: Array = []
+	for modifier_variant in modifier_candidates:
+		if not (modifier_variant is Dictionary):
+			continue
+
+		var modifier: Dictionary = _normalize_stat_modifier(modifier_variant as Dictionary)
+		if not modifier.is_empty():
+			modifiers.append(modifier)
+	return modifiers
+
+
+func _is_stat_modifier_data(modifier_data: Dictionary) -> bool:
+	var effect_type: String = str(modifier_data.get("effect_type", "")).strip_edges().to_lower()
+	if effect_type != "" and effect_type != "stat_modifier":
+		return false
+
+	return (
+		modifier_data.has("stat_key")
+		or modifier_data.has("key")
+		or modifier_data.has("stat")
+		or modifier_data.has("stat_name")
+		or modifier_data.has("attribute")
+		or modifier_data.has("effect_key")
+	)
+
+
+func _ability_stat_modifier_containers(ability_data: Dictionary) -> Array:
+	var containers: Array = [ability_data]
+	var effects: Variant = ability_data.get("effects", ability_data.get("ability_effects", []))
+	if effects is Array:
+		for effect_variant in (effects as Array):
+			if effect_variant is Dictionary:
+				containers.append(effect_variant as Dictionary)
+	elif effects is Dictionary:
+		containers.append(effects as Dictionary)
+	return containers
+
+
+func _normalize_stat_modifier(modifier_data: Dictionary) -> Dictionary:
+	var raw_stat_key: Variant = modifier_data.get(
+		"stat_key",
+		modifier_data.get(
+			"key",
+			modifier_data.get(
+				"stat",
+				modifier_data.get(
+					"stat_name",
+					modifier_data.get("attribute", modifier_data.get("effect_key", ""))
+				)
+			)
+		)
+	)
+	var stat_key: String = str(raw_stat_key).strip_edges().to_lower()
+	var modifier_type: String = str(modifier_data.get("modifier_type", modifier_data.get("type", "flat"))).strip_edges().to_lower()
+	var value: float = float(modifier_data.get("value", modifier_data.get("amount", 0.0)))
+	if stat_key == "" or is_zero_approx(value):
+		return {}
+	if modifier_type == "":
+		modifier_type = "flat"
+
+	return {
+		"stat_key": stat_key,
+		"modifier_type": modifier_type,
+		"value": value,
+	}
+
+
 func _ability_visual_key(ability_name: String) -> String:
 	var ability_config: Dictionary = _server_ability_config(ability_name)
 	return str(ability_config.get("visual_key", ""))
@@ -1274,6 +1426,8 @@ func _perform_firebolt(peer_id: int) -> void:
 	_server_projectiles[projectile_id] = {
 		"projectile_id": projectile_id,
 		"owner_peer_id": peer_id,
+		"ability_name": "Firebolt",
+		"behavior_key": "projectile_aoe_damage",
 		"position": start_position,
 		"fixed_direction": fixed_direction,
 		"speed": projectile_speed,
@@ -1285,6 +1439,47 @@ func _perform_firebolt(peer_id: int) -> void:
 	}
 	rpc("spawn_fireball_projectile", projectile_id, start_position, fixed_direction, projectile_speed, projectile_range, visual_key)
 	print("Fireball spawned: peer_id=%s projectile_id=%s start_position=%s fixed_direction=%s speed=%s range=%s radius=%s" % [peer_id, projectile_id, start_position, fixed_direction, projectile_speed, projectile_range, explosion_radius])
+
+
+func _perform_shoot(peer_id: int) -> void:
+	if not multiplayer.is_server() or not players.has(peer_id):
+		return
+
+	var player_position: Vector3 = players[peer_id] as Vector3
+	var aim_direction: Vector2 = _aim_direction_by_peer.get(peer_id, Vector2(0.0, -1.0)) as Vector2
+	if aim_direction.length_squared() <= 0.0001:
+		aim_direction = Vector2(0.0, -1.0)
+
+	var fixed_direction: Vector2 = aim_direction.normalized()
+	var ability_config: Dictionary = _server_ability_config("Shoot")
+	var behavior_key: String = str(ability_config.get("behavior_key", "projectile_single_target")).strip_edges()
+	var projectile_range: float = float(ability_config.get("range", 0.0))
+	var hit_radius: float = float(ability_config.get("radius", 0.0))
+	var projectile_speed: float = _ability_projectile_speed("Shoot")
+	var damage: int = int(ability_config.get("damage", 0))
+	if behavior_key != "projectile_single_target" or projectile_range <= 0.0 or hit_radius <= 0.0 or projectile_speed <= 0.0 or damage <= 0:
+		return
+
+	var projectile_id: int = _next_projectile_id
+	_next_projectile_id += 1
+	var start_position: Vector3 = player_position + Vector3(fixed_direction.x, 0.0, fixed_direction.y) * 0.65
+	var visual_key: String = _ability_visual_key("Shoot")
+	_server_projectiles[projectile_id] = {
+		"projectile_id": projectile_id,
+		"owner_peer_id": peer_id,
+		"ability_name": "Shoot",
+		"behavior_key": behavior_key,
+		"position": start_position,
+		"fixed_direction": fixed_direction,
+		"speed": projectile_speed,
+		"max_range": projectile_range,
+		"radius": hit_radius,
+		"damage": damage,
+		"visual_key": visual_key,
+		"distance_traveled": 0.0,
+	}
+	rpc("spawn_fireball_projectile", projectile_id, start_position, fixed_direction, projectile_speed, projectile_range, visual_key)
+	print("Shoot fired: peer_id=%s projectile_id=%s damage=%s range=%s speed=%s fixed_direction=%s" % [peer_id, projectile_id, damage, projectile_range, projectile_speed, fixed_direction])
 
 
 func _process_fireball_projectiles(delta: float) -> void:
@@ -1302,7 +1497,7 @@ func _process_fireball_projectiles(delta: float) -> void:
 		var speed: float = float(projectile.get("speed", 0.0))
 		var max_range: float = float(projectile.get("max_range", 0.0))
 		if fixed_direction.length_squared() <= 0.0001 or speed <= 0.0 or max_range <= 0.0:
-			_expire_fireball_projectile(projectile_id, projectile.get("position", Vector3.ZERO) as Vector3)
+			_expire_projectile(projectile_id, projectile.get("position", Vector3.ZERO) as Vector3)
 			continue
 
 		var previous_position: Vector3 = projectile.get("position", Vector3.ZERO) as Vector3
@@ -1310,20 +1505,25 @@ func _process_fireball_projectiles(delta: float) -> void:
 		var distance_traveled: float = float(projectile.get("distance_traveled", 0.0))
 		var remaining_distance: float = max(max_range - distance_traveled, 0.0)
 		if remaining_distance <= 0.0:
-			_expire_fireball_projectile(projectile_id, previous_position)
+			_expire_projectile(projectile_id, previous_position)
 			continue
 
 		step_distance = min(step_distance, remaining_distance)
 		var direction_3d: Vector3 = Vector3(fixed_direction.x, 0.0, fixed_direction.y).normalized()
 		var next_position: Vector3 = previous_position + direction_3d * step_distance
-		var collision: Dictionary = _first_fireball_collision(previous_position, next_position)
+		var behavior_key: String = str(projectile.get("behavior_key", "projectile_aoe_damage"))
+		var projectile_collision_radius: float = float(projectile.get("radius", FIREBALL_COLLISION_RADIUS)) if behavior_key == "projectile_single_target" else FIREBALL_COLLISION_RADIUS
+		var collision: Dictionary = _first_projectile_collision(previous_position, next_position, projectile_collision_radius)
 		if not collision.is_empty():
-			_impact_fireball_projectile(projectile_id, projectile, collision.get("position", next_position) as Vector3)
+			if behavior_key == "projectile_single_target":
+				_impact_single_target_projectile(projectile_id, projectile, collision.get("position", next_position) as Vector3, int(collision.get("enemy_id", 0)))
+			else:
+				_impact_fireball_projectile(projectile_id, projectile, collision.get("position", next_position) as Vector3)
 			continue
 
 		distance_traveled += step_distance
 		if distance_traveled >= max_range:
-			_expire_fireball_projectile(projectile_id, next_position)
+			_expire_projectile(projectile_id, next_position)
 			continue
 
 		projectile["position"] = next_position
@@ -1331,7 +1531,7 @@ func _process_fireball_projectiles(delta: float) -> void:
 		_server_projectiles[projectile_id] = projectile
 
 
-func _first_fireball_collision(previous_position: Vector3, next_position: Vector3) -> Dictionary:
+func _first_projectile_collision(previous_position: Vector3, next_position: Vector3, collision_radius: float = FIREBALL_COLLISION_RADIUS) -> Dictionary:
 	var enemy_spawner: Node = get_node_or_null("../EnemySpawner")
 	if enemy_spawner == null:
 		return {}
@@ -1344,10 +1544,13 @@ func _first_fireball_collision(previous_position: Vector3, next_position: Vector
 	var end_xz: Vector2 = Vector2(next_position.x, next_position.z)
 	var segment: Vector2 = end_xz - start_xz
 	var segment_length_squared: float = segment.length_squared()
+	var safe_collision_radius: float = max(collision_radius, 0.01)
 	var best_t: float = 1.0
 	var best_position: Vector3 = Vector3.ZERO
+	var best_enemy_id: int = 0
 	var has_collision: bool = false
 	for enemy_id in enemy_positions:
+		var enemy_id_int: int = int(enemy_id)
 		var enemy_position: Vector3 = enemy_positions[enemy_id] as Vector3
 		var enemy_xz: Vector2 = Vector2(enemy_position.x, enemy_position.z)
 		var t: float = 0.0
@@ -1355,19 +1558,20 @@ func _first_fireball_collision(previous_position: Vector3, next_position: Vector
 			t = clamp((enemy_xz - start_xz).dot(segment) / segment_length_squared, 0.0, 1.0)
 
 		var closest_xz: Vector2 = start_xz + segment * t
-		if closest_xz.distance_to(enemy_xz) > FIREBALL_COLLISION_RADIUS:
+		if closest_xz.distance_to(enemy_xz) > safe_collision_radius:
 			continue
 		if has_collision and t >= best_t:
 			continue
 
 		best_t = t
 		best_position = enemy_position
+		best_enemy_id = enemy_id_int
 		has_collision = true
 
 	if not has_collision:
 		return {}
 
-	return {"position": best_position}
+	return {"position": best_position, "enemy_id": best_enemy_id}
 
 
 func _impact_fireball_projectile(projectile_id: int, projectile: Dictionary, impact_position: Vector3) -> void:
@@ -1388,7 +1592,29 @@ func _impact_fireball_projectile(projectile_id: int, projectile: Dictionary, imp
 	print("Fireball impacted: peer_id=%s projectile_id=%s impact_position=%s enemies_hit=%s" % [owner_peer_id, projectile_id, impact_position, enemies_hit])
 
 
+func _impact_single_target_projectile(projectile_id: int, projectile: Dictionary, impact_position: Vector3, enemy_id: int) -> void:
+	if not _server_projectiles.has(projectile_id):
+		return
+
+	_server_projectiles.erase(projectile_id)
+	var owner_peer_id: int = int(projectile.get("owner_peer_id", 0))
+	var damage: int = int(projectile.get("damage", 0))
+	var visual_key: String = str(projectile.get("visual_key", _ability_visual_key("Shoot")))
+	var hit_enemy_id: int = 0
+	var enemy_spawner: Node = get_node_or_null("../EnemySpawner")
+	if enemy_spawner != null and enemy_id > 0 and damage > 0:
+		if bool(enemy_spawner.call("resolve_projectile_single_target", owner_peer_id, enemy_id, damage)):
+			hit_enemy_id = enemy_id
+
+	rpc("despawn_fireball_projectile", projectile_id, impact_position, 0.0, visual_key)
+	print("Shoot impacted: peer_id=%s projectile_id=%s hit_enemy_id=%s impact_position=%s" % [owner_peer_id, projectile_id, hit_enemy_id, impact_position])
+
+
 func _expire_fireball_projectile(projectile_id: int, expire_position: Vector3) -> void:
+	_expire_projectile(projectile_id, expire_position)
+
+
+func _expire_projectile(projectile_id: int, expire_position: Vector3) -> void:
 	if not _server_projectiles.has(projectile_id):
 		return
 
@@ -1397,7 +1623,10 @@ func _expire_fireball_projectile(projectile_id: int, expire_position: Vector3) -
 	var owner_peer_id: int = int(projectile.get("owner_peer_id", 0))
 	var visual_key: String = str(projectile.get("visual_key", _ability_visual_key("Firebolt")))
 	rpc("despawn_fireball_projectile", projectile_id, expire_position, 0.0, visual_key)
-	print("Fireball expired: peer_id=%s projectile_id=%s expire_position=%s enemies_hit=0" % [owner_peer_id, projectile_id, expire_position])
+	if str(projectile.get("behavior_key", "")) == "projectile_single_target":
+		print("Shoot expired: peer_id=%s projectile_id=%s hit_enemy_id=0 expire_position=%s" % [owner_peer_id, projectile_id, expire_position])
+	else:
+		print("Fireball expired: peer_id=%s projectile_id=%s expire_position=%s enemies_hit=0" % [owner_peer_id, projectile_id, expire_position])
 
 
 func _clear_projectiles_for_peer(peer_id: int) -> void:
@@ -1529,8 +1758,9 @@ func _animate_projectile_visuals(delta: float) -> void:
 func _predict_and_reconcile_local_player(player: Node3D, peer_id: int, delta: float) -> void:
 	if local_prediction_enabled:
 		# Local prediction is visual only. The server still owns authoritative movement.
-		player.position.x += _local_prediction_input.x * movement_speed * delta
-		player.position.z += _local_prediction_input.y * movement_speed * delta
+		var confirmed_move_speed: float = _computed_player_move_speed(peer_id)
+		player.position.x += _local_prediction_input.x * confirmed_move_speed * delta
+		player.position.z += _local_prediction_input.y * confirmed_move_speed * delta
 
 	if not _target_positions.has(peer_id):
 		return
@@ -2046,17 +2276,24 @@ func spawn_fireball_projectile(projectile_id: int, start_position: Vector3, fixe
 
 	var normalized_direction: Vector2 = fixed_direction.normalized()
 	var marker: MeshInstance3D = MeshInstance3D.new()
-	var marker_mesh: SphereMesh = SphereMesh.new()
-	marker_mesh.radius = 0.18
-	marker_mesh.height = 0.36
+	var marker_mesh: Mesh
+	if visual_key == "arrow":
+		var box_mesh: BoxMesh = BoxMesh.new()
+		box_mesh.size = Vector3(0.12, 0.12, 0.8)
+		marker_mesh = box_mesh
+	else:
+		var sphere_mesh: SphereMesh = SphereMesh.new()
+		sphere_mesh.radius = 0.18
+		sphere_mesh.height = 0.36
+		marker_mesh = sphere_mesh
 	marker.mesh = marker_mesh
 
 	var material: StandardMaterial3D = StandardMaterial3D.new()
-	material.albedo_color = Color(1.0, 0.28, 0.04, 0.95)
+	material.albedo_color = Color(0.78, 0.54, 0.24, 0.95) if visual_key == "arrow" else Color(1.0, 0.28, 0.04, 0.95)
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.emission_enabled = true
-	material.emission = Color(1.0, 0.22, 0.02, 1.0)
-	material.emission_energy_multiplier = 1.2
+	material.emission = Color(0.55, 0.36, 0.16, 1.0) if visual_key == "arrow" else Color(1.0, 0.22, 0.02, 1.0)
+	material.emission_energy_multiplier = 0.6 if visual_key == "arrow" else 1.2
 	marker.material_override = material
 	marker.name = "%s_projectile_%s" % [visual_key, projectile_id]
 	marker.position = start_position + Vector3(0.0, 0.45, 0.0)
