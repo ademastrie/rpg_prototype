@@ -32,7 +32,7 @@ from app.models.user import User
 router = APIRouter(prefix="/characters", tags=["characters"])
 MAX_LOADOUT_ENTRIES = 5
 DEFAULT_STARTER_ABILITY_KEY = "slash"
-STARTER_ABILITY_KEYS = {"slash", "firebolt"}
+STARTER_ABILITY_KEYS = {"slash", "firebolt", "shoot"}
 VALID_EQUIPMENT_SLOTS = {"weapon", "head", "chest", "arms", "hands", "legs", "feet"}
 
 

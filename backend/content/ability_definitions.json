@@ -54,5 +54,19 @@
     "arc_angle_degrees": 90.0,
     "visual_key": "slash_arc",
     "is_active": true
+  },
+  {
+    "ability_key": "shoot",
+    "display_name": "Shoot",
+    "description": "Fires a bow shot that sends an arrow into a single distant target.",
+    "behavior_key": "projectile_single_target",
+    "trigger_type": "cooldown",
+    "targeting_type": "single_target",
+    "cooldown_seconds": 1.0,
+    "range": 14.0,
+    "radius": 0.4,
+    "arc_angle_degrees": null,
+    "visual_key": "arrow",
+    "is_active": true
   }
 ]

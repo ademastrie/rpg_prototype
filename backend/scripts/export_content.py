@@ -1,5 +1,8 @@
 import json
 import sys
+from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +33,12 @@ from app.models import (  # noqa: E402
 
 JsonRow = dict[str, Any]
 ContentTable = tuple[str, type, tuple[str, ...], tuple[str, ...]]
+
+
+@dataclass(frozen=True)
+class ExportResult:
+    path: Path
+    row_count: int
 
 
 CONTENT_TABLES: tuple[ContentTable, ...] = (
@@ -196,7 +205,17 @@ def sort_value(value: Any) -> tuple[int, Any]:
 
 
 def row_to_json(instance: object, fields: tuple[str, ...]) -> JsonRow:
-    return {field: getattr(instance, field) for field in fields}
+    return {field: to_json_value(getattr(instance, field)) for field in fields}
+
+
+def to_json_value(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return float(value)
+
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+
+    return value
 
 
 def export_table(
@@ -205,7 +224,7 @@ def export_table(
     model: type,
     key_fields: tuple[str, ...],
     fields: tuple[str, ...],
-) -> int:
+) -> ExportResult:
     rows = session.scalars(select(model)).all()
     rows = sorted(
         rows,
@@ -216,14 +235,14 @@ def export_table(
     CONTENT_DIR.mkdir(parents=True, exist_ok=True)
     path = CONTENT_DIR / f"{table_name}.json"
     with path.open("w", encoding="utf-8", newline="\n") as file:
-        json.dump(data, file, indent=2)
+        json.dump(data, file, indent=2, sort_keys=False)
         file.write("\n")
 
-    return len(data)
+    return ExportResult(path=path, row_count=len(data))
 
 
-def export_content(session: Session) -> dict[str, int]:
-    results: dict[str, int] = {}
+def export_content(session: Session) -> dict[str, ExportResult]:
+    results: dict[str, ExportResult] = {}
 
     for table_name, model, key_fields, fields in CONTENT_TABLES:
         results[table_name] = export_table(
@@ -237,9 +256,10 @@ def export_content(session: Session) -> dict[str, int]:
     return results
 
 
-def print_results(results: dict[str, int]) -> None:
-    for table_name, row_count in results.items():
-        print(f"{table_name}: exported {row_count}")
+def print_results(results: dict[str, ExportResult]) -> None:
+    for table_name, result in results.items():
+        path = result.path.relative_to(BACKEND_DIR)
+        print(f"{path}: exported {result.row_count} rows from {table_name}")
 
 
 def main() -> int:

@@ -26,7 +26,7 @@
   {
     "item_key": "padded_chest",
     "stat_key": "damage_reduction",
-    "value": 1.0,
+    "value": 0.2,
     "modifier_type": "flat"
   },
   {
@@ -50,7 +50,7 @@
   {
     "item_key": "training_gloves",
     "stat_key": "damage_reduction",
-    "value": 0.5,
+    "value": 0.1,
     "modifier_type": "flat"
   },
   {

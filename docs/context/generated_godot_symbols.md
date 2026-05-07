@@ -354,6 +354,9 @@
 - `_load_region_enemy_spawns_for_startup() -> void:`
 - `_on_region_enemy_spawns_startup_completed(`
 - `_clear_region_enemy_spawn_startup_request() -> void:`
+- `_load_region_patrol_paths_for_startup() -> void:`
+- `_on_region_patrol_paths_startup_completed(`
+- `_clear_region_patrol_path_startup_request() -> void:`
 - `_start_enet_server_after_region_enemy_spawns() -> void:`
 - `_on_peer_connected(peer_id: int) -> void:`
 - `_on_peer_disconnected(peer_id: int) -> void:`
@@ -448,6 +451,8 @@
 - `use_prototype_enemy_definitions() -> void:`
 - `load_backend_region_enemy_spawns(data: Variant) -> bool:`
 - `use_prototype_region_enemy_spawns() -> void:`
+- `load_backend_region_patrol_paths(data: Variant) -> bool:`
+- `clear_backend_region_patrol_paths() -> void:`
 - `sync_peer(peer_id: int) -> void:`
 - `get_active_enemy_positions() -> Dictionary:`
 - `get_enemy_xp_reward(enemy_id: int) -> int:`
@@ -459,7 +464,7 @@
 - `_spawn_enemy(spawn_position: Vector3, enemy_type: String = DEFAULT_ENEMY_TYPE, spawn_definition: Dictionary = {}, spawn_key: String = "") -> void:`
 - `resolve_basic_attack(_attacker_peer_id: int, attack_position: Vector3, facing_direction: Vector2, slash_range: float, slash_arc_angle: float, damage: int) -> int:`
 - `resolve_damage_aura(_attacker_peer_id: int, aura_position: Vector3, radius: float, damage: int) -> void:`
-- `resolve_firebolt(_attacker_peer_id: int, firebolt_position: Vector3, aim_direction: Vector2, firebolt_range: float, firebolt_width: float, damage: int) -> void:`
+- `resolve_fireball_aoe(_attacker_peer_id: int, impact_position: Vector3, radius: float, damage: int) -> int:`
 - `_apply_damage_to_enemy(enemy_id: int, attacker_peer_id: int, damage: int) -> void:`
 - `_despawn_enemy(enemy_id: int) -> void:`
 - `_schedule_enemy_respawn(enemy_id: int) -> void:`
@@ -495,10 +500,11 @@
 - `_enemy_attack_cooldown_state_key(enemy_id: int, attack_key: String) -> String:`
 - `_log_enemy_attack_started(enemy_id: int, attack_key: String, windup_seconds: float, recovery_seconds: float, cooldown_seconds: float, next_allowed_attack_time: float) -> void:`
 - `_should_hold_ranged_position(enemy_id: int, enemy_position: Vector3, target_position: Vector3) -> bool:`
+- `_should_ranged_guard_hold_near_spawn(enemy_id: int, enemy_position: Vector3, target_position: Vector3) -> bool:`
 - `_should_hold_melee_recovery_position(enemy_id: int, enemy_position: Vector3, target_position: Vector3) -> bool:`
 - `_is_peer_alive(peer_id: int) -> bool:`
 - `_target_peer_for_enemy(enemy_id: int) -> int:`
-- `_should_return_with_target(_enemy_id: int, enemy_position: Vector3, spawn_position: Vector3, target_position: Vector3) -> bool:`
+- `_should_return_with_target(enemy_id: int, enemy_position: Vector3, spawn_position: Vector3, target_position: Vector3) -> bool:`
 - `_should_return_without_target(enemy_id: int, enemy_position: Vector3, spawn_position: Vector3) -> bool:`
 - `_begin_return_to_spawn(enemy_id: int, reason: String, enemy_position: Vector3, spawn_position: Vector3, target_position: Vector3, has_target: bool) -> void:`
 - `_return_position(enemy_id: int, enemy_position: Vector3, spawn_position: Vector3, delta: float) -> Vector3:`
@@ -512,17 +518,35 @@
 - `_return_speed(enemy_id: int) -> float:`
 - `_move_toward_position(current_position: Vector3, target_position: Vector3, speed: float, delta: float) -> Vector3:`
 - `_chase_position(enemy_id: int, enemy_position: Vector3, target_position: Vector3, delta: float) -> Vector3:`
+- `_profile_idle_position(enemy_id: int, enemy_position: Vector3, spawn_position: Vector3, delta: float) -> Vector3:`
+- `_assign_patrol_path_to_enemy(enemy_id: int, spawn_definition: Dictionary) -> void:`
+- `_enemy_has_valid_patrol(enemy_id: int) -> bool:`
+- `_patrol_idle_position(enemy_id: int, enemy_position: Vector3, delta: float) -> Vector3:`
+- `_resume_patrol_near_position(enemy_id: int, position: Vector3) -> void:`
+- `_profile_aggro_radius(enemy_id: int) -> float:`
+- `_profile_forced_aggro_seconds(enemy_id: int) -> float:`
+- `_profile_proximity_aggro_seconds(enemy_id: int) -> float:`
+- `_profile_home_return_distance(enemy_id: int) -> float:`
+- `_profile_target_drop_distance(enemy_id: int) -> float:`
+- `_profile_hard_return_distance(enemy_id: int) -> float:`
+- `_enemy_behavior_profile_key(enemy_id: int) -> String:`
 - `_log_suspicious_movement_step(enemy_id: int, chase_speed: float, delta: float, max_step: float, distance_to_target: float) -> void:`
 - `_enemy_definition_float(enemy_id: int, key: String, fallback: float) -> float:`
 - `_enemy_definition_int(enemy_id: int, key: String, fallback: int) -> int:`
 - `_enemy_definition_bool(enemy_id: int, key: String, fallback: bool) -> bool:`
+- `_enemy_can_use_ranged_attack(enemy_id: int) -> bool:`
 - `_enemy_attack_type(enemy_id: int) -> String:`
 - `_enemy_definition_for_enemy(enemy_id: int) -> Dictionary:`
 - `_enemy_definition_for_type(enemy_type: String) -> Dictionary:`
 - `_resolved_enemy_type(enemy_type: String) -> String:`
+- `_resolved_behavior_profile_key(profile_key: String, spawn_key: String, enemy_key: String) -> String:`
 - `_active_enemy_definitions() -> Dictionary:`
 - `_extract_backend_enemy_definition_array(data: Variant) -> Array:`
 - `_extract_backend_region_enemy_spawn_array(data: Variant) -> Array:`
+- `_extract_backend_region_patrol_path_array(data: Variant) -> Array:`
+- `_normalize_backend_region_patrol_path(source: Dictionary) -> Dictionary:`
+- `_normalize_backend_region_patrol_point(source: Dictionary) -> Dictionary:`
+- `_sort_patrol_points_by_order(a: Dictionary, b: Dictionary) -> bool:`
 - `_normalize_backend_region_enemy_spawn(source: Dictionary) -> Dictionary:`
 - `_backend_region_spawn_definition_overrides(source: Dictionary) -> Dictionary:`
 - `_spawn_position_for_index(center_position: Vector3, spawn_radius: float, spawn_index: int, spawn_count: int) -> Vector3:`
@@ -626,6 +650,7 @@
 - `debug_join_sync_logs: bool = false`
 
 ### Functions
+- `_ready() -> void:`
 - `send_join_request(character_id: int, character_name: String, access_token: String) -> void:`
 - `set_local_prediction_input(input_direction: Vector2) -> void:`
 - `register_peer(peer_id: int, character_name: String = "", loadout: Array = [], ability_enabled: Dictionary = {}, ability_display_names: Dictionary = {}, ability_keys: Dictionary = {}, unlocked_abilities: Array = [], ability_slot_indexes: Dictionary = {}) -> void:`
@@ -676,6 +701,16 @@
 - `_ability_keys_for_loadout(loadout: Array, ability_keys: Dictionary) -> Dictionary:`
 - `_ability_slot_indexes_for_loadout(loadout: Array, ability_slot_indexes: Dictionary) -> Dictionary:`
 - `_ability_display_names_for_loadout(loadout: Array, ability_display_names: Dictionary) -> Dictionary:`
+- `load_backend_ability_runtime_configs(response_data: Dictionary) -> void:`
+- `_use_fallback_ability_runtime_configs() -> void:`
+- `_supported_ability_config_keys() -> Array[String]:`
+- `_extract_backend_runtime_abilities(response_data: Dictionary) -> Array:`
+- `_copy_valid_backend_string(source: Dictionary, target: Dictionary, source_key: String, target_key: String) -> bool:`
+- `_copy_valid_backend_int(source: Dictionary, target: Dictionary, source_key: String, target_key: String) -> bool:`
+- `_copy_valid_backend_float(source: Dictionary, target: Dictionary, source_key: String, target_key: String) -> bool:`
+- `_valid_backend_float_value(source: Dictionary, source_key: String) -> Variant:`
+- `_log_ability_runtime_config_status(loaded_keys: Array, fallback_keys: Array = []) -> void:`
+- `_format_key_list(keys: Array) -> String:`
 - `_is_ability_enabled(peer_id: int, ability_name: String) -> bool:`
 - `_is_hp_regen_active(peer_id: int) -> bool:`
 - `_broadcast_hp_regen_active_state(peer_id: int) -> void:`
@@ -693,17 +728,25 @@
 - `_ability_range(ability_name: String) -> float:`
 - `_ability_arc_angle(ability_name: String) -> float:`
 - `_ability_width(ability_name: String) -> float:`
+- `_ability_projectile_speed(ability_name: String) -> float:`
 - `_ability_visual_key(ability_name: String) -> String:`
 - `_server_ability_config(ability_name: String) -> Dictionary:`
 - `_server_ability_key(ability_name: String) -> String:`
 - `_apply_hp_regen(peer_id: int) -> void:`
 - `_perform_damage_aura(peer_id: int) -> void:`
 - `_perform_firebolt(peer_id: int) -> void:`
+- `_process_fireball_projectiles(delta: float) -> void:`
+- `_first_fireball_collision(previous_position: Vector3, next_position: Vector3) -> Dictionary:`
+- `_impact_fireball_projectile(projectile_id: int, projectile: Dictionary, impact_position: Vector3) -> void:`
+- `_expire_fireball_projectile(projectile_id: int, expire_position: Vector3) -> void:`
+- `_clear_projectiles_for_peer(peer_id: int) -> void:`
 - `_loadout_entries(peer_id: int) -> Array:`
 - `_broadcast_position_snapshots() -> void:`
 - `_send_position_snapshots(target_peer_id: int) -> void:`
 - `_sync_loot_orbs_to_peer(peer_id: int) -> void:`
+- `_sync_projectiles_to_peer(peer_id: int) -> void:`
 - `_smooth_spawned_players(delta: float) -> void:`
+- `_animate_projectile_visuals(delta: float) -> void:`
 - `_predict_and_reconcile_local_player(player: Node3D, peer_id: int, delta: float) -> void:`
 - `_spawn_position_for_index(spawn_index: int) -> Vector3:`
 - `spawn_player(peer_id: int, spawn_position: Vector3, character_name: String = "") -> void:`
@@ -738,7 +781,8 @@
 - `show_basic_attack(peer_id: int, attack_position: Vector3, facing_direction: Vector2, slash_range: float, slash_arc_angle: float, visual_key: String = "slash_arc") -> void:`
 - `_build_slash_arc_mesh(slash_range: float, slash_arc_angle: float) -> ArrayMesh:`
 - `show_damage_aura(peer_id: int, aura_position: Vector3, radius: float, visual_key: String = "damage_aura") -> void:`
-- `show_firebolt(peer_id: int, firebolt_position: Vector3, aim_direction: Vector2, firebolt_range: float, visual_key: String = "firebolt") -> void:`
+- `spawn_fireball_projectile(projectile_id: int, start_position: Vector3, fixed_direction: Vector2, speed: float, max_range: float, visual_key: String = "firebolt") -> void:`
+- `despawn_fireball_projectile(projectile_id: int, impact_position: Vector3, radius: float, visual_key: String = "firebolt") -> void:`
 - `spawn_loot_orb(loot_orb_id: int, loot_position: Vector3) -> void:`
 - `despawn_loot_orb(loot_orb_id: int) -> void:`
 - `despawn_player(peer_id: int) -> void:`
@@ -776,7 +820,8 @@
 - `@rpc("any_peer", "call_remote", "reliable") func submit_basic_attack() -> void:`
 - `@rpc("authority", "call_remote", "reliable") func show_basic_attack(peer_id: int, attack_position: Vector3, facing_direction: Vector2, slash_range: float, slash_arc_angle: float, visual_key: String = "slash_arc") -> void:`
 - `@rpc("authority", "call_remote", "reliable") func show_damage_aura(peer_id: int, aura_position: Vector3, radius: float, visual_key: String = "damage_aura") -> void:`
-- `@rpc("authority", "call_remote", "reliable") func show_firebolt(peer_id: int, firebolt_position: Vector3, aim_direction: Vector2, firebolt_range: float, visual_key: String = "firebolt") -> void:`
+- `@rpc("authority", "call_remote", "reliable") func spawn_fireball_projectile(projectile_id: int, start_position: Vector3, fixed_direction: Vector2, speed: float, max_range: float, visual_key: String = "firebolt") -> void:`
+- `@rpc("authority", "call_remote", "reliable") func despawn_fireball_projectile(projectile_id: int, impact_position: Vector3, radius: float, visual_key: String = "firebolt") -> void:`
 - `@rpc("authority", "call_remote", "reliable") func spawn_loot_orb(loot_orb_id: int, loot_position: Vector3) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func despawn_loot_orb(loot_orb_id: int) -> void:`
 - `@rpc("authority", "call_remote", "reliable") func despawn_player(peer_id: int) -> void:`

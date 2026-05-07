@@ -345,6 +345,8 @@
 ### Classes
 - `RegionDefinition`
 - `RegionEnemySpawn`
+- `RegionPatrolPath`
+- `RegionPatrolPoint`
 
 ### Functions
 - None found
@@ -385,19 +387,24 @@
 - `list_regions(db: Session = Depends(get_db)) -> list[RegionDefinition]:`
 - `get_region(`
 - `list_region_enemy_spawns(`
+- `list_region_patrol_paths(`
 
 ### Routers
 - `GET "", response_model=list[RegionDefinitionResponse]`
 - `GET "/{region_key}", response_model=RegionDefinitionDetailResponse`
 - `GET "/{region_key}/enemy-spawns", response_model=RegionEnemySpawnsResponse`
+- `GET "/{region_key}/patrol-paths", response_model=RegionPatrolPathsResponse`
 
 ## `backend/app/regions/schemas.py`
 
 ### Classes
 - `RegionEnemySpawnResponse`
+- `RegionPatrolPointResponse`
+- `RegionPatrolPathResponse`
 - `RegionDefinitionResponse`
 - `RegionDefinitionDetailResponse`
 - `RegionEnemySpawnsResponse`
+- `RegionPatrolPathsResponse`
 
 ### Functions
 - None found

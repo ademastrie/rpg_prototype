@@ -34,5 +34,14 @@
     "value": 10.0,
     "tick_interval_seconds": null,
     "duration_seconds": null
+  },
+  {
+    "ability_key": "shoot",
+    "effect_type": "stat_modifier",
+    "target_team": "self",
+    "stat_key": "move_speed",
+    "value": 0.4,
+    "tick_interval_seconds": null,
+    "duration_seconds": null
   }
 ]
