@@ -64,6 +64,7 @@ var _ability_display_names_by_peer: Dictionary = {}
 var _unlocked_abilities_by_peer: Dictionary = {}
 var _ability_enabled_by_peer: Dictionary = {}
 var _last_ability_time_by_peer: Dictionary = {}
+var _server_ability_configs: Dictionary = {}
 var _loot_orbs: Dictionary = {}
 var _spawned_loot_orb_nodes: Dictionary = {}
 var _local_prediction_input: Vector2 = Vector2.ZERO
@@ -118,9 +119,8 @@ const ABILITY_KEY_BY_DISPLAY_NAME: Dictionary = {
 	"Firebolt": "firebolt",
 }
 
-# Temporary server-owned prototype ability config. These values should later be
-# hydrated from backend ability definitions/effects while Godot keeps combat
-# execution authoritative.
+# Safe fallback prototype ability config. Backend runtime values can override
+# this server-owned cache, while Godot keeps combat execution authoritative.
 const SERVER_ABILITY_CONFIGS: Dictionary = {
 	"slash": {
 		"behavior_key": "melee_arc_damage",
@@ -156,6 +156,10 @@ const SERVER_ABILITY_CONFIGS: Dictionary = {
 }
 const PLAYER_DAMAGE_REDUCTION_CAP: float = 0.80
 const SUPPORTED_EQUIPMENT_STAT_KEYS: Array[String] = ["max_hp", "damage_reduction", "attack_power", "spell_power", "move_speed"]
+
+
+func _ready() -> void:
+	_use_fallback_ability_runtime_configs()
 
 
 func send_join_request(character_id: int, character_name: String, access_token: String) -> void:
@@ -900,6 +904,178 @@ func _ability_display_names_for_loadout(loadout: Array, ability_display_names: D
 	return display_names
 
 
+func load_backend_ability_runtime_configs(response_data: Dictionary) -> void:
+	if not multiplayer.is_server():
+		return
+
+	var backend_abilities: Array = _extract_backend_runtime_abilities(response_data)
+	if backend_abilities.is_empty():
+		print("Backend ability runtime config response had no usable ability entries. Using fallback Godot ability configs.")
+		_use_fallback_ability_runtime_configs()
+		_log_ability_runtime_config_status([], _supported_ability_config_keys())
+		return
+
+	var loaded_configs: Dictionary = SERVER_ABILITY_CONFIGS.duplicate(true)
+	var loaded_keys: Array[String] = []
+	var fallback_keys: Array[String] = []
+	for ability_variant in backend_abilities:
+		if not ability_variant is Dictionary:
+			continue
+
+		var backend_ability: Dictionary = ability_variant as Dictionary
+		var ability_key: String = str(backend_ability.get("ability_key", "")).strip_edges()
+		if ability_key == "" or not SERVER_ABILITY_CONFIGS.has(ability_key):
+			continue
+
+		var fallback_config: Dictionary = SERVER_ABILITY_CONFIGS[ability_key] as Dictionary
+		var merged_config: Dictionary = (loaded_configs[ability_key] as Dictionary).duplicate(true)
+		var used_fallback: bool = false
+
+		used_fallback = not _copy_valid_backend_string(backend_ability, merged_config, "behavior_key", "behavior_key") or used_fallback
+		used_fallback = not _copy_valid_backend_string(backend_ability, merged_config, "visual_key", "visual_key") or used_fallback
+		used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "cooldown_seconds", "cooldown_seconds") or used_fallback
+
+		if fallback_config.has("damage"):
+			used_fallback = not _copy_valid_backend_int(backend_ability, merged_config, "damage", "damage") or used_fallback
+		if fallback_config.has("heal"):
+			used_fallback = not _copy_valid_backend_int(backend_ability, merged_config, "healing", "heal") or used_fallback
+		if fallback_config.has("range"):
+			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "range", "range") or used_fallback
+		if fallback_config.has("radius"):
+			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "radius", "radius") or used_fallback
+		if fallback_config.has("width"):
+			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "radius", "width") or used_fallback
+		if fallback_config.has("arc_angle"):
+			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "arc_angle_degrees", "arc_angle") or used_fallback
+		if fallback_config.has("tick_seconds"):
+			var loaded_tick: bool = _copy_valid_backend_float(backend_ability, merged_config, "tick_seconds", "tick_seconds")
+			used_fallback = not loaded_tick or used_fallback
+			if loaded_tick:
+				merged_config["cooldown_seconds"] = float(merged_config.get("tick_seconds", fallback_config.get("tick_seconds", 1.0)))
+
+		loaded_configs[ability_key] = merged_config
+		if not loaded_keys.has(ability_key):
+			loaded_keys.append(ability_key)
+		if used_fallback and not fallback_keys.has(ability_key):
+			fallback_keys.append(ability_key)
+
+	for fallback_key in SERVER_ABILITY_CONFIGS.keys():
+		var fallback_key_text: String = str(fallback_key)
+		if not loaded_keys.has(fallback_key_text):
+			fallback_keys.append(fallback_key_text)
+
+	_server_ability_configs = loaded_configs
+	_log_ability_runtime_config_status(loaded_keys, fallback_keys)
+
+
+func _use_fallback_ability_runtime_configs() -> void:
+	_server_ability_configs = SERVER_ABILITY_CONFIGS.duplicate(true)
+
+
+func _supported_ability_config_keys() -> Array[String]:
+	var ability_keys: Array[String] = []
+	for ability_key in SERVER_ABILITY_CONFIGS.keys():
+		ability_keys.append(str(ability_key))
+	return ability_keys
+
+
+func _extract_backend_runtime_abilities(response_data: Dictionary) -> Array:
+	var abilities: Array = []
+	var raw_abilities: Variant = response_data.get("unlocked_abilities", [])
+	if not raw_abilities is Array:
+		return abilities
+
+	for ability_variant in (raw_abilities as Array):
+		if not ability_variant is Dictionary:
+			continue
+
+		var ability: Dictionary = ability_variant as Dictionary
+		var definition: Variant = ability.get("definition", {})
+		var runtime_ability: Dictionary = {}
+		if definition is Dictionary:
+			runtime_ability = (definition as Dictionary).duplicate(true)
+		for key in ability.keys():
+			if str(key) == "definition":
+				continue
+			runtime_ability[key] = ability[key]
+		abilities.append(runtime_ability)
+
+	return abilities
+
+
+func _copy_valid_backend_string(source: Dictionary, target: Dictionary, source_key: String, target_key: String) -> bool:
+	if not source.has(source_key) or source[source_key] == null:
+		return false
+
+	var value: String = str(source[source_key]).strip_edges()
+	if value == "":
+		return false
+
+	target[target_key] = value
+	return true
+
+
+func _copy_valid_backend_int(source: Dictionary, target: Dictionary, source_key: String, target_key: String) -> bool:
+	var parsed_value: Variant = _valid_backend_float_value(source, source_key)
+	if parsed_value == null:
+		return false
+
+	var value: int = int(parsed_value)
+	if value <= 0:
+		return false
+
+	target[target_key] = value
+	return true
+
+
+func _copy_valid_backend_float(source: Dictionary, target: Dictionary, source_key: String, target_key: String) -> bool:
+	var parsed_value: Variant = _valid_backend_float_value(source, source_key)
+	if parsed_value == null:
+		return false
+
+	var value: float = float(parsed_value)
+	if value <= 0.0:
+		return false
+
+	target[target_key] = value
+	return true
+
+
+func _valid_backend_float_value(source: Dictionary, source_key: String) -> Variant:
+	if not source.has(source_key) or source[source_key] == null:
+		return null
+
+	var value: Variant = source[source_key]
+	if value is int or value is float:
+		return value
+	if value is String:
+		var text: String = str(value).strip_edges()
+		if text.is_valid_float():
+			return text.to_float()
+
+	return null
+
+
+func _log_ability_runtime_config_status(loaded_keys: Array, fallback_keys: Array = []) -> void:
+	loaded_keys.sort()
+	fallback_keys.sort()
+	print("Backend ability runtime configs loaded for keys: %s." % _format_key_list(loaded_keys))
+	if fallback_keys.is_empty():
+		print("Backend ability runtime configs supplied all supported fallback fields.")
+	else:
+		print("Using fallback ability runtime values for keys: %s." % _format_key_list(fallback_keys))
+
+
+func _format_key_list(keys: Array) -> String:
+	if keys.is_empty():
+		return "(none)"
+
+	var packed_keys: PackedStringArray = PackedStringArray()
+	for key in keys:
+		packed_keys.append(str(key))
+	return ", ".join(packed_keys)
+
+
 func _is_ability_enabled(peer_id: int, ability_name: String) -> bool:
 	var ability_state: Dictionary = _ability_enabled_by_peer.get(peer_id, {}) as Dictionary
 	return bool(ability_state.get(ability_name, false))
@@ -1020,12 +1196,12 @@ func _ability_visual_key(ability_name: String) -> String:
 
 func _server_ability_config(ability_name: String) -> Dictionary:
 	var ability_key: String = _server_ability_key(ability_name)
-	return SERVER_ABILITY_CONFIGS.get(ability_key, {}) as Dictionary
+	return _server_ability_configs.get(ability_key, SERVER_ABILITY_CONFIGS.get(ability_key, {})) as Dictionary
 
 
 func _server_ability_key(ability_name: String) -> String:
 	var normalized_name: String = ability_name.strip_edges()
-	if SERVER_ABILITY_CONFIGS.has(normalized_name):
+	if _server_ability_configs.has(normalized_name) or SERVER_ABILITY_CONFIGS.has(normalized_name):
 		return normalized_name
 
 	return str(ABILITY_KEY_BY_DISPLAY_NAME.get(normalized_name, normalized_name.to_snake_case()))
@@ -1540,8 +1716,9 @@ func submit_basic_attack() -> void:
 		return
 
 	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
-	var last_attack_time: float = float(_last_attack_time_by_peer.get(peer_id, -basic_attack_cooldown_seconds))
-	if now_seconds - last_attack_time < basic_attack_cooldown_seconds:
+	var slash_cooldown_seconds: float = _ability_cooldown("Slash")
+	var last_attack_time: float = float(_last_attack_time_by_peer.get(peer_id, -slash_cooldown_seconds))
+	if now_seconds - last_attack_time < slash_cooldown_seconds:
 		return
 
 	_last_attack_time_by_peer[peer_id] = now_seconds

@@ -424,6 +424,7 @@ func _on_character_abilities_completed(
 		_disconnect_peer(peer_id)
 		return
 
+	world_spawner.call("load_backend_ability_runtime_configs", response_data)
 	_complete_validated_join(peer_id, session, loadout_data)
 
 
@@ -1066,6 +1067,7 @@ func _on_ability_loadout_update_completed(
 	if loadout_data.is_empty():
 		return
 
+	world_spawner.call("load_backend_ability_runtime_configs", response_data)
 	world_spawner.call(
 		"apply_confirmed_ability_data",
 		peer_id,
@@ -1651,6 +1653,7 @@ func _on_unlock_ability_reload_completed(
 	if loadout_data.is_empty():
 		return
 
+	world_spawner.call("load_backend_ability_runtime_configs", response_data)
 	var unlocked_abilities: Array = loadout_data.get("unlocked_abilities", []) as Array
 	world_spawner.call(
 		"apply_confirmed_ability_data",
