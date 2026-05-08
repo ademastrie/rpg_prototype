@@ -133,6 +133,10 @@ const SERVER_ABILITY_CONFIGS: Dictionary = {
 		"damage": 10,
 		"range": 3.5,
 		"arc_angle": 90.0,
+		"stat_modifiers": [
+			{"stat_key": "max_hp", "modifier_type": "flat", "value": 25.0},
+			{"stat_key": "damage_reduction", "modifier_type": "flat", "value": 0.20},
+		],
 	},
 	"hp_regen": {
 		"behavior_key": "periodic_heal",
@@ -158,6 +162,9 @@ const SERVER_ABILITY_CONFIGS: Dictionary = {
 		"radius": 2.0,
 		# Godot-side fallback until projectile_speed is added to backend ability runtime fields.
 		"projectile_speed": 12.0,
+		"stat_modifiers": [
+			{"stat_key": "spell_power", "modifier_type": "flat", "value": 4.0},
+		],
 	},
 	"shoot": {
 		"behavior_key": "projectile_single_target",
@@ -168,7 +175,9 @@ const SERVER_ABILITY_CONFIGS: Dictionary = {
 		"radius": 0.35,
 		# Godot-side fallback until projectile_speed is added to backend ability runtime fields.
 		"projectile_speed": 22.0,
-		"stat_modifiers": [],
+		"stat_modifiers": [
+			{"stat_key": "move_speed", "modifier_type": "flat", "value": 2.0},
+		],
 	},
 }
 const PLAYER_DAMAGE_REDUCTION_CAP: float = 0.80
@@ -630,15 +639,7 @@ func _recalculate_player_combat_stats(peer_id: int, restore_current_hp_to_max: b
 		return
 
 	var combat_stats: Dictionary = _default_player_combat_stats()
-	var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
-	# Temporary prototype modifiers: Slash grants damage reduction and max HP while slotted.
-	# Future stats should be assembled from backend base stats, backend ability
-	# effects, gear, buffs/debuffs, and other server-owned simulation state.
-	if loadout.has("Slash"):
-		combat_stats["damage_reduction"] = float(combat_stats["damage_reduction"]) + 0.20
-		combat_stats["max_hp"] = int(combat_stats["max_hp"]) + 25
-
-	_apply_ability_stat_modifiers(peer_id, combat_stats)
+	var ability_stat_recompute: Dictionary = _apply_ability_stat_modifiers(peer_id, combat_stats)
 	var ability_move_speed_bonus: float = float(combat_stats.get("move_speed", movement_speed)) - movement_speed
 	_apply_equipped_item_stat_modifiers(peer_id, combat_stats)
 	var equipment_move_speed_bonus: float = float(combat_stats.get("move_speed", movement_speed)) - movement_speed - ability_move_speed_bonus
@@ -659,6 +660,14 @@ func _recalculate_player_combat_stats(peer_id: int, restore_current_hp_to_max: b
 			equipment_move_speed_bonus,
 			new_move_speed,
 		])
+	if bool(ability_stat_recompute.get("slash_applied", false)):
+		print("Player ability stat recomputed: peer_id=%s ability_key=slash max_hp_bonus=%s damage_reduction_bonus=%s final_max_hp=%s final_damage_reduction=%s" % [
+			peer_id,
+			int(round(float(ability_stat_recompute.get("slash_max_hp_bonus", 0.0)))),
+			float(ability_stat_recompute.get("slash_damage_reduction_bonus", 0.0)),
+			int(combat_stats.get("max_hp", player_max_hp)),
+			float(combat_stats.get("damage_reduction", 0.0)),
+		])
 
 
 func _computed_player_move_speed(peer_id: int) -> float:
@@ -666,18 +675,34 @@ func _computed_player_move_speed(peer_id: int) -> float:
 	return clamp(float(combat_stats.get("move_speed", movement_speed)), MIN_PLAYER_MOVE_SPEED, MAX_PLAYER_MOVE_SPEED)
 
 
-func _apply_ability_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> void:
+func _apply_ability_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> Dictionary:
+	var recompute_event: Dictionary = {
+		"slash_applied": false,
+		"slash_max_hp_bonus": 0.0,
+		"slash_damage_reduction_bonus": 0.0,
+	}
 	var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
 	var ability_keys: Dictionary = _ability_keys_by_peer.get(peer_id, {}) as Dictionary
 	for ability_name in loadout:
 		var ability_name_text: String = str(ability_name)
-		var ability_key: String = str(ability_keys.get(ability_name_text, _server_ability_key(ability_name_text))).strip_edges()
+		var ability_key: String = str(ability_keys.get(ability_name_text, _server_ability_key(ability_name_text))).strip_edges().to_lower()
 		var stat_modifiers: Array = _ability_stat_modifiers(ability_key)
 		for modifier_variant in stat_modifiers:
 			if not (modifier_variant is Dictionary):
 				continue
 
+			var before_max_hp: float = float(combat_stats.get("max_hp", player_max_hp))
+			var before_damage_reduction: float = float(combat_stats.get("damage_reduction", 0.0))
 			_apply_stat_modifier_to_combat_stats(combat_stats, modifier_variant as Dictionary)
+			if ability_key == "slash":
+				recompute_event["slash_applied"] = true
+				var modifier: Dictionary = modifier_variant as Dictionary
+				var stat_key: String = str(modifier.get("stat_key", modifier.get("key", modifier.get("stat", "")))).strip_edges().to_lower()
+				if stat_key == "max_hp":
+					recompute_event["slash_max_hp_bonus"] = float(recompute_event["slash_max_hp_bonus"]) + float(combat_stats.get("max_hp", player_max_hp)) - before_max_hp
+				elif stat_key == "damage_reduction":
+					recompute_event["slash_damage_reduction_bonus"] = float(recompute_event["slash_damage_reduction_bonus"]) + float(combat_stats.get("damage_reduction", 0.0)) - before_damage_reduction
+	return recompute_event
 
 
 func _apply_equipped_item_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> void:
@@ -944,7 +969,7 @@ func _ability_keys_for_loadout(loadout: Array, ability_keys: Dictionary) -> Dict
 	var keys: Dictionary = {}
 	for ability_name in loadout:
 		var ability_name_text: String = str(ability_name)
-		keys[ability_name_text] = str(ability_keys.get(ability_name_text, ability_name_text))
+		keys[ability_name_text] = str(ability_keys.get(ability_name_text, _server_ability_key(ability_name_text))).strip_edges().to_lower()
 
 	return keys
 
@@ -1008,12 +1033,12 @@ func load_backend_ability_runtime_configs(response_data: Dictionary) -> void:
 			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "radius", "radius") or used_fallback
 		if fallback_config.has("projectile_speed"):
 			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "projectile_speed", "projectile_speed") or used_fallback
-		if fallback_config.has("stat_modifiers"):
-			var loaded_stat_modifiers: Array = _extract_ability_stat_modifiers(backend_ability)
-			if loaded_stat_modifiers.is_empty():
+		var loaded_stat_modifiers: Array = _extract_ability_stat_modifiers(backend_ability)
+		if loaded_stat_modifiers.is_empty():
+			if fallback_config.has("stat_modifiers"):
 				used_fallback = true
-			else:
-				merged_config["stat_modifiers"] = loaded_stat_modifiers
+		else:
+			merged_config["stat_modifiers"] = loaded_stat_modifiers
 		if fallback_config.has("width"):
 			used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "radius", "width") or used_fallback
 		if fallback_config.has("arc_angle"):
@@ -1305,6 +1330,9 @@ func _extract_ability_stat_modifiers(ability_data: Dictionary) -> Array:
 func _is_stat_modifier_data(modifier_data: Dictionary) -> bool:
 	var effect_type: String = str(modifier_data.get("effect_type", "")).strip_edges().to_lower()
 	if effect_type != "" and effect_type != "stat_modifier":
+		return false
+	var target_team: String = str(modifier_data.get("target_team", "")).strip_edges().to_lower()
+	if target_team != "" and target_team != "self":
 		return false
 
 	return (
@@ -1658,7 +1686,7 @@ func _loadout_entries(peer_id: int) -> Array:
 		var ability_name_text: String = str(ability_name)
 		entries.append({
 			"slot_index": int(ability_slot_indexes.get(ability_name_text, slot_index)),
-			"ability_key": str(ability_keys.get(ability_name_text, ability_name_text)),
+			"ability_key": str(ability_keys.get(ability_name_text, _server_ability_key(ability_name_text))).strip_edges().to_lower(),
 			"ability_name": ability_name_text,
 			"display_name": str(display_names.get(ability_name_text, ability_name_text)),
 			"enabled": bool(ability_state.get(ability_name_text, true)),

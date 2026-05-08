@@ -18,12 +18,39 @@
     "duration_seconds": null
   },
   {
+    "ability_key": "firebolt",
+    "effect_type": "stat_modifier",
+    "target_team": "self",
+    "stat_key": "spell_power",
+    "value": 4.0,
+    "tick_interval_seconds": null,
+    "duration_seconds": null
+  },
+  {
     "ability_key": "hp_regen",
     "effect_type": "healing",
     "target_team": "self",
     "stat_key": "hp",
     "value": 8.0,
     "tick_interval_seconds": 2.0,
+    "duration_seconds": null
+  },
+  {
+    "ability_key": "shoot",
+    "effect_type": "damage",
+    "target_team": "enemy",
+    "stat_key": "hp",
+    "value": 9.0,
+    "tick_interval_seconds": null,
+    "duration_seconds": null
+  },
+  {
+    "ability_key": "shoot",
+    "effect_type": "stat_modifier",
+    "target_team": "self",
+    "stat_key": "move_speed",
+    "value": 2.0,
+    "tick_interval_seconds": null,
     "duration_seconds": null
   },
   {
@@ -36,11 +63,20 @@
     "duration_seconds": null
   },
   {
-    "ability_key": "shoot",
+    "ability_key": "slash",
     "effect_type": "stat_modifier",
     "target_team": "self",
-    "stat_key": "move_speed",
-    "value": 0.4,
+    "stat_key": "damage_reduction",
+    "value": 0.2,
+    "tick_interval_seconds": null,
+    "duration_seconds": null
+  },
+  {
+    "ability_key": "slash",
+    "effect_type": "stat_modifier",
+    "target_team": "self",
+    "stat_key": "max_hp",
+    "value": 25.0,
     "tick_interval_seconds": null,
     "duration_seconds": null
   }

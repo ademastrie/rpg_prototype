@@ -280,6 +280,7 @@
 - `_refresh_characters() -> void:`
 - `_show_characters(data: Variant) -> void:`
 - `_setup_starter_ability_options() -> void:`
+- `_add_starter_ability_option(ability_key: String, display_name: String) -> void:`
 - `_selected_starter_ability_key() -> String:`
 - `_show_selected_character_info(character: Dictionary) -> void:`
 - `_clear_selected_character_info() -> void:`
@@ -465,6 +466,7 @@
 - `resolve_basic_attack(_attacker_peer_id: int, attack_position: Vector3, facing_direction: Vector2, slash_range: float, slash_arc_angle: float, damage: int) -> int:`
 - `resolve_damage_aura(_attacker_peer_id: int, aura_position: Vector3, radius: float, damage: int) -> void:`
 - `resolve_fireball_aoe(_attacker_peer_id: int, impact_position: Vector3, radius: float, damage: int) -> int:`
+- `resolve_projectile_single_target(_attacker_peer_id: int, enemy_id: int, damage: int) -> bool:`
 - `_apply_damage_to_enemy(enemy_id: int, attacker_peer_id: int, damage: int) -> void:`
 - `_despawn_enemy(enemy_id: int) -> void:`
 - `_schedule_enemy_respawn(enemy_id: int) -> void:`
@@ -680,6 +682,8 @@
 - `_modified_player_damage_taken(peer_id: int, raw_damage: int) -> int:`
 - `_default_player_combat_stats() -> Dictionary:`
 - `_recalculate_player_combat_stats(peer_id: int, restore_current_hp_to_max: bool = false) -> void:`
+- `_computed_player_move_speed(peer_id: int) -> float:`
+- `_apply_ability_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> void:`
 - `_apply_equipped_item_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> void:`
 - `_equipment_item_stat_modifiers(equipment_item: Dictionary) -> Array:`
 - `_apply_stat_modifier_to_combat_stats(combat_stats: Dictionary, modifier: Dictionary) -> void:`
@@ -729,16 +733,24 @@
 - `_ability_arc_angle(ability_name: String) -> float:`
 - `_ability_width(ability_name: String) -> float:`
 - `_ability_projectile_speed(ability_name: String) -> float:`
+- `_ability_stat_modifiers(ability_name: String) -> Array:`
+- `_extract_ability_stat_modifiers(ability_data: Dictionary) -> Array:`
+- `_is_stat_modifier_data(modifier_data: Dictionary) -> bool:`
+- `_ability_stat_modifier_containers(ability_data: Dictionary) -> Array:`
+- `_normalize_stat_modifier(modifier_data: Dictionary) -> Dictionary:`
 - `_ability_visual_key(ability_name: String) -> String:`
 - `_server_ability_config(ability_name: String) -> Dictionary:`
 - `_server_ability_key(ability_name: String) -> String:`
 - `_apply_hp_regen(peer_id: int) -> void:`
 - `_perform_damage_aura(peer_id: int) -> void:`
 - `_perform_firebolt(peer_id: int) -> void:`
+- `_perform_shoot(peer_id: int) -> void:`
 - `_process_fireball_projectiles(delta: float) -> void:`
-- `_first_fireball_collision(previous_position: Vector3, next_position: Vector3) -> Dictionary:`
+- `_first_projectile_collision(previous_position: Vector3, next_position: Vector3, collision_radius: float = FIREBALL_COLLISION_RADIUS) -> Dictionary:`
 - `_impact_fireball_projectile(projectile_id: int, projectile: Dictionary, impact_position: Vector3) -> void:`
+- `_impact_single_target_projectile(projectile_id: int, projectile: Dictionary, impact_position: Vector3, enemy_id: int) -> void:`
 - `_expire_fireball_projectile(projectile_id: int, expire_position: Vector3) -> void:`
+- `_expire_projectile(projectile_id: int, expire_position: Vector3) -> void:`
 - `_clear_projectiles_for_peer(peer_id: int) -> void:`
 - `_loadout_entries(peer_id: int) -> Array:`
 - `_broadcast_position_snapshots() -> void:`
