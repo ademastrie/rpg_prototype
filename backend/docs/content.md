@@ -5,6 +5,14 @@ Alembic still owns database schema creation and migrations. These scripts only m
 
 The content workflows do not export or sync user accounts, characters, character inventory, character equipment, character abilities, character loadouts, gold, XP, or progression data.
 
+When content JSON uses newly added columns, apply migrations before syncing:
+
+```powershell
+alembic upgrade head
+python .\scripts\sync_content.py
+python .\scripts\export_content.py
+```
+
 ## Content workflow
 
 You can tune durable game content in either pgAdmin/PostgreSQL or the JSON files:

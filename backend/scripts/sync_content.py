@@ -33,6 +33,15 @@ JsonRow = dict[str, Any]
 ContentTable = tuple[str, type, tuple[str, ...]]
 
 
+CONTENT_ROW_DEFAULTS: dict[str, JsonRow] = {
+    "ability_effects": {
+        "damage_school": None,
+        "scaling_stat_key": None,
+        "scaling_ratio": 0.0,
+    },
+}
+
+
 CONTENT_TABLES: tuple[ContentTable, ...] = (
     ("ability_definitions", AbilityDefinition, ("ability_key",)),
     (
@@ -69,6 +78,14 @@ def load_rows(filename: str) -> list[JsonRow]:
         raise ValueError(f"{path} must contain a JSON array.")
 
     return rows
+
+
+def apply_row_defaults(table_name: str, rows: Iterable[JsonRow]) -> list[JsonRow]:
+    defaults = CONTENT_ROW_DEFAULTS.get(table_name)
+    if defaults is None:
+        return list(rows)
+
+    return [{**defaults, **row} for row in rows]
 
 
 def set_values(instance: object, row: JsonRow) -> None:
@@ -114,7 +131,7 @@ def sync_content(session: Session) -> dict[str, tuple[int, int]]:
         results[table_name] = upsert_rows(
             session,
             model,
-            load_rows(f"{table_name}.json"),
+            apply_row_defaults(table_name, load_rows(f"{table_name}.json")),
             key_fields,
         )
 

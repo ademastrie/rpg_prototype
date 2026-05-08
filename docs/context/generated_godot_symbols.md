@@ -683,7 +683,7 @@
 - `_default_player_combat_stats() -> Dictionary:`
 - `_recalculate_player_combat_stats(peer_id: int, restore_current_hp_to_max: bool = false) -> void:`
 - `_computed_player_move_speed(peer_id: int) -> float:`
-- `_apply_ability_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> void:`
+- `_apply_ability_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> Dictionary:`
 - `_apply_equipped_item_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> void:`
 - `_equipment_item_stat_modifiers(equipment_item: Dictionary) -> Array:`
 - `_apply_stat_modifier_to_combat_stats(combat_stats: Dictionary, modifier: Dictionary) -> void:`

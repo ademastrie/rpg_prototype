@@ -1023,8 +1023,12 @@ func load_backend_ability_runtime_configs(response_data: Dictionary) -> void:
 		used_fallback = not _copy_valid_backend_string(backend_ability, merged_config, "visual_key", "visual_key") or used_fallback
 		used_fallback = not _copy_valid_backend_float(backend_ability, merged_config, "cooldown_seconds", "cooldown_seconds") or used_fallback
 
-		if fallback_config.has("damage"):
+		var loaded_damage_effect: Dictionary = _extract_ability_damage_effect(backend_ability)
+		if fallback_config.has("damage") and loaded_damage_effect.is_empty():
 			used_fallback = not _copy_valid_backend_int(backend_ability, merged_config, "damage", "damage") or used_fallback
+		elif not loaded_damage_effect.is_empty():
+			merged_config["damage_effect"] = loaded_damage_effect
+			merged_config["damage"] = int(loaded_damage_effect.get("value", merged_config.get("damage", 0)))
 		if fallback_config.has("heal"):
 			used_fallback = not _copy_valid_backend_int(backend_ability, merged_config, "healing", "heal") or used_fallback
 		if fallback_config.has("range"):
@@ -1260,9 +1264,113 @@ func _ability_heal_amount(ability_name: String) -> int:
 	return int(ability_config.get("heal", 0))
 
 
-func _ability_damage_amount(ability_name: String) -> int:
+func _ability_damage_amount(peer_id: int, ability_name: String) -> int:
 	var ability_config: Dictionary = _server_ability_config(ability_name)
-	return int(ability_config.get("damage", 0))
+	var ability_key: String = _server_ability_key(ability_name)
+	var damage_effect: Dictionary = _ability_damage_effect(ability_config)
+	var base_damage: float = float(damage_effect.get("value", ability_config.get("damage", 0)))
+	var scaling_stat_key: String = str(damage_effect.get("scaling_stat_key", "")).strip_edges().to_lower()
+	var scaling_ratio: float = float(damage_effect.get("scaling_ratio", 0.0))
+	var final_damage: float = base_damage
+	if scaling_stat_key != "" and scaling_ratio > 0.0:
+		var combat_stats: Dictionary = _player_combat_stats_by_peer.get(peer_id, _default_player_combat_stats()) as Dictionary
+		var scaling_stat_value: float = float(combat_stats.get(scaling_stat_key, 0.0))
+		final_damage = base_damage + scaling_stat_value * scaling_ratio
+		var rounded_damage: int = max(int(round(final_damage)), 0)
+		print("Ability damage scaled: peer_id=%s ability_key=%s base_damage=%s scaling_stat_key=%s scaling_stat_value=%s scaling_ratio=%s final_damage=%s" % [
+			peer_id,
+			ability_key,
+			int(round(base_damage)),
+			scaling_stat_key,
+			scaling_stat_value,
+			scaling_ratio,
+			rounded_damage,
+		])
+		return rounded_damage
+
+	return max(int(round(final_damage)), 0)
+
+
+func _ability_damage_effect(ability_config: Dictionary) -> Dictionary:
+	var raw_damage_effect: Variant = ability_config.get("damage_effect", {})
+	if raw_damage_effect is Dictionary:
+		return (raw_damage_effect as Dictionary).duplicate(true)
+
+	return {"value": float(ability_config.get("damage", 0))}
+
+
+func _extract_ability_damage_effect(ability_data: Dictionary) -> Dictionary:
+	for container_variant in _ability_effect_containers(ability_data):
+		if not (container_variant is Dictionary):
+			continue
+
+		var damage_effect: Dictionary = _normalize_damage_effect(container_variant as Dictionary)
+		if not damage_effect.is_empty():
+			return damage_effect
+
+	return {}
+
+
+func _ability_effect_containers(ability_data: Dictionary) -> Array:
+	var containers: Array = [ability_data]
+	var effects: Variant = ability_data.get("effects", ability_data.get("ability_effects", []))
+	if effects is Array:
+		for effect_variant in (effects as Array):
+			if effect_variant is Dictionary:
+				containers.append(effect_variant as Dictionary)
+	elif effects is Dictionary:
+		containers.append(effects as Dictionary)
+	return containers
+
+
+func _normalize_damage_effect(effect_data: Dictionary) -> Dictionary:
+	var effect_type: String = str(effect_data.get("effect_type", effect_data.get("type", ""))).strip_edges().to_lower()
+	if effect_type == "stat_modifier":
+		return {}
+
+	var has_damage_metadata: bool = effect_data.has("damage_school") or effect_data.has("scaling_stat_key") or effect_data.has("scaling_ratio")
+	var is_damage_effect: bool = effect_type == "damage" or effect_type == "direct_damage" or effect_type == "area_damage" or effect_type == "aoe_damage" or has_damage_metadata
+	if not is_damage_effect:
+		return {}
+
+	var raw_value: Variant = _first_present_value(effect_data, ["value", "damage", "amount", "damage_amount", "base_damage"])
+	if raw_value == null:
+		return {}
+
+	var value: float = _variant_to_float(raw_value, -1.0)
+	if value <= 0.0:
+		return {}
+
+	var damage_effect: Dictionary = {
+		"value": value,
+	}
+	var damage_school: String = str(effect_data.get("damage_school", "")).strip_edges().to_lower()
+	if damage_school != "":
+		damage_effect["damage_school"] = damage_school
+	var scaling_stat_key: String = str(effect_data.get("scaling_stat_key", "")).strip_edges().to_lower()
+	if scaling_stat_key != "":
+		damage_effect["scaling_stat_key"] = scaling_stat_key
+	damage_effect["scaling_ratio"] = max(_variant_to_float(effect_data.get("scaling_ratio", 0.0), 0.0), 0.0)
+	return damage_effect
+
+
+func _first_present_value(source: Dictionary, keys: Array[String]) -> Variant:
+	for key in keys:
+		if source.has(key) and source[key] != null:
+			return source[key]
+
+	return null
+
+
+func _variant_to_float(value: Variant, fallback: float = 0.0) -> float:
+	if value is int or value is float:
+		return float(value)
+	if value is String:
+		var text: String = str(value).strip_edges()
+		if text.is_valid_float():
+			return text.to_float()
+
+	return fallback
 
 
 func _ability_radius(ability_name: String) -> float:
@@ -1346,15 +1454,7 @@ func _is_stat_modifier_data(modifier_data: Dictionary) -> bool:
 
 
 func _ability_stat_modifier_containers(ability_data: Dictionary) -> Array:
-	var containers: Array = [ability_data]
-	var effects: Variant = ability_data.get("effects", ability_data.get("ability_effects", []))
-	if effects is Array:
-		for effect_variant in (effects as Array):
-			if effect_variant is Dictionary:
-				containers.append(effect_variant as Dictionary)
-	elif effects is Dictionary:
-		containers.append(effects as Dictionary)
-	return containers
+	return _ability_effect_containers(ability_data)
 
 
 func _normalize_stat_modifier(modifier_data: Dictionary) -> Dictionary:
@@ -1419,7 +1519,7 @@ func _perform_damage_aura(peer_id: int) -> void:
 	var aura_position: Vector3 = players[peer_id] as Vector3
 	var ability_config: Dictionary = _server_ability_config("Damage Aura")
 	var radius: float = float(ability_config.get("radius", 0.0))
-	var damage: int = int(ability_config.get("damage", 0))
+	var damage: int = _ability_damage_amount(peer_id, "Damage Aura")
 	if radius <= 0.0 or damage <= 0:
 		return
 
@@ -1443,7 +1543,7 @@ func _perform_firebolt(peer_id: int) -> void:
 	var projectile_range: float = float(ability_config.get("range", 0.0))
 	var explosion_radius: float = float(ability_config.get("radius", 0.0))
 	var projectile_speed: float = _ability_projectile_speed("Firebolt")
-	var damage: int = int(ability_config.get("damage", 0))
+	var damage: int = _ability_damage_amount(peer_id, "Firebolt")
 	if projectile_range <= 0.0 or explosion_radius <= 0.0 or projectile_speed <= 0.0 or damage <= 0:
 		return
 
@@ -1484,7 +1584,7 @@ func _perform_shoot(peer_id: int) -> void:
 	var projectile_range: float = float(ability_config.get("range", 0.0))
 	var hit_radius: float = float(ability_config.get("radius", 0.0))
 	var projectile_speed: float = _ability_projectile_speed("Shoot")
-	var damage: int = int(ability_config.get("damage", 0))
+	var damage: int = _ability_damage_amount(peer_id, "Shoot")
 	if behavior_key != "projectile_single_target" or projectile_range <= 0.0 or hit_radius <= 0.0 or projectile_speed <= 0.0 or damage <= 0:
 		return
 
@@ -2198,7 +2298,7 @@ func _perform_slash(peer_id: int) -> void:
 	var ability_config: Dictionary = _server_ability_config("Slash")
 	var slash_range: float = float(ability_config.get("range", 0.0))
 	var slash_arc_angle: float = float(ability_config.get("arc_angle", 0.0))
-	var slash_damage: int = int(ability_config.get("damage", 0))
+	var slash_damage: int = _ability_damage_amount(peer_id, "Slash")
 	if slash_range <= 0.0 or slash_arc_angle <= 0.0 or slash_damage <= 0:
 		return
 

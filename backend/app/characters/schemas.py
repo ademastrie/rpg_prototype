@@ -116,6 +116,9 @@ class AbilityEffectResponse(BaseModel):
     effect_type: str
     target_team: str
     stat_key: str | None
+    damage_school: str | None
+    scaling_stat_key: str | None
+    scaling_ratio: float | None
     value: float
     tick_interval_seconds: float | None
     duration_seconds: float | None

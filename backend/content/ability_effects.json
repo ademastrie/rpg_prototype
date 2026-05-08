@@ -4,6 +4,9 @@
     "effect_type": "damage",
     "target_team": "enemy",
     "stat_key": "hp",
+    "damage_school": "magic",
+    "scaling_stat_key": "spell_power",
+    "scaling_ratio": 0.25,
     "value": 5.0,
     "tick_interval_seconds": 1.0,
     "duration_seconds": null
@@ -13,6 +16,9 @@
     "effect_type": "damage",
     "target_team": "enemy",
     "stat_key": "hp",
+    "damage_school": "magic",
+    "scaling_stat_key": "spell_power",
+    "scaling_ratio": 0.5,
     "value": 12.0,
     "tick_interval_seconds": null,
     "duration_seconds": null
@@ -22,6 +28,9 @@
     "effect_type": "stat_modifier",
     "target_team": "self",
     "stat_key": "spell_power",
+    "damage_school": null,
+    "scaling_stat_key": null,
+    "scaling_ratio": 0.0,
     "value": 4.0,
     "tick_interval_seconds": null,
     "duration_seconds": null
@@ -31,6 +40,9 @@
     "effect_type": "healing",
     "target_team": "self",
     "stat_key": "hp",
+    "damage_school": null,
+    "scaling_stat_key": null,
+    "scaling_ratio": 0.0,
     "value": 8.0,
     "tick_interval_seconds": 2.0,
     "duration_seconds": null
@@ -40,6 +52,9 @@
     "effect_type": "damage",
     "target_team": "enemy",
     "stat_key": "hp",
+    "damage_school": "physical",
+    "scaling_stat_key": null,
+    "scaling_ratio": 0.0,
     "value": 9.0,
     "tick_interval_seconds": null,
     "duration_seconds": null
@@ -49,6 +64,9 @@
     "effect_type": "stat_modifier",
     "target_team": "self",
     "stat_key": "move_speed",
+    "damage_school": null,
+    "scaling_stat_key": null,
+    "scaling_ratio": 0.0,
     "value": 2.0,
     "tick_interval_seconds": null,
     "duration_seconds": null
@@ -58,6 +76,9 @@
     "effect_type": "damage",
     "target_team": "enemy",
     "stat_key": "hp",
+    "damage_school": "physical",
+    "scaling_stat_key": null,
+    "scaling_ratio": 0.0,
     "value": 10.0,
     "tick_interval_seconds": null,
     "duration_seconds": null
@@ -67,6 +88,9 @@
     "effect_type": "stat_modifier",
     "target_team": "self",
     "stat_key": "damage_reduction",
+    "damage_school": null,
+    "scaling_stat_key": null,
+    "scaling_ratio": 0.0,
     "value": 0.2,
     "tick_interval_seconds": null,
     "duration_seconds": null
@@ -76,6 +100,9 @@
     "effect_type": "stat_modifier",
     "target_team": "self",
     "stat_key": "max_hp",
+    "damage_school": null,
+    "scaling_stat_key": null,
+    "scaling_ratio": 0.0,
     "value": 25.0,
     "tick_interval_seconds": null,
     "duration_seconds": null
