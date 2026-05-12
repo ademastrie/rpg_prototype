@@ -1,0 +1,31 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Material" path="res://assets/materials/mat_enemy_caster.tres" id="1_caster_mat"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_caster"]
+radius = 0.38
+height = 1.75
+
+[sub_resource type="SphereMesh" id="SphereMesh_focus"]
+radius = 0.25
+height = 0.5
+
+[sub_resource type="BoxMesh" id="BoxMesh_staff"]
+size = Vector3(0.12, 2.1, 0.12)
+
+[node name="EnemyVisual_Caster" type="Node3D"]
+
+[node name="Body" type="MeshInstance3D" parent="."]
+transform = Transform3D(1.15, 0, 0, 0, 1.15, 0, 0, 0, 1.15, 0, 1.15, 0)
+mesh = SubResource("CapsuleMesh_caster")
+surface_material_override/0 = ExtResource("1_caster_mat")
+
+[node name="Staff" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.55, 1.2, 0)
+mesh = SubResource("BoxMesh_staff")
+surface_material_override/0 = ExtResource("1_caster_mat")
+
+[node name="Focus" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.55, 2.35, 0)
+mesh = SubResource("SphereMesh_focus")
+surface_material_override/0 = ExtResource("1_caster_mat")

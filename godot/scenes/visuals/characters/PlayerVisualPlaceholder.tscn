@@ -1,0 +1,23 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Material" path="res://assets/materials/mat_player_placeholder.tres" id="1_player_mat"]
+[ext_resource type="Material" path="res://assets/materials/mat_player_accent.tres" id="2_accent_mat"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_player"]
+radius = 0.45
+height = 1.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_facing"]
+size = Vector3(0.28, 0.16, 1.0)
+
+[node name="PlayerVisualPlaceholder" type="Node3D"]
+
+[node name="Body" type="MeshInstance3D" parent="."]
+transform = Transform3D(1.35, 0, 0, 0, 1.35, 0, 0, 0, 1.35, 0, 1.35, 0)
+mesh = SubResource("CapsuleMesh_player")
+surface_material_override/0 = ExtResource("1_player_mat")
+
+[node name="FacingMarker" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -0.75)
+mesh = SubResource("BoxMesh_facing")
+surface_material_override/0 = ExtResource("2_accent_mat")

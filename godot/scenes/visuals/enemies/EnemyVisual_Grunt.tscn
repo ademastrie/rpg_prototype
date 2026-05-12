@@ -1,0 +1,22 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Material" path="res://assets/materials/mat_enemy_grunt.tres" id="1_grunt_mat"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_grunt"]
+top_radius = 0.55
+bottom_radius = 0.75
+height = 1.6
+
+[sub_resource type="BoxMesh" id="BoxMesh_ground_marker"]
+size = Vector3(1.25, 0.08, 1.25)
+
+[node name="EnemyVisual_Grunt" type="Node3D"]
+
+[node name="Body" type="MeshInstance3D" parent="."]
+transform = Transform3D(1.25, 0, 0, 0, 1.25, 0, 0, 0, 1.25, 0, 1, 0)
+mesh = SubResource("CylinderMesh_grunt")
+surface_material_override/0 = ExtResource("1_grunt_mat")
+
+[node name="GroundMarker" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_ground_marker")
+surface_material_override/0 = ExtResource("1_grunt_mat")

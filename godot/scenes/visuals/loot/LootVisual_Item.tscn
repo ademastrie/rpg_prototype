@@ -1,0 +1,22 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Material" path="res://assets/materials/mat_loot_item.tres" id="1_item_mat"]
+[ext_resource type="Material" path="res://assets/materials/mat_loot_item_band.tres" id="2_band_mat"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_item"]
+size = Vector3(0.7, 0.5, 0.7)
+
+[sub_resource type="BoxMesh" id="BoxMesh_band"]
+size = Vector3(0.76, 0.08, 0.76)
+
+[node name="LootVisual_Item" type="Node3D"]
+
+[node name="Bundle" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.35, 0)
+mesh = SubResource("BoxMesh_item")
+surface_material_override/0 = ExtResource("1_item_mat")
+
+[node name="Band" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.43, 0)
+mesh = SubResource("BoxMesh_band")
+surface_material_override/0 = ExtResource("2_band_mat")

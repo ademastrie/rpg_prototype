@@ -1,0 +1,24 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Material" path="res://assets/materials/mat_projectile_arrow.tres" id="1_arrow_mat"]
+[ext_resource type="Material" path="res://assets/materials/mat_projectile_arrow_tip.tres" id="2_tip_mat"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_shaft"]
+top_radius = 0.04
+bottom_radius = 0.04
+height = 1.2
+
+[sub_resource type="BoxMesh" id="BoxMesh_tip"]
+size = Vector3(0.18, 0.18, 0.28)
+
+[node name="ProjectileVisual_Arrow" type="Node3D"]
+
+[node name="Shaft" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, -4.37114e-08, 1, 0, -1, -4.37114e-08, 0, 0, 0)
+mesh = SubResource("CylinderMesh_shaft")
+surface_material_override/0 = ExtResource("1_arrow_mat")
+
+[node name="Tip" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, -4.37114e-08, 1, 0, -1, -4.37114e-08, 0, 0, -0.72)
+mesh = SubResource("BoxMesh_tip")
+surface_material_override/0 = ExtResource("2_tip_mat")

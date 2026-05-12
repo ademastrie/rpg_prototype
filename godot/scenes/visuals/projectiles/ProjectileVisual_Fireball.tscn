@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Material" path="res://assets/materials/mat_projectile_fireball.tres" id="1_fireball_mat"]
+
+[sub_resource type="SphereMesh" id="SphereMesh_fireball"]
+radius = 0.28
+height = 0.56
+
+[node name="ProjectileVisual_Fireball" type="Node3D"]
+
+[node name="Body" type="MeshInstance3D" parent="."]
+mesh = SubResource("SphereMesh_fireball")
+surface_material_override/0 = ExtResource("1_fireball_mat")
