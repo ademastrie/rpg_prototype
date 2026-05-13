@@ -5,6 +5,8 @@ Alembic still owns database schema creation and migrations. These scripts only m
 
 The content workflows do not export or sync user accounts, characters, character inventory, character equipment, character abilities, character loadouts, gold, XP, or progression data.
 
+Combat stat modifiers should use the Godot-derived stat keys: `max_hp`, `move_speed`, `physical_power`, `spell_power`, `armor`, and `avoidance`.
+
 When content JSON uses newly added columns, apply migrations before syncing:
 
 ```powershell
@@ -50,7 +52,7 @@ Run from `backend/` to apply the source-controlled JSON content back into the da
 python .\scripts\sync_content.py
 ```
 
-The sync script inserts or updates content rows in existing tables from `backend/content/*.json`. It is safe to run repeatedly; it does not drop tables, truncate tables, or delete player-owned data.
+The sync script inserts or updates content rows in existing tables from `backend/content/*.json`. It is safe to run repeatedly; it does not drop tables, truncate tables, or delete player-owned data. For renamed prototype stat keys, it may update or remove obsolete content-only modifier/effect rows so old keys do not remain alongside official stat keys.
 
 The script upserts rows by stable keys:
 

@@ -31,6 +31,7 @@ from app.models import (  # noqa: E402
 
 JsonRow = dict[str, Any]
 ContentTable = tuple[str, type, tuple[str, ...]]
+LegacyStatKeyRename = tuple[JsonRow, str, str]
 
 
 CONTENT_ROW_DEFAULTS: dict[str, JsonRow] = {
@@ -39,6 +40,43 @@ CONTENT_ROW_DEFAULTS: dict[str, JsonRow] = {
         "scaling_stat_key": None,
         "scaling_ratio": 0.0,
     },
+}
+
+
+CONTENT_LEGACY_STAT_KEY_RENAMES: dict[str, tuple[LegacyStatKeyRename, ...]] = {
+    "ability_effects": (
+        (
+            {
+                "ability_key": "slash",
+                "effect_type": "stat_modifier",
+                "target_team": "self",
+            },
+            "damage_reduction",
+            "armor",
+        ),
+    ),
+    "item_stat_modifiers": (
+        (
+            {"item_key": "training_sword", "modifier_type": "flat"},
+            "attack_power",
+            "physical_power",
+        ),
+        (
+            {"item_key": "simple_bow", "modifier_type": "flat"},
+            "attack_power",
+            "physical_power",
+        ),
+        (
+            {"item_key": "padded_chest", "modifier_type": "flat"},
+            "damage_reduction",
+            "armor",
+        ),
+        (
+            {"item_key": "training_gloves", "modifier_type": "flat"},
+            "damage_reduction",
+            "armor",
+        ),
+    ),
 }
 
 
@@ -101,6 +139,55 @@ def find_one(session: Session, model: type, keys: JsonRow) -> object | None:
     return session.scalars(statement).one_or_none()
 
 
+def find_all(session: Session, model: type, keys: JsonRow) -> list[object]:
+    statement = select(model)
+    for column_name, value in keys.items():
+        statement = statement.where(getattr(model, column_name) == value)
+
+    return list(session.scalars(statement).all())
+
+
+def row_matches(row: JsonRow, values: JsonRow) -> bool:
+    return all(row.get(key) == value for key, value in values.items())
+
+
+def apply_legacy_stat_key_renames(
+    session: Session,
+    table_name: str,
+    model: type,
+    rows: Iterable[JsonRow],
+) -> list[JsonRow]:
+    prepared_rows = list(rows)
+    renames = CONTENT_LEGACY_STAT_KEY_RENAMES.get(table_name)
+    if renames is None:
+        return prepared_rows
+
+    for base_keys, old_stat_key, new_stat_key in renames:
+        desired_keys = {**base_keys, "stat_key": new_stat_key}
+        if not any(row_matches(row, desired_keys) for row in prepared_rows):
+            continue
+
+        legacy_rows = find_all(
+            session,
+            model,
+            {**base_keys, "stat_key": old_stat_key},
+        )
+        if not legacy_rows:
+            continue
+
+        existing_new_rows = find_all(session, model, desired_keys)
+        if existing_new_rows:
+            for legacy_row in legacy_rows:
+                session.delete(legacy_row)
+            continue
+
+        setattr(legacy_rows[0], "stat_key", new_stat_key)
+        for duplicate_legacy_row in legacy_rows[1:]:
+            session.delete(duplicate_legacy_row)
+
+    return prepared_rows
+
+
 def upsert_rows(
     session: Session,
     model: type,
@@ -128,10 +215,16 @@ def sync_content(session: Session) -> dict[str, tuple[int, int]]:
     results: dict[str, tuple[int, int]] = {}
 
     for table_name, model, key_fields in CONTENT_TABLES:
+        rows = apply_legacy_stat_key_renames(
+            session,
+            table_name,
+            model,
+            apply_row_defaults(table_name, load_rows(f"{table_name}.json")),
+        )
         results[table_name] = upsert_rows(
             session,
             model,
-            apply_row_defaults(table_name, load_rows(f"{table_name}.json")),
+            rows,
             key_fields,
         )
 

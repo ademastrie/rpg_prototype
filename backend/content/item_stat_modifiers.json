@@ -25,8 +25,14 @@
   },
   {
     "item_key": "padded_chest",
-    "stat_key": "damage_reduction",
+    "stat_key": "armor",
     "value": 0.2,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "padded_chest",
+    "stat_key": "armor",
+    "value": 2.0,
     "modifier_type": "flat"
   },
   {
@@ -37,25 +43,43 @@
   },
   {
     "item_key": "simple_bow",
-    "stat_key": "attack_power",
-    "value": 1.0,
-    "modifier_type": "flat"
-  },
-  {
-    "item_key": "simple_bow",
     "stat_key": "move_speed",
     "value": 0.02,
     "modifier_type": "percent"
   },
   {
+    "item_key": "simple_bow",
+    "stat_key": "physical_power",
+    "value": 1.0,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "simple_bow",
+    "stat_key": "physical_power",
+    "value": 1.0,
+    "modifier_type": "flat"
+  },
+  {
     "item_key": "training_gloves",
-    "stat_key": "damage_reduction",
+    "stat_key": "armor",
     "value": 0.1,
     "modifier_type": "flat"
   },
   {
+    "item_key": "training_gloves",
+    "stat_key": "armor",
+    "value": 1.0,
+    "modifier_type": "flat"
+  },
+  {
     "item_key": "training_sword",
-    "stat_key": "attack_power",
+    "stat_key": "physical_power",
+    "value": 2.0,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "training_sword",
+    "stat_key": "physical_power",
     "value": 2.0,
     "modifier_type": "flat"
   },
