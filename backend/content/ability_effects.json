@@ -54,8 +54,20 @@
     "stat_key": "hp",
     "damage_school": "physical",
     "scaling_stat_key": "physical_power",
-    "scaling_ratio": 0.35,
+    "scaling_ratio": 0.5,
     "value": 9.0,
+    "tick_interval_seconds": null,
+    "duration_seconds": null
+  },
+  {
+    "ability_key": "shoot",
+    "effect_type": "stat_modifier",
+    "target_team": "self",
+    "stat_key": "avoidance",
+    "damage_school": null,
+    "scaling_stat_key": null,
+    "scaling_ratio": 0.0,
+    "value": 0.02,
     "tick_interval_seconds": null,
     "duration_seconds": null
   },
@@ -80,18 +92,6 @@
     "scaling_stat_key": "physical_power",
     "scaling_ratio": 0.5,
     "value": 10.0,
-    "tick_interval_seconds": null,
-    "duration_seconds": null
-  },
-  {
-    "ability_key": "slash",
-    "effect_type": "stat_modifier",
-    "target_team": "self",
-    "stat_key": "armor",
-    "damage_school": null,
-    "scaling_stat_key": null,
-    "scaling_ratio": 0.0,
-    "value": 0.2,
     "tick_interval_seconds": null,
     "duration_seconds": null
   },

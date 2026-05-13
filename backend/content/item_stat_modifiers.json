@@ -26,12 +26,6 @@
   {
     "item_key": "padded_chest",
     "stat_key": "armor",
-    "value": 0.2,
-    "modifier_type": "flat"
-  },
-  {
-    "item_key": "padded_chest",
-    "stat_key": "armor",
     "value": 2.0,
     "modifier_type": "flat"
   },
@@ -54,27 +48,9 @@
     "modifier_type": "flat"
   },
   {
-    "item_key": "simple_bow",
-    "stat_key": "physical_power",
-    "value": 1.0,
-    "modifier_type": "flat"
-  },
-  {
-    "item_key": "training_gloves",
-    "stat_key": "armor",
-    "value": 0.1,
-    "modifier_type": "flat"
-  },
-  {
     "item_key": "training_gloves",
     "stat_key": "armor",
     "value": 1.0,
-    "modifier_type": "flat"
-  },
-  {
-    "item_key": "training_sword",
-    "stat_key": "physical_power",
-    "value": 2.0,
     "modifier_type": "flat"
   },
   {

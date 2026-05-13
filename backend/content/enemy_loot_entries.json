@@ -56,6 +56,15 @@
   {
     "enemy_key": "grunt",
     "payload_type": "item",
+    "item_key": "training_sword",
+    "min_quantity": 1,
+    "max_quantity": 1,
+    "drop_chance": 1.0,
+    "is_active": true
+  },
+  {
+    "enemy_key": "grunt",
+    "payload_type": "item",
     "item_key": "worn_boots",
     "min_quantity": 1,
     "max_quantity": 1,

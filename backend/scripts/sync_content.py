@@ -131,20 +131,29 @@ def set_values(instance: object, row: JsonRow) -> None:
         setattr(instance, key, value)
 
 
-def find_one(session: Session, model: type, keys: JsonRow) -> object | None:
-    statement = select(model)
-    for column_name, value in keys.items():
-        statement = statement.where(getattr(model, column_name) == value)
-
-    return session.scalars(statement).one_or_none()
-
-
 def find_all(session: Session, model: type, keys: JsonRow) -> list[object]:
     statement = select(model)
     for column_name, value in keys.items():
         statement = statement.where(getattr(model, column_name) == value)
 
     return list(session.scalars(statement).all())
+
+
+def find_primary_for_upsert(
+    session: Session,
+    model: type,
+    keys: JsonRow,
+) -> object | None:
+    rows = find_all(session, model, keys)
+    if not rows:
+        return None
+
+    rows = sorted(rows, key=lambda row: getattr(row, "id"))
+    primary_row = rows[0]
+    for duplicate_row in rows[1:]:
+        session.delete(duplicate_row)
+
+    return primary_row
 
 
 def row_matches(row: JsonRow, values: JsonRow) -> bool:
@@ -199,7 +208,7 @@ def upsert_rows(
 
     for row in rows:
         keys = {field: row[field] for field in key_fields}
-        existing = find_one(session, model, keys)
+        existing = find_primary_for_upsert(session, model, keys)
 
         if existing is None:
             session.add(model(**row))
