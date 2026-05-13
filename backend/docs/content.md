@@ -5,7 +5,11 @@ Alembic still owns database schema creation and migrations. These scripts only m
 
 The content workflows do not export or sync user accounts, characters, character inventory, character equipment, character abilities, character loadouts, gold, XP, or progression data.
 
-Combat stat modifiers should use the Godot-derived stat keys: `max_hp`, `move_speed`, `physical_power`, `spell_power`, `armor`, and `avoidance`.
+Equipment definitions currently support the slots `weapon`, `head`, `chest`, `arms`, `hands`, `legs`, and `feet`.
+
+Equipment stat modifiers should use only the official derived combat stat keys: `max_hp`, `move_speed`, `physical_power`, `spell_power`, `armor`, and `avoidance`.
+
+Future equipment stats may include `ability_haste` or `healing_power`; they are not implemented yet. Hands/gloves are a natural future source for ability haste or cooldown reduction when that system exists.
 
 When content JSON uses newly added columns, apply migrations before syncing:
 

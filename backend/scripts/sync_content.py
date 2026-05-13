@@ -43,6 +43,16 @@ CONTENT_ROW_DEFAULTS: dict[str, JsonRow] = {
 }
 
 
+OFFICIAL_EQUIPMENT_STAT_KEYS = {
+    "max_hp",
+    "move_speed",
+    "physical_power",
+    "spell_power",
+    "armor",
+    "avoidance",
+}
+
+
 CONTENT_LEGACY_STAT_KEY_RENAMES: dict[str, tuple[LegacyStatKeyRename, ...]] = {
     "ability_effects": (
         (
@@ -197,6 +207,47 @@ def apply_legacy_stat_key_renames(
     return prepared_rows
 
 
+def validate_content_rows(table_name: str, rows: Iterable[JsonRow]) -> list[JsonRow]:
+    prepared_rows = list(rows)
+    if table_name != "item_stat_modifiers":
+        return prepared_rows
+
+    for row in prepared_rows:
+        stat_key = row.get("stat_key")
+        if stat_key not in OFFICIAL_EQUIPMENT_STAT_KEYS:
+            raise ValueError(
+                "item_stat_modifiers contains unsupported stat_key "
+                f"{stat_key!r} for item_key {row.get('item_key')!r}."
+            )
+
+    return prepared_rows
+
+
+def prune_missing_item_stat_modifiers(
+    session: Session,
+    model: type,
+    rows: Iterable[JsonRow],
+    key_fields: tuple[str, ...],
+) -> None:
+    prepared_rows = list(rows)
+    managed_item_keys = {row["item_key"] for row in prepared_rows}
+    desired_keys = {
+        tuple(row[field] for field in key_fields)
+        for row in prepared_rows
+    }
+
+    if not managed_item_keys:
+        return
+
+    existing_rows = session.scalars(
+        select(model).where(model.item_key.in_(managed_item_keys))
+    ).all()
+    for existing_row in existing_rows:
+        existing_key = tuple(getattr(existing_row, field) for field in key_fields)
+        if existing_key not in desired_keys:
+            session.delete(existing_row)
+
+
 def upsert_rows(
     session: Session,
     model: type,
@@ -224,12 +275,23 @@ def sync_content(session: Session) -> dict[str, tuple[int, int]]:
     results: dict[str, tuple[int, int]] = {}
 
     for table_name, model, key_fields in CONTENT_TABLES:
-        rows = apply_legacy_stat_key_renames(
-            session,
+        rows = validate_content_rows(
             table_name,
-            model,
-            apply_row_defaults(table_name, load_rows(f"{table_name}.json")),
+            apply_legacy_stat_key_renames(
+                session,
+                table_name,
+                model,
+                apply_row_defaults(table_name, load_rows(f"{table_name}.json")),
+            ),
         )
+        if table_name == "item_stat_modifiers":
+            prune_missing_item_stat_modifiers(
+                session,
+                model,
+                rows,
+                key_fields,
+            )
+
         results[table_name] = upsert_rows(
             session,
             model,

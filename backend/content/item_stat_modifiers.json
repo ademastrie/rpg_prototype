@@ -26,7 +26,7 @@
   {
     "item_key": "padded_chest",
     "stat_key": "armor",
-    "value": 2.0,
+    "value": 0.04,
     "modifier_type": "flat"
   },
   {
@@ -48,9 +48,27 @@
     "modifier_type": "flat"
   },
   {
-    "item_key": "training_gloves",
-    "stat_key": "armor",
+    "item_key": "training_bow",
+    "stat_key": "avoidance",
+    "value": 0.02,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "training_bow",
+    "stat_key": "physical_power",
     "value": 1.0,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "training_gloves",
+    "stat_key": "physical_power",
+    "value": 1.0,
+    "modifier_type": "flat"
+  },
+  {
+    "item_key": "training_staff",
+    "stat_key": "spell_power",
+    "value": 2.0,
     "modifier_type": "flat"
   },
   {
@@ -61,8 +79,8 @@
   },
   {
     "item_key": "worn_boots",
-    "stat_key": "max_hp",
-    "value": 3.0,
+    "stat_key": "move_speed",
+    "value": 0.25,
     "modifier_type": "flat"
   }
 ]

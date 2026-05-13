@@ -88,14 +88,36 @@
     "is_active": true
   },
   {
+    "item_key": "training_bow",
+    "display_name": "Training Bow",
+    "description": "A light bow for basic range drills.",
+    "item_type": "equipment",
+    "equip_slot": "weapon",
+    "stackable": false,
+    "max_stack": 1,
+    "icon_key": "training_bow",
+    "is_active": true
+  },
+  {
     "item_key": "training_gloves",
     "display_name": "Training Gloves",
-    "description": "Light gloves made for weapon practice.",
+    "description": "Light gloves made for focused practice.",
     "item_type": "equipment",
     "equip_slot": "hands",
     "stackable": false,
     "max_stack": 1,
     "icon_key": "training_gloves",
+    "is_active": true
+  },
+  {
+    "item_key": "training_staff",
+    "display_name": "Training Staff",
+    "description": "A simple focus for basic spell drills.",
+    "item_type": "equipment",
+    "equip_slot": "weapon",
+    "stackable": false,
+    "max_stack": 1,
+    "icon_key": "training_staff",
     "is_active": true
   },
   {
