@@ -44,9 +44,10 @@ var _character_level_label: Label = null
 var _character_xp_label: Label = null
 var _character_gold_label: Label = null
 var _character_max_hp_label: Label = null
-var _character_damage_reduction_label: Label = null
-var _character_attack_power_label: Label = null
+var _character_physical_power_label: Label = null
 var _character_spell_power_label: Label = null
+var _character_armor_label: Label = null
+var _character_avoidance_label: Label = null
 var _character_move_speed_label: Label = null
 var _equipment_slot_labels: Dictionary = {}
 var _equipment_slot_options: Dictionary = {}
@@ -76,10 +77,12 @@ var _confirmed_equipment: Dictionary = {}
 var _is_equipment_change_pending: bool = false
 var _is_refreshing_equipment_ui: bool = false
 var _current_max_hp: int = 100
-var _current_damage_reduction: float = 0.0
-var _current_attack_power: float = 0.0
+var _current_physical_power: float = 0.0
 var _current_spell_power: float = 0.0
+var _current_armor: float = 0.0
+var _current_avoidance: float = 0.0
 var _current_move_speed: float = 0.0
+var _has_confirmed_combat_stats: bool = false
 var _dragged_panel: Control = null
 var _drag_offset: Vector2 = Vector2.ZERO
 
@@ -157,10 +160,17 @@ func update_combat_mode(combat_enabled: bool) -> void:
 
 
 func update_combat_stats(combat_stats: Dictionary) -> void:
-	_current_damage_reduction = float(combat_stats.get("damage_reduction", 0.0))
+	if combat_stats.is_empty():
+		_has_confirmed_combat_stats = false
+		_refresh_character_panel()
+		return
+
+	_has_confirmed_combat_stats = true
 	_current_max_hp = int(combat_stats.get("max_hp", _current_max_hp))
-	_current_attack_power = float(combat_stats.get("attack_power", _current_attack_power))
+	_current_physical_power = float(combat_stats.get("physical_power", combat_stats.get("attack_power", _current_physical_power)))
 	_current_spell_power = float(combat_stats.get("spell_power", _current_spell_power))
+	_current_armor = float(combat_stats.get("armor", combat_stats.get("damage_reduction", _current_armor)))
+	_current_avoidance = float(combat_stats.get("avoidance", _current_avoidance))
 	_current_move_speed = float(combat_stats.get("move_speed", _current_move_speed))
 	_refresh_character_panel()
 
@@ -381,10 +391,11 @@ func _build_character_panel() -> void:
 	_character_xp_label = _add_label(panel_vbox, "")
 	_character_gold_label = _add_label(panel_vbox, "")
 	_character_max_hp_label = _add_label(panel_vbox, "")
-	_character_damage_reduction_label = _add_label(panel_vbox, "")
-	_character_attack_power_label = _add_label(panel_vbox, "")
-	_character_spell_power_label = _add_label(panel_vbox, "")
 	_character_move_speed_label = _add_label(panel_vbox, "")
+	_character_physical_power_label = _add_label(panel_vbox, "")
+	_character_spell_power_label = _add_label(panel_vbox, "")
+	_character_armor_label = _add_label(panel_vbox, "")
+	_character_avoidance_label = _add_label(panel_vbox, "")
 	_add_label(panel_vbox, "Equipment")
 	for slot_name in EQUIPMENT_SLOTS:
 		var slot_label: Label = _add_label(panel_vbox, "")
@@ -592,11 +603,20 @@ func _refresh_character_panel() -> void:
 	_character_level_label.text = "Level: %s" % _current_level
 	_character_xp_label.text = "XP: %s/%s" % [_current_xp, _current_xp_to_next]
 	_character_gold_label.text = "Gold: %s" % _current_gold
-	_character_max_hp_label.text = "Max HP: %s" % _current_max_hp
-	_character_damage_reduction_label.text = "Damage Reduction: %s%%" % int(round(_current_damage_reduction * 100.0))
-	_character_attack_power_label.text = "Attack Power: %s" % _format_stat_number(_current_attack_power)
-	_character_spell_power_label.text = "Spell Power: %s" % _format_stat_number(_current_spell_power)
-	_character_move_speed_label.text = "Move Speed: %s" % _format_stat_number(_current_move_speed)
+	if not _has_confirmed_combat_stats:
+		_character_max_hp_label.text = "Max HP: --"
+		_character_move_speed_label.text = "Move Speed: --"
+		_character_physical_power_label.text = "Physical Power: --"
+		_character_spell_power_label.text = "Spell Power: --"
+		_character_armor_label.text = "Armor: --"
+		_character_avoidance_label.text = "Avoidance: --"
+	else:
+		_character_max_hp_label.text = "Max HP: %s" % _current_max_hp
+		_character_move_speed_label.text = "Move Speed: %s" % _format_stat_number(_current_move_speed)
+		_character_physical_power_label.text = "Physical Power: %s" % _format_stat_number(_current_physical_power)
+		_character_spell_power_label.text = "Spell Power: %s" % _format_stat_number(_current_spell_power)
+		_character_armor_label.text = "Armor: %s%%" % int(round(_current_armor * 100.0))
+		_character_avoidance_label.text = "Avoidance: %s%%" % int(round(_current_avoidance * 100.0))
 	for slot_name in EQUIPMENT_SLOTS:
 		if not _equipment_slot_labels.has(slot_name):
 			continue

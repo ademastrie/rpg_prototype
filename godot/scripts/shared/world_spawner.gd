@@ -135,7 +135,7 @@ const SERVER_ABILITY_CONFIGS: Dictionary = {
 		"arc_angle": 90.0,
 		"stat_modifiers": [
 			{"stat_key": "max_hp", "modifier_type": "flat", "value": 25.0},
-			{"stat_key": "damage_reduction", "modifier_type": "flat", "value": 0.20},
+			{"stat_key": "armor", "modifier_type": "flat", "value": 0.20},
 		],
 	},
 	"hp_regen": {
@@ -180,11 +180,24 @@ const SERVER_ABILITY_CONFIGS: Dictionary = {
 		],
 	},
 }
-const PLAYER_DAMAGE_REDUCTION_CAP: float = 0.80
 const FIREBALL_COLLISION_RADIUS: float = 0.45
 const MIN_PLAYER_MOVE_SPEED: float = 1.0
 const MAX_PLAYER_MOVE_SPEED: float = 10.0
-const SUPPORTED_PLAYER_STAT_KEYS: Array[String] = ["max_hp", "damage_reduction", "attack_power", "spell_power", "move_speed"]
+const PLAYER_AVOIDANCE_CAP: float = 0.30
+const PLAYER_ARMOR_CAP: float = 0.80
+const PLAYER_COMPUTED_STAT_DEFINITIONS: Dictionary = {
+	"max_hp": {"base": 100.0, "min": 1.0},
+	"move_speed": {"base": 4.0, "min": 1.0, "max": 10.0},
+	"physical_power": {"base": 0.0},
+	"spell_power": {"base": 0.0},
+	"armor": {"base": 0.0, "min": 0.0, "max": 0.80},
+	"avoidance": {"base": 0.0, "min": 0.0, "max": 0.30},
+}
+const PLAYER_STAT_ALIASES: Dictionary = {
+	"attack_power": "physical_power",
+	"damage_reduction": "armor",
+}
+const SUPPORTED_PLAYER_STAT_KEYS: Array[String] = ["max_hp", "move_speed", "physical_power", "spell_power", "armor", "avoidance"]
 
 
 func _ready() -> void:
@@ -620,18 +633,18 @@ func apply_enemy_damage_to_player(peer_id: int, raw_damage: int) -> bool:
 
 func _modified_player_damage_taken(peer_id: int, raw_damage: int) -> int:
 	var combat_stats: Dictionary = _player_combat_stats_by_peer.get(peer_id, _default_player_combat_stats()) as Dictionary
-	var damage_reduction: float = clamp(float(combat_stats.get("damage_reduction", 0.0)), 0.0, PLAYER_DAMAGE_REDUCTION_CAP)
-	return max(int(round(float(raw_damage) * (1.0 - damage_reduction))), 1)
+	var armor: float = clamp(float(combat_stats.get("armor", combat_stats.get("damage_reduction", 0.0))), 0.0, PLAYER_ARMOR_CAP)
+	return max(int(round(float(raw_damage) * (1.0 - armor))), 1)
 
 
 func _default_player_combat_stats() -> Dictionary:
-	return {
-		"max_hp": player_max_hp,
-		"damage_reduction": 0.0,
-		"attack_power": 0.0,
-		"spell_power": 0.0,
-		"move_speed": movement_speed,
-	}
+	var stats: Dictionary = {}
+	for stat_key in PLAYER_COMPUTED_STAT_DEFINITIONS.keys():
+		var definition: Dictionary = PLAYER_COMPUTED_STAT_DEFINITIONS[stat_key] as Dictionary
+		stats[stat_key] = float(definition.get("base", 0.0))
+	stats["max_hp"] = player_max_hp
+	stats["move_speed"] = movement_speed
+	return _finalize_player_combat_stats(stats)
 
 
 func _recalculate_player_combat_stats(peer_id: int, restore_current_hp_to_max: bool = false) -> void:
@@ -639,35 +652,21 @@ func _recalculate_player_combat_stats(peer_id: int, restore_current_hp_to_max: b
 		return
 
 	var combat_stats: Dictionary = _default_player_combat_stats()
-	var ability_stat_recompute: Dictionary = _apply_ability_stat_modifiers(peer_id, combat_stats)
-	var ability_move_speed_bonus: float = float(combat_stats.get("move_speed", movement_speed)) - movement_speed
+	_apply_ability_stat_modifiers(peer_id, combat_stats)
 	_apply_equipped_item_stat_modifiers(peer_id, combat_stats)
-	var equipment_move_speed_bonus: float = float(combat_stats.get("move_speed", movement_speed)) - movement_speed - ability_move_speed_bonus
-	combat_stats["damage_reduction"] = clamp(float(combat_stats.get("damage_reduction", 0.0)), 0.0, PLAYER_DAMAGE_REDUCTION_CAP)
-	combat_stats["max_hp"] = max(int(round(float(combat_stats.get("max_hp", player_max_hp)))), 1)
-	var previous_combat_stats: Dictionary = _player_combat_stats_by_peer.get(peer_id, {}) as Dictionary
-	var previous_move_speed: float = float(previous_combat_stats.get("move_speed", movement_speed))
-	combat_stats["move_speed"] = clamp(float(combat_stats.get("move_speed", movement_speed)), MIN_PLAYER_MOVE_SPEED, MAX_PLAYER_MOVE_SPEED)
+	combat_stats = _finalize_player_combat_stats(combat_stats)
 	_player_combat_stats_by_peer[peer_id] = combat_stats
 	_apply_computed_player_max_hp(peer_id, int(combat_stats.get("max_hp", player_max_hp)), restore_current_hp_to_max)
 	rpc_id(peer_id, "apply_player_combat_stats_update", peer_id, combat_stats)
-	var new_move_speed: float = float(combat_stats.get("move_speed", movement_speed))
-	if not is_equal_approx(previous_move_speed, new_move_speed):
-		print("Player move_speed recomputed: peer_id=%s base_move_speed=%s ability_move_speed_bonus=%s equipment_move_speed_bonus=%s final_move_speed=%s" % [
-			peer_id,
-			movement_speed,
-			ability_move_speed_bonus,
-			equipment_move_speed_bonus,
-			new_move_speed,
-		])
-	if bool(ability_stat_recompute.get("slash_applied", false)):
-		print("Player ability stat recomputed: peer_id=%s ability_key=slash max_hp_bonus=%s damage_reduction_bonus=%s final_max_hp=%s final_damage_reduction=%s" % [
-			peer_id,
-			int(round(float(ability_stat_recompute.get("slash_max_hp_bonus", 0.0)))),
-			float(ability_stat_recompute.get("slash_damage_reduction_bonus", 0.0)),
-			int(combat_stats.get("max_hp", player_max_hp)),
-			float(combat_stats.get("damage_reduction", 0.0)),
-		])
+	print("Player stats recomputed: peer_id=%s max_hp=%s move_speed=%s physical_power=%s spell_power=%s armor=%s avoidance=%s" % [
+		peer_id,
+		int(combat_stats.get("max_hp", player_max_hp)),
+		float(combat_stats.get("move_speed", movement_speed)),
+		float(combat_stats.get("physical_power", 0.0)),
+		float(combat_stats.get("spell_power", 0.0)),
+		float(combat_stats.get("armor", 0.0)),
+		float(combat_stats.get("avoidance", 0.0)),
+	])
 
 
 func _computed_player_move_speed(peer_id: int) -> float:
@@ -675,12 +674,29 @@ func _computed_player_move_speed(peer_id: int) -> float:
 	return clamp(float(combat_stats.get("move_speed", movement_speed)), MIN_PLAYER_MOVE_SPEED, MAX_PLAYER_MOVE_SPEED)
 
 
-func _apply_ability_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> Dictionary:
-	var recompute_event: Dictionary = {
-		"slash_applied": false,
-		"slash_max_hp_bonus": 0.0,
-		"slash_damage_reduction_bonus": 0.0,
-	}
+func _finalize_player_combat_stats(combat_stats: Dictionary) -> Dictionary:
+	for stat_key in PLAYER_COMPUTED_STAT_DEFINITIONS.keys():
+		var definition: Dictionary = PLAYER_COMPUTED_STAT_DEFINITIONS[stat_key] as Dictionary
+		if not combat_stats.has(stat_key):
+			combat_stats[stat_key] = float(definition.get("base", 0.0))
+
+	combat_stats["max_hp"] = max(int(round(float(combat_stats.get("max_hp", player_max_hp)))), 1)
+	combat_stats["move_speed"] = clamp(float(combat_stats.get("move_speed", movement_speed)), MIN_PLAYER_MOVE_SPEED, MAX_PLAYER_MOVE_SPEED)
+	combat_stats["physical_power"] = float(combat_stats.get("physical_power", 0.0))
+	combat_stats["spell_power"] = float(combat_stats.get("spell_power", 0.0))
+	combat_stats["armor"] = clamp(float(combat_stats.get("armor", 0.0)), 0.0, PLAYER_ARMOR_CAP)
+	combat_stats["avoidance"] = clamp(float(combat_stats.get("avoidance", 0.0)), 0.0, PLAYER_AVOIDANCE_CAP)
+	combat_stats["attack_power"] = combat_stats["physical_power"]
+	combat_stats["damage_reduction"] = combat_stats["armor"]
+	return combat_stats
+
+
+func _canonical_player_stat_key(raw_stat_key: String) -> String:
+	var stat_key: String = raw_stat_key.strip_edges().to_lower()
+	return str(PLAYER_STAT_ALIASES.get(stat_key, stat_key))
+
+
+func _apply_ability_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> void:
 	var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
 	var ability_keys: Dictionary = _ability_keys_by_peer.get(peer_id, {}) as Dictionary
 	for ability_name in loadout:
@@ -691,18 +707,7 @@ func _apply_ability_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> Di
 			if not (modifier_variant is Dictionary):
 				continue
 
-			var before_max_hp: float = float(combat_stats.get("max_hp", player_max_hp))
-			var before_damage_reduction: float = float(combat_stats.get("damage_reduction", 0.0))
 			_apply_stat_modifier_to_combat_stats(combat_stats, modifier_variant as Dictionary)
-			if ability_key == "slash":
-				recompute_event["slash_applied"] = true
-				var modifier: Dictionary = modifier_variant as Dictionary
-				var stat_key: String = str(modifier.get("stat_key", modifier.get("key", modifier.get("stat", "")))).strip_edges().to_lower()
-				if stat_key == "max_hp":
-					recompute_event["slash_max_hp_bonus"] = float(recompute_event["slash_max_hp_bonus"]) + float(combat_stats.get("max_hp", player_max_hp)) - before_max_hp
-				elif stat_key == "damage_reduction":
-					recompute_event["slash_damage_reduction_bonus"] = float(recompute_event["slash_damage_reduction_bonus"]) + float(combat_stats.get("damage_reduction", 0.0)) - before_damage_reduction
-	return recompute_event
 
 
 func _apply_equipped_item_stat_modifiers(peer_id: int, combat_stats: Dictionary) -> void:
@@ -740,7 +745,7 @@ func _equipment_item_stat_modifiers(equipment_item: Dictionary) -> Array:
 
 
 func _apply_stat_modifier_to_combat_stats(combat_stats: Dictionary, modifier: Dictionary) -> void:
-	var stat_key: String = str(modifier.get("stat_key", modifier.get("key", modifier.get("stat", "")))).strip_edges().to_lower()
+	var stat_key: String = _canonical_player_stat_key(str(modifier.get("stat_key", modifier.get("key", modifier.get("stat", "")))))
 	if not SUPPORTED_PLAYER_STAT_KEYS.has(stat_key):
 		return
 
@@ -755,10 +760,10 @@ func _apply_stat_modifier_to_combat_stats(combat_stats: Dictionary, modifier: Di
 				combat_stats["max_hp"] = int(round(float(combat_stats.get("max_hp", player_max_hp)) * (1.0 + _percent_modifier_value(value))))
 			else:
 				combat_stats["max_hp"] = int(round(float(combat_stats.get("max_hp", player_max_hp)) + value))
-		"damage_reduction":
-			var reduction_delta: float = _percent_modifier_value(value)
-			combat_stats["damage_reduction"] = float(combat_stats.get("damage_reduction", 0.0)) + reduction_delta
-		"attack_power", "spell_power", "move_speed":
+		"armor", "avoidance":
+			var chance_delta: float = _percent_modifier_value(value)
+			combat_stats[stat_key] = float(combat_stats.get(stat_key, 0.0)) + chance_delta
+		"physical_power", "spell_power", "move_speed":
 			if _is_percent_modifier(modifier_type):
 				combat_stats[stat_key] = float(combat_stats.get(stat_key, 0.0)) * (1.0 + _percent_modifier_value(value))
 			else:
@@ -1269,7 +1274,7 @@ func _ability_damage_amount(peer_id: int, ability_name: String) -> int:
 	var ability_key: String = _server_ability_key(ability_name)
 	var damage_effect: Dictionary = _ability_damage_effect(ability_config)
 	var base_damage: float = float(damage_effect.get("value", ability_config.get("damage", 0)))
-	var scaling_stat_key: String = str(damage_effect.get("scaling_stat_key", "")).strip_edges().to_lower()
+	var scaling_stat_key: String = _canonical_player_stat_key(str(damage_effect.get("scaling_stat_key", "")))
 	var scaling_ratio: float = float(damage_effect.get("scaling_ratio", 0.0))
 	var final_damage: float = base_damage
 	if scaling_stat_key != "" and scaling_ratio > 0.0:
@@ -1471,7 +1476,7 @@ func _normalize_stat_modifier(modifier_data: Dictionary) -> Dictionary:
 			)
 		)
 	)
-	var stat_key: String = str(raw_stat_key).strip_edges().to_lower()
+	var stat_key: String = _canonical_player_stat_key(str(raw_stat_key))
 	var modifier_type: String = str(modifier_data.get("modifier_type", modifier_data.get("type", "flat"))).strip_edges().to_lower()
 	var value: float = float(modifier_data.get("value", modifier_data.get("amount", 0.0)))
 	if stat_key == "" or is_zero_approx(value):
@@ -1884,7 +1889,7 @@ func _animate_projectile_visuals(delta: float) -> void:
 
 
 func _predict_and_reconcile_local_player(player: Node3D, peer_id: int, delta: float) -> void:
-	if local_prediction_enabled:
+	if local_prediction_enabled and _player_combat_stats_by_peer.has(peer_id):
 		# Local prediction is visual only. The server still owns authoritative movement.
 		var confirmed_move_speed: float = _computed_player_move_speed(peer_id)
 		player.position.x += _local_prediction_input.x * confirmed_move_speed * delta
