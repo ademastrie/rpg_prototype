@@ -11,6 +11,18 @@ Equipment stat modifiers should use only the official derived combat stat keys: 
 
 Future equipment stats may include `ability_haste` or `healing_power`; they are not implemented yet. Hands/gloves are a natural future source for ability haste or cooldown reduction when that system exists.
 
+Enemy content is split into archetypes, definitions, and spawns:
+
+- Enemy archetypes describe shared creature identity and future behavior/visual defaults. They are where content teaches what kind of enemy something is.
+- Enemy definitions are tuned variants. They keep the Godot-facing `enemy_key` and still own concrete level, stats, rewards, combat tuning, visual keys, and loot links for now.
+- Region enemy spawns place a specific variant in the world. Spawns still reference `region_enemy_spawns.enemy_key`, which points to an `enemy_definitions.enemy_key` variant.
+
+Enemy definitions support `level` and `base_xp` for backend XP awards. The legacy `xp_reward` field is still exported for compatibility with existing consumers, but server-side kill XP uses `base_xp`.
+
+Region definitions support `recommended_level_min`, `recommended_level_max`, and `xp_multiplier`. Keep normal zone pacing in enemy levels and base XP; region XP multipliers are for explicit special cases such as events, dungeons, or other clearly surfaced reward rules, not hidden zone balancing. Current regions use `xp_multiplier = 1.0`.
+
+Character XP has no level cap yet. Level-up ability unlocks, party XP, and global event multipliers are not implemented yet.
+
 When content JSON uses newly added columns, apply migrations before syncing:
 
 ```powershell
@@ -64,6 +76,7 @@ The script upserts rows by stable keys:
 - `ability_effects`: `ability_key`, `effect_type`, `target_team`, `stat_key`
 - `item_definitions`: `item_key`
 - `item_stat_modifiers`: `item_key`, `stat_key`, `modifier_type`
+- `enemy_archetypes`: `archetype_key`
 - `enemy_definitions`: `enemy_key`
 - `enemy_attacks`: `enemy_key`, `attack_key`
 - `enemy_loot_entries`: `enemy_key`, `payload_type`, `item_key`

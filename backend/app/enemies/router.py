@@ -12,6 +12,7 @@ router = APIRouter(prefix="/enemy-definitions", tags=["enemy-definitions"])
 
 def _enemy_definition_options() -> tuple:
     return (
+        selectinload(EnemyDefinition.archetype),
         selectinload(EnemyDefinition.attacks),
         selectinload(EnemyDefinition.loot_entries),
     )

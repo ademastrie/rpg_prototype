@@ -1,0 +1,26 @@
+[
+  {
+    "archetype_key": "brute",
+    "display_name": "Brute",
+    "description": "Large melee creature identity for slow, heavy combatants.",
+    "default_behavior_profile_key": "wander",
+    "default_visual_key": "brute",
+    "notes": "Initial archetype for the prototype brute variant."
+  },
+  {
+    "archetype_key": "caster",
+    "display_name": "Caster",
+    "description": "Ranged creature identity for spell or projectile attackers.",
+    "default_behavior_profile_key": "wander",
+    "default_visual_key": "caster",
+    "notes": "Initial archetype for the prototype caster variant."
+  },
+  {
+    "archetype_key": "humanoid_grunt",
+    "display_name": "Humanoid Grunt",
+    "description": "Basic humanoid melee creature identity.",
+    "default_behavior_profile_key": "wander",
+    "default_visual_key": "grunt",
+    "notes": "Initial archetype for the prototype grunt variant."
+  }
+]

@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = ""
     JWT_SECRET: str = ""
     JWT_EXPIRE_MINUTES: int = 60
+    GAME_SERVER_SECRET: str = ""
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_DIR / ".env",

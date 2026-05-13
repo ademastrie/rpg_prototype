@@ -26,18 +26,31 @@ class EnemyLootEntryResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class EnemyArchetypeSummaryResponse(BaseModel):
+    archetype_key: str
+    display_name: str
+    description: str | None
+    default_behavior_profile_key: str | None
+    default_visual_key: str | None
+
+    model_config = {"from_attributes": True}
+
+
 class EnemyDefinitionResponse(BaseModel):
     enemy_key: str
+    archetype_key: str | None
     display_name: str
     description: str | None
     level: int
     max_hp: int
     move_speed: float
+    base_xp: int
     xp_reward: int
     aggro_radius: float
     leash_radius: float | None
     visual_key: str | None
     is_active: bool
+    archetype: EnemyArchetypeSummaryResponse | None
     attacks: list[EnemyAttackResponse]
     loot_entries: list[EnemyLootEntryResponse]
 

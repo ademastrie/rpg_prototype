@@ -45,6 +45,9 @@ class RegionDefinitionResponse(BaseModel):
     region_key: str
     display_name: str
     description: str | None
+    recommended_level_min: int
+    recommended_level_max: int
+    xp_multiplier: float
     is_active: bool
 
     model_config = {"from_attributes": True}

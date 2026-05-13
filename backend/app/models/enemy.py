@@ -4,22 +4,50 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
 
+class EnemyArchetype(Base):
+    __tablename__ = "enemy_archetypes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    archetype_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    default_behavior_profile_key: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    default_visual_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+    enemy_definitions: Mapped[list["EnemyDefinition"]] = relationship(
+        back_populates="archetype",
+        order_by="EnemyDefinition.id",
+    )
+
+
 class EnemyDefinition(Base):
     __tablename__ = "enemy_definitions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     enemy_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    archetype_key: Mapped[str | None] = mapped_column(
+        ForeignKey("enemy_archetypes.archetype_key"),
+        nullable=True,
+    )
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     level: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     max_hp: Mapped[int] = mapped_column(Integer, nullable=False)
     move_speed: Mapped[float] = mapped_column(Float, nullable=False)
+    base_xp: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     xp_reward: Mapped[int] = mapped_column(Integer, nullable=False)
     aggro_radius: Mapped[float] = mapped_column(Float, nullable=False)
     leash_radius: Mapped[float | None] = mapped_column(Float, nullable=True)
     visual_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
 
+    archetype: Mapped[EnemyArchetype | None] = relationship(
+        back_populates="enemy_definitions"
+    )
     attacks: Mapped[list["EnemyAttack"]] = relationship(
         back_populates="enemy_definition",
         cascade="all, delete-orphan",

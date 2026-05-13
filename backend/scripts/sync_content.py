@@ -17,6 +17,7 @@ from app.db import SessionLocal  # noqa: E402
 from app.models import (  # noqa: E402
     AbilityDefinition,
     AbilityEffect,
+    EnemyArchetype,
     EnemyAttack,
     EnemyDefinition,
     EnemyLootEntry,
@@ -39,6 +40,11 @@ CONTENT_ROW_DEFAULTS: dict[str, JsonRow] = {
         "damage_school": None,
         "scaling_stat_key": None,
         "scaling_ratio": 0.0,
+    },
+    "region_definitions": {
+        "recommended_level_min": 1,
+        "recommended_level_max": 1,
+        "xp_multiplier": 1.0,
     },
 }
 
@@ -103,6 +109,7 @@ CONTENT_TABLES: tuple[ContentTable, ...] = (
         ItemStatModifier,
         ("item_key", "stat_key", "modifier_type"),
     ),
+    ("enemy_archetypes", EnemyArchetype, ("archetype_key",)),
     ("enemy_definitions", EnemyDefinition, ("enemy_key",)),
     ("enemy_attacks", EnemyAttack, ("enemy_key", "attack_key")),
     ("enemy_loot_entries", EnemyLootEntry, ("enemy_key", "payload_type", "item_key")),
@@ -130,10 +137,24 @@ def load_rows(filename: str) -> list[JsonRow]:
 
 def apply_row_defaults(table_name: str, rows: Iterable[JsonRow]) -> list[JsonRow]:
     defaults = CONTENT_ROW_DEFAULTS.get(table_name)
-    if defaults is None:
-        return list(rows)
+    prepared_rows = list(rows)
+    if table_name == "enemy_definitions":
+        return [apply_enemy_definition_defaults(row) for row in prepared_rows]
 
-    return [{**defaults, **row} for row in rows]
+    if defaults is None:
+        return prepared_rows
+
+    return [{**defaults, **row} for row in prepared_rows]
+
+
+def apply_enemy_definition_defaults(row: JsonRow) -> JsonRow:
+    prepared_row = dict(row)
+    if "base_xp" not in prepared_row:
+        prepared_row["base_xp"] = prepared_row.get("xp_reward", 0)
+    if "xp_reward" not in prepared_row:
+        prepared_row["xp_reward"] = prepared_row.get("base_xp", 0)
+
+    return prepared_row
 
 
 def set_values(instance: object, row: JsonRow) -> None:

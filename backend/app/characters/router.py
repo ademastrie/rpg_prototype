@@ -27,6 +27,8 @@ from app.models.ability import AbilityDefinition, CharacterAbility, CharacterAbi
 from app.models.character import Character
 from app.models.item import CharacterEquipment, CharacterInventory, ItemDefinition
 from app.models.user import User
+from app.progression import apply_character_xp, xp_to_next_level
+from app.server_auth import require_game_server_secret
 
 
 router = APIRouter(prefix="/characters", tags=["characters"])
@@ -34,10 +36,6 @@ MAX_LOADOUT_ENTRIES = 5
 DEFAULT_STARTER_ABILITY_KEY = "slash"
 STARTER_ABILITY_KEYS = {"slash", "firebolt", "shoot"}
 VALID_EQUIPMENT_SLOTS = {"weapon", "head", "chest", "arms", "hands", "legs", "feet"}
-
-
-def _xp_to_next_level(level: int) -> int:
-    return max(level, 1) * 100
 
 
 def _get_owned_character(character_id: int, user_id: int, db: Session) -> Character:
@@ -61,7 +59,7 @@ def _character_progression_response(character: Character) -> CharacterProgressio
         character_id=character.id,
         level=character.level,
         xp=character.xp,
-        xp_to_next=_xp_to_next_level(character.level),
+        xp_to_next=xp_to_next_level(character.level),
     )
 
 
@@ -523,6 +521,7 @@ def delete_character(
 def award_character_xp(
     character_id: int,
     payload: CharacterXpAward,
+    _: None = Depends(require_game_server_secret),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CharacterProgressionResponse:
@@ -533,10 +532,7 @@ def award_character_xp(
         )
 
     character = _get_owned_character(character_id, current_user.id, db)
-    character.xp += payload.xp_amount
-    while character.xp >= _xp_to_next_level(character.level):
-        character.xp -= _xp_to_next_level(character.level)
-        character.level += 1
+    apply_character_xp(character, payload.xp_amount)
 
     db.commit()
     db.refresh(character)
