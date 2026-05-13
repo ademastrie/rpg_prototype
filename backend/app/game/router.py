@@ -9,7 +9,11 @@ from app.models.character import Character
 from app.models.enemy import EnemyDefinition
 from app.models.region import RegionDefinition
 from app.models.user import User
-from app.progression import apply_character_xp, enemy_kill_xp_award
+from app.progression import (
+    apply_character_xp,
+    enemy_kill_xp_award,
+    level_delta_xp_multiplier,
+)
 from app.server_auth import require_game_server_secret
 
 
@@ -49,10 +53,7 @@ class SavePositionResponse(BaseModel):
 class AwardEnemyXpRequest(BaseModel):
     character_id: int
     enemy_key: str
-    enemy_level: int | None = None
-    enemy_base_xp: int | None = None
-    region_key: str | None = None
-    region_xp_multiplier: float | None = None
+    region_key: str
 
 
 class AwardEnemyXpResponse(BaseModel):
@@ -63,12 +64,17 @@ class AwardEnemyXpResponse(BaseModel):
     xp_awarded: int
     leveled_up: bool
     levels_gained: int
+    enemy_key: str
+    enemy_level: int
+    region_key: str
+    region_xp_multiplier: float
+    level_delta_multiplier: float
 
 
-def _resolve_enemy_xp_inputs(
+def _resolve_enemy_definition(
     payload: AwardEnemyXpRequest,
     db: Session,
-) -> tuple[int, int]:
+) -> EnemyDefinition:
     enemy_key = payload.enemy_key.strip()
     enemy_definition = db.scalar(
         select(EnemyDefinition).where(
@@ -76,56 +82,33 @@ def _resolve_enemy_xp_inputs(
             EnemyDefinition.is_active.is_(True),
         )
     )
-    if enemy_definition is not None:
-        return enemy_definition.level, enemy_definition.base_xp
-
-    if payload.enemy_level is None or payload.enemy_base_xp is None:
+    if enemy_definition is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Unknown enemy_key requires enemy_level and enemy_base_xp.",
+            detail=f"Unknown or inactive enemy_key: {enemy_key}.",
         )
 
-    if payload.enemy_level < 1:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="enemy_level must be at least 1.",
-        )
-
-    if payload.enemy_base_xp < 0:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="enemy_base_xp cannot be negative.",
-        )
-
-    return payload.enemy_level, payload.enemy_base_xp
+    return enemy_definition
 
 
-def _resolve_region_xp_multiplier(
+def _resolve_region_definition(
     payload: AwardEnemyXpRequest,
     db: Session,
-) -> float:
-    if payload.region_key is not None:
-        region_key = payload.region_key.strip()
-        region_definition = db.scalar(
-            select(RegionDefinition).where(
-                RegionDefinition.region_key == region_key,
-                RegionDefinition.is_active.is_(True),
-            )
+) -> RegionDefinition:
+    region_key = payload.region_key.strip()
+    region_definition = db.scalar(
+        select(RegionDefinition).where(
+            RegionDefinition.region_key == region_key,
+            RegionDefinition.is_active.is_(True),
         )
-        if region_definition is not None:
-            return region_definition.xp_multiplier
-
-    multiplier = payload.region_xp_multiplier
-    if multiplier is None:
-        return 1.0
-
-    if multiplier < 0:
+    )
+    if region_definition is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="region_xp_multiplier cannot be negative.",
+            detail=f"Unknown or inactive region_key: {region_key}.",
         )
 
-    return multiplier
+    return region_definition
 
 
 @router.post("/validate-join", response_model=ValidateJoinResponse)
@@ -206,13 +189,17 @@ def award_enemy_xp(
             detail="Character not found.",
         )
 
-    enemy_level, enemy_base_xp = _resolve_enemy_xp_inputs(payload, db)
-    region_xp_multiplier = _resolve_region_xp_multiplier(payload, db)
+    enemy_definition = _resolve_enemy_definition(payload, db)
+    region_definition = _resolve_region_definition(payload, db)
+    delta_multiplier = level_delta_xp_multiplier(
+        enemy_definition.level,
+        character.level,
+    )
     xp_awarded = enemy_kill_xp_award(
-        enemy_level=enemy_level,
+        enemy_level=enemy_definition.level,
         player_level=character.level,
-        enemy_base_xp=enemy_base_xp,
-        region_xp_multiplier=region_xp_multiplier,
+        enemy_base_xp=enemy_definition.base_xp,
+        region_xp_multiplier=region_definition.xp_multiplier,
     )
     result = apply_character_xp(character, xp_awarded)
 
@@ -227,4 +214,9 @@ def award_enemy_xp(
         xp_awarded=result.xp_awarded,
         leveled_up=result.leveled_up,
         levels_gained=result.levels_gained,
+        enemy_key=enemy_definition.enemy_key,
+        enemy_level=enemy_definition.level,
+        region_key=region_definition.region_key,
+        region_xp_multiplier=region_definition.xp_multiplier,
+        level_delta_multiplier=delta_multiplier,
     )

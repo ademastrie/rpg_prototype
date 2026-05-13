@@ -48,6 +48,7 @@ class RegionDefinitionResponse(BaseModel):
     recommended_level_min: int
     recommended_level_max: int
     xp_multiplier: float
+    loot_table_key: str | None
     is_active: bool
 
     model_config = {"from_attributes": True}

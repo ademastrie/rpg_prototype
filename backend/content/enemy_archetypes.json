@@ -5,6 +5,7 @@
     "description": "Large melee creature identity for slow, heavy combatants.",
     "default_behavior_profile_key": "wander",
     "default_visual_key": "brute",
+    "loot_table_key": null,
     "notes": "Initial archetype for the prototype brute variant."
   },
   {
@@ -13,6 +14,7 @@
     "description": "Ranged creature identity for spell or projectile attackers.",
     "default_behavior_profile_key": "wander",
     "default_visual_key": "caster",
+    "loot_table_key": null,
     "notes": "Initial archetype for the prototype caster variant."
   },
   {
@@ -21,6 +23,7 @@
     "description": "Basic humanoid melee creature identity.",
     "default_behavior_profile_key": "wander",
     "default_visual_key": "grunt",
+    "loot_table_key": null,
     "notes": "Initial archetype for the prototype grunt variant."
   }
 ]

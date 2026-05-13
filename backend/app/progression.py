@@ -60,7 +60,19 @@ def enemy_kill_xp_award(
 def apply_character_xp(character: Character, xp_awarded: int) -> XpAwardResult:
     awarded = max(int(xp_awarded), 0)
     character.level = max(character.level, 1)
-    character.xp = max(character.xp, 0) + awarded
+    character.xp = max(character.xp, 0)
+
+    if awarded == 0:
+        return XpAwardResult(
+            character_id=character.id,
+            level=character.level,
+            current_xp=character.xp,
+            xp_to_next_level=xp_to_next_level(character.level),
+            xp_awarded=0,
+            levels_gained=0,
+        )
+
+    character.xp += awarded
 
     levels_gained = 0
     while character.xp >= xp_to_next_level(character.level):

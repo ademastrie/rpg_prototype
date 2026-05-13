@@ -16,6 +16,7 @@ class EnemyArchetype(Base):
         nullable=True,
     )
     default_visual_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    loot_table_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     notes: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     enemy_definitions: Mapped[list["EnemyDefinition"]] = relationship(
@@ -39,7 +40,8 @@ class EnemyDefinition(Base):
     max_hp: Mapped[int] = mapped_column(Integer, nullable=False)
     move_speed: Mapped[float] = mapped_column(Float, nullable=False)
     base_xp: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
-    xp_reward: Mapped[int] = mapped_column(Integer, nullable=False)
+    loot_table_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tier: Mapped[str] = mapped_column(String(32), default="normal", server_default="normal", nullable=False)
     aggro_radius: Mapped[float] = mapped_column(Float, nullable=False)
     leash_radius: Mapped[float | None] = mapped_column(Float, nullable=True)
     visual_key: Mapped[str | None] = mapped_column(String(100), nullable=True)

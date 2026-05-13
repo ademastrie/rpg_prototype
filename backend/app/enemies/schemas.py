@@ -32,6 +32,7 @@ class EnemyArchetypeSummaryResponse(BaseModel):
     description: str | None
     default_behavior_profile_key: str | None
     default_visual_key: str | None
+    loot_table_key: str | None
 
     model_config = {"from_attributes": True}
 
@@ -45,7 +46,8 @@ class EnemyDefinitionResponse(BaseModel):
     max_hp: int
     move_speed: float
     base_xp: int
-    xp_reward: int
+    loot_table_key: str | None
+    tier: str
     aggro_radius: float
     leash_radius: float | None
     visual_key: str | None

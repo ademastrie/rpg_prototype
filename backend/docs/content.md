@@ -14,12 +14,22 @@ Future equipment stats may include `ability_haste` or `healing_power`; they are 
 Enemy content is split into archetypes, definitions, and spawns:
 
 - Enemy archetypes describe shared creature identity and future behavior/visual defaults. They are where content teaches what kind of enemy something is.
-- Enemy definitions are tuned variants. They keep the Godot-facing `enemy_key` and still own concrete level, stats, rewards, combat tuning, visual keys, and loot links for now.
+- Enemy definitions are tuned variants. They keep the Godot-facing `enemy_key` and own concrete level, stats, XP rewards, combat tuning, visual keys, and variant loot hooks.
 - Region enemy spawns place a specific variant in the world. Spawns still reference `region_enemy_spawns.enemy_key`, which points to an `enemy_definitions.enemy_key` variant.
 
-Enemy definitions support `level` and `base_xp` for backend XP awards. The legacy `xp_reward` field is still exported for compatibility with existing consumers, but server-side kill XP uses `base_xp`.
+Enemy definitions support `level` and `base_xp` for backend XP awards. `base_xp` is the canonical enemy XP field; archetypes do not own XP rewards. Final kill XP is calculated from enemy variant `base_xp`, the enemy/player level delta multiplier, and the region `xp_multiplier`.
 
-Region definitions support `recommended_level_min`, `recommended_level_max`, and `xp_multiplier`. Keep normal zone pacing in enemy levels and base XP; region XP multipliers are for explicit special cases such as events, dungeons, or other clearly surfaced reward rules, not hidden zone balancing. Current regions use `xp_multiplier = 1.0`.
+Region definitions support `recommended_level_min`, `recommended_level_max`, `xp_multiplier`, and optional `loot_table_key`. Keep normal zone pacing in enemy levels and base XP; region XP multipliers are for explicit special cases such as events, dungeons, or other clearly surfaced reward rules, not hidden zone balancing. Current regions use `xp_multiplier = 1.0`.
+
+Loot is still resolved through the existing enemy-key-specific `enemy_loot_entries` content. The optional `loot_table_key` fields are structure hooks for a later layered resolver and may be null:
+
+- Global loot tables will cover broad world, event, or account-wide drop rules.
+- Region loot tables will cover zone-themed drops.
+- Archetype loot tables will cover creature-family drops.
+- Variant loot tables will cover drops specific to one enemy definition.
+- Enemy definition `tier` defaults to `normal` and is reserved for future normal, elite, rare, or boss modifiers.
+
+Future loot can come from multiple layers, but this content pass only adds hooks and preserves current enemy-specific loot behavior.
 
 Character XP has no level cap yet. Level-up ability unlocks, party XP, and global event multipliers are not implemented yet.
 

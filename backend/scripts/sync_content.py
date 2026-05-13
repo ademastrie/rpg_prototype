@@ -45,6 +45,14 @@ CONTENT_ROW_DEFAULTS: dict[str, JsonRow] = {
         "recommended_level_min": 1,
         "recommended_level_max": 1,
         "xp_multiplier": 1.0,
+        "loot_table_key": None,
+    },
+    "enemy_archetypes": {
+        "loot_table_key": None,
+    },
+    "enemy_definitions": {
+        "loot_table_key": None,
+        "tier": "normal",
     },
 }
 
@@ -138,23 +146,10 @@ def load_rows(filename: str) -> list[JsonRow]:
 def apply_row_defaults(table_name: str, rows: Iterable[JsonRow]) -> list[JsonRow]:
     defaults = CONTENT_ROW_DEFAULTS.get(table_name)
     prepared_rows = list(rows)
-    if table_name == "enemy_definitions":
-        return [apply_enemy_definition_defaults(row) for row in prepared_rows]
-
     if defaults is None:
         return prepared_rows
 
     return [{**defaults, **row} for row in prepared_rows]
-
-
-def apply_enemy_definition_defaults(row: JsonRow) -> JsonRow:
-    prepared_row = dict(row)
-    if "base_xp" not in prepared_row:
-        prepared_row["base_xp"] = prepared_row.get("xp_reward", 0)
-    if "xp_reward" not in prepared_row:
-        prepared_row["xp_reward"] = prepared_row.get("base_xp", 0)
-
-    return prepared_row
 
 
 def set_values(instance: object, row: JsonRow) -> None:

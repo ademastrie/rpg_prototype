@@ -31,7 +31,7 @@ $body = @{
 Invoke-RestMethod -Method Post "http://localhost:8000/game/server/award-enemy-xp" -Headers $headers -Body $body -ContentType "application/json"
 ```
 
-The response confirms `character_id`, `level`, `current_xp`, `xp_to_next_level`, `xp_awarded`, `leveled_up`, and `levels_gained`. XP uses enemy `base_xp`, enemy/player level delta, and region `xp_multiplier`; no level cap is implemented yet.
+The request only sends `character_id`, `enemy_key`, and `region_key`; the backend looks up enemy level/base XP and the region XP multiplier from content. The response confirms `character_id`, `level`, `current_xp`, `xp_to_next_level`, `xp_awarded`, `leveled_up`, `levels_gained`, `enemy_key`, `enemy_level`, `region_key`, `region_xp_multiplier`, and `level_delta_multiplier`. XP uses enemy `base_xp`, enemy/player level delta, and region `xp_multiplier`; no level cap is implemented yet.
 
 ## Region patrol paths
 

@@ -29,6 +29,7 @@ class RegionDefinition(Base):
         server_default="1",
         nullable=False,
     )
+    loot_table_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
