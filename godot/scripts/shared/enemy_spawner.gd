@@ -850,7 +850,7 @@ func _resolve_enemy_melee_attack(enemy_id: int) -> void:
 
 	var world_spawner: Node = get_node_or_null("../WorldSpawner")
 	if world_spawner != null:
-		world_spawner.call("apply_enemy_damage_to_player", target_peer_id, _enemy_definition_int(enemy_id, "melee_attack_damage", 15))
+		world_spawner.call("apply_enemy_damage_to_player", target_peer_id, _enemy_definition_int(enemy_id, "melee_attack_damage", 15), enemy_id, _enemy_melee_attack_key(enemy_id))
 
 
 func _clear_enemy_melee_windup(enemy_id: int) -> void:
@@ -931,7 +931,7 @@ func _resolve_enemy_ranged_attack(enemy_id: int) -> void:
 
 	var world_spawner: Node = get_node_or_null("../WorldSpawner")
 	if world_spawner != null:
-		world_spawner.call("apply_enemy_damage_to_player", target_peer_id, _enemy_definition_int(enemy_id, "ranged_attack_damage", 12))
+		world_spawner.call("apply_enemy_damage_to_player", target_peer_id, _enemy_definition_int(enemy_id, "ranged_attack_damage", 12), enemy_id, _enemy_ranged_attack_key(enemy_id))
 
 
 func _clear_enemy_ranged_windup(enemy_id: int) -> void:

@@ -601,16 +601,17 @@ func _apply_enemy_contact_damage(_delta: float) -> void:
 			continue
 
 		var player_position: Vector3 = players[peer_id] as Vector3
-		if _is_enemy_in_contact_range(player_position, enemy_positions):
-			if apply_enemy_damage_to_player(peer_id_int, enemy_contact_damage):
+		var contact_enemy_id: int = _enemy_contact_id_in_range(player_position, enemy_positions)
+		if contact_enemy_id > 0:
+			if apply_enemy_damage_to_player(peer_id_int, enemy_contact_damage, contact_enemy_id, "contact"):
 				_last_contact_damage_time_by_peer[peer_id] = now_seconds
 
 
 func apply_enemy_melee_damage(peer_id: int, damage: int) -> bool:
-	return apply_enemy_damage_to_player(peer_id, damage)
+	return apply_enemy_damage_to_player(peer_id, damage, 0, "melee")
 
 
-func apply_enemy_damage_to_player(peer_id: int, raw_damage: int) -> bool:
+func apply_enemy_damage_to_player(peer_id: int, raw_damage: int, enemy_id: int = 0, source_label: String = "enemy") -> bool:
 	if not multiplayer.is_server() or raw_damage <= 0 or not players.has(peer_id):
 		return false
 	if bool(_player_is_down_by_peer.get(peer_id, false)):
@@ -620,6 +621,9 @@ func apply_enemy_damage_to_player(peer_id: int, raw_damage: int) -> bool:
 	if current_hp <= 0:
 		return false
 
+	if _roll_player_avoidance(peer_id, source_label, enemy_id):
+		return true
+
 	var final_damage: int = _modified_player_damage_taken(peer_id, raw_damage)
 	current_hp = max(current_hp - final_damage, 0)
 	_player_current_hp_by_peer[peer_id] = current_hp
@@ -628,6 +632,27 @@ func apply_enemy_damage_to_player(peer_id: int, raw_damage: int) -> bool:
 	if current_hp <= 0:
 		_mark_player_down(peer_id)
 
+	return true
+
+
+func _roll_player_avoidance(peer_id: int, source_label: String, enemy_id: int = 0) -> bool:
+	var combat_stats: Dictionary = _player_combat_stats_by_peer.get(peer_id, _default_player_combat_stats()) as Dictionary
+	var avoidance_chance: float = clamp(float(combat_stats.get("avoidance", 0.0)), 0.0, PLAYER_AVOIDANCE_CAP)
+	if avoidance_chance <= 0.0:
+		return false
+
+	var roll: float = randf()
+	if roll >= avoidance_chance:
+		return false
+
+	print("Enemy attack avoided: peer_id=%s enemy_id=%s source=%s avoidance=%s roll=%s" % [
+		peer_id,
+		enemy_id,
+		source_label,
+		avoidance_chance,
+		roll,
+	])
+	rpc_id(peer_id, "apply_status_message", peer_id, "Avoided")
 	return true
 
 
@@ -844,14 +869,14 @@ func _on_player_respawn_timer_timeout(peer_id: int, respawn_timer: Timer) -> voi
 	print("Player peer %s respawned." % peer_id)
 
 
-func _is_enemy_in_contact_range(player_position: Vector3, enemy_positions: Dictionary) -> bool:
+func _enemy_contact_id_in_range(player_position: Vector3, enemy_positions: Dictionary) -> int:
 	for enemy_id in enemy_positions:
 		var enemy_position: Vector3 = enemy_positions[enemy_id] as Vector3
 		var offset_xz: Vector2 = Vector2(enemy_position.x - player_position.x, enemy_position.z - player_position.z)
 		if offset_xz.length() <= enemy_contact_range:
-			return true
+			return int(enemy_id)
 
-	return false
+	return 0
 
 
 func _process_prototype_loot_pickups() -> void:
