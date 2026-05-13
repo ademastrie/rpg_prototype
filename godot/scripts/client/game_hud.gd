@@ -506,19 +506,28 @@ func _build_inventory_panel() -> void:
 	_inventory_panel.offset_top = 556.0
 	_inventory_panel.offset_right = -16.0
 	_inventory_panel.offset_bottom = 760.0
+	_inventory_panel.custom_minimum_size = Vector2(320.0, 204.0)
 	_apply_panel_style(_inventory_panel)
 	_root.add_child(_inventory_panel)
 
 	var panel_vbox: VBoxContainer = VBoxContainer.new()
 	panel_vbox.add_theme_constant_override("separation", 6)
+	panel_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_inventory_panel.add_child(panel_vbox)
 
 	var title_label: Label = _add_title_label(panel_vbox, "Inventory")
 	title_label.gui_input.connect(_on_panel_drag_handle_input.bind(_inventory_panel))
 
+	var inventory_scroll: ScrollContainer = ScrollContainer.new()
+	inventory_scroll.name = "InventoryScroll"
+	inventory_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	inventory_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	panel_vbox.add_child(inventory_scroll)
+
 	_inventory_list = VBoxContainer.new()
-	_inventory_list.add_theme_constant_override("separation", 2)
-	panel_vbox.add_child(_inventory_list)
+	_inventory_list.add_theme_constant_override("separation", 4)
+	_inventory_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inventory_scroll.add_child(_inventory_list)
 	_refresh_inventory_panel()
 
 
@@ -643,10 +652,6 @@ func _equipment_display_text(slot_name: String) -> String:
 	if label_text == "":
 		return "Empty"
 
-	var inventory_entry_id: String = _inventory_entry_id(equipment_item)
-	if inventory_entry_id != "":
-		return "%s (%s)" % [label_text, inventory_entry_id]
-
 	return label_text
 
 
@@ -729,7 +734,7 @@ func _add_equipment_option(option: OptionButton, item: Dictionary, quantity: int
 
 	var display_name: String = _equipment_item_display_name(item, item_key)
 	var option_text: String = display_name if display_name != "" else item_key
-	if quantity >= 0:
+	if quantity >= 0 and _inventory_item_shows_quantity(item):
 		option_text = "%s x%s" % [option_text, quantity]
 	option.add_item(option_text)
 	option.set_item_metadata(option.get_item_count() - 1, {
@@ -863,15 +868,88 @@ func _refresh_inventory_panel() -> void:
 		if inventory_entry_id != "" and equipped_inventory_entry_ids.has(inventory_entry_id):
 			continue
 
-		var display_name: String = str(item.get("display_name", item_key)).strip_edges()
-		var quantity: int = max(int(item.get("quantity", 0)), 0)
-		if display_name == "":
-			display_name = item_key
-		_add_label(_inventory_list, "%s x%s" % [display_name, quantity])
+		_add_inventory_row(_inventory_list, _inventory_item_display_text(item, item_key))
 		visible_item_count += 1
 
 	if visible_item_count == 0:
 		_add_label(_inventory_list, "No unequipped items.")
+
+
+func _add_inventory_row(parent: Control, text: String) -> void:
+	var row_panel: PanelContainer = PanelContainer.new()
+	row_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var row_style: StyleBoxFlat = StyleBoxFlat.new()
+	row_style.bg_color = Color(0.11, 0.12, 0.14, 0.88)
+	row_style.border_color = Color(0.28, 0.30, 0.34, 0.9)
+	row_style.set_border_width_all(1)
+	row_style.set_corner_radius_all(4)
+	row_style.set_content_margin(SIDE_LEFT, 8.0)
+	row_style.set_content_margin(SIDE_TOP, 5.0)
+	row_style.set_content_margin(SIDE_RIGHT, 8.0)
+	row_style.set_content_margin(SIDE_BOTTOM, 5.0)
+	row_panel.add_theme_stylebox_override("panel", row_style)
+	parent.add_child(row_panel)
+
+	var label: Label = _add_label(row_panel, text)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+
+func _inventory_item_display_text(item: Dictionary, item_key: String) -> String:
+	var display_name: String = str(item.get("display_name", item_key)).strip_edges()
+	if display_name == "":
+		display_name = item_key
+
+	if _inventory_item_shows_quantity(item):
+		var quantity: int = max(int(item.get("quantity", 0)), 0)
+		return "%s x%s" % [display_name, quantity]
+
+	return display_name
+
+
+func _inventory_item_shows_quantity(item: Dictionary) -> bool:
+	var stackable_flag: Variant = _inventory_item_stackable_flag(item)
+	if stackable_flag != null:
+		return _variant_is_true(stackable_flag)
+
+	return _inventory_item_equip_slot(item) == ""
+
+
+func _variant_is_true(value: Variant) -> bool:
+	if value is bool:
+		return bool(value)
+	if value is int:
+		return int(value) != 0
+	if value is float:
+		return not is_zero_approx(float(value))
+
+	var value_text: String = str(value).strip_edges().to_lower()
+	return value_text == "true" or value_text == "yes" or value_text == "1"
+
+
+func _inventory_item_stackable_flag(item: Dictionary) -> Variant:
+	for key in ["stackable", "is_stackable"]:
+		if item.has(key):
+			return item[key]
+
+	if item.get("definition", null) is Dictionary:
+		var definition: Dictionary = item.get("definition", {}) as Dictionary
+		for key in ["stackable", "is_stackable"]:
+			if definition.has(key):
+				return definition[key]
+
+	if item.get("item", null) is Dictionary:
+		var nested_item: Dictionary = item.get("item", {}) as Dictionary
+		for key in ["stackable", "is_stackable"]:
+			if nested_item.has(key):
+				return nested_item[key]
+		if nested_item.get("definition", null) is Dictionary:
+			var nested_definition: Dictionary = nested_item.get("definition", {}) as Dictionary
+			for key in ["stackable", "is_stackable"]:
+				if nested_definition.has(key):
+					return nested_definition[key]
+
+	return null
 
 
 func _confirmed_equipped_inventory_entry_ids() -> Array[String]:
