@@ -13,6 +13,7 @@ from app.progression import (
     apply_character_xp,
     enemy_kill_xp_award,
     level_delta_xp_multiplier,
+    xp_to_next_level,
 )
 from app.server_auth import require_game_server_secret
 
@@ -30,6 +31,8 @@ class ValidateJoinResponse(BaseModel):
     character_name: str
     level: int
     xp: int
+    current_xp: int
+    xp_to_next_level: int
     gold: int
     region_id: str
     position_x: float
@@ -135,6 +138,8 @@ def validate_join(
         character_name=character.name,
         level=character.level,
         xp=character.xp,
+        current_xp=character.xp,
+        xp_to_next_level=xp_to_next_level(character.level),
         gold=character.gold,
         region_id=character.region_id,
         position_x=character.position_x,

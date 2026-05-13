@@ -81,10 +81,11 @@ func set_selected_character(character_data: Dictionary) -> void:
 	var character_name := str(selected_character.get("name", "Unnamed"))
 	var level := int(selected_character.get("level", 1))
 	var xp := int(selected_character.get("xp", 0))
+	var xp_to_next := int(selected_character.get("xp_to_next", selected_character.get("xp_to_next_level", 0)))
 	var gold := int(selected_character.get("gold", 0))
 	var region_id := str(selected_character.get("region_id", "unknown_region"))
 	_character_status_text = "Character: %s | Level %s | Region: %s" % [character_name, level, region_id]
-	game_hud.call("update_progression", level, xp, level * 100)
+	game_hud.call("update_progression", level, xp, xp_to_next)
 	game_hud.call("update_gold", gold)
 	if debug_client_startup_logs:
 		print("Client game loaded character: %s" % selected_character)
@@ -210,12 +211,21 @@ func _on_character_progression_updated(peer_id: int, progression: Dictionary) ->
 
 	var level: int = int(progression.get("level", 1))
 	var xp: int = int(progression.get("xp", 0))
-	var xp_to_next: int = int(progression.get("xp_to_next", level * 100))
-	game_hud.call("update_progression", level, xp, xp_to_next)
+	var xp_to_next: int = int(progression.get("xp_to_next", 0))
+	var xp_awarded: int = int(progression.get("xp_awarded", 0))
+	var leveled_up: bool = bool(progression.get("leveled_up", false))
+	var levels_gained: int = int(progression.get("levels_gained", 0))
+	game_hud.call("update_progression", level, xp, xp_to_next, xp_awarded, leveled_up, levels_gained)
 	selected_character["level"] = level
 	selected_character["xp"] = xp
+	selected_character["xp_to_next"] = xp_to_next
 	ClientSession.selected_character["level"] = level
 	ClientSession.selected_character["xp"] = xp
+	ClientSession.selected_character["xp_to_next"] = xp_to_next
+	if leveled_up:
+		game_hud.call("show_status_message", "Level Up! %s" % level)
+	elif xp_awarded > 0:
+		game_hud.call("show_status_message", "+%s XP" % xp_awarded)
 	_character_status_text = "Character: %s | Level %s | Region: %s" % [
 		str(selected_character.get("name", "Unnamed")),
 		level,

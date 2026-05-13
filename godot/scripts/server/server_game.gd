@@ -2,6 +2,7 @@ extends Node
 
 @export var server_port: int = 7777
 @export var backend_base_url: String = "http://127.0.0.1:8000"
+@export var game_server_secret: String = ""
 @export var server_region_id: String = "starting_region"
 @export var hosted_region_key: String = "starter_field"
 @export var debug_server_startup_logs: bool = false
@@ -17,6 +18,7 @@ var _join_timing_start_msec_by_peer: Dictionary = {}
 var _enemy_definition_startup_request: HTTPRequest
 var _region_enemy_spawn_startup_request: HTTPRequest
 var _region_patrol_path_startup_request: HTTPRequest
+var _warned_missing_game_server_secret: bool = false
 
 const BACKEND_ABILITY_NAME_BY_KEY: Dictionary = {
 	"slash": "Slash",
@@ -25,10 +27,6 @@ const BACKEND_ABILITY_NAME_BY_KEY: Dictionary = {
 	"firebolt": "Firebolt",
 	"shoot": "Shoot",
 }
-const LEVEL_UNLOCK_REWARDS: Array[Dictionary] = [
-	{"level": 2, "ability_key": "hp_regen"},
-	{"level": 3, "ability_key": "damage_aura"},
-]
 const PROTOTYPE_ITEM_DISPLAY_NAMES: Dictionary = {
 	"slime_gel": "Slime Gel",
 	"training_sword": "Training Sword",
@@ -50,7 +48,23 @@ const EQUIPMENT_SLOTS: Array[String] = ["weapon", "head", "chest", "arms", "hand
 func _ready() -> void:
 	if debug_server_startup_logs:
 		print("Server game scene ready.")
+	if _configured_game_server_secret() == "":
+		_warn_missing_game_server_secret_once()
 	_start_server()
+
+
+func _configured_game_server_secret() -> String:
+	var configured_secret: String = game_server_secret.strip_edges()
+	if configured_secret != "":
+		return configured_secret
+	return OS.get_environment("GAME_SERVER_SECRET").strip_edges()
+
+
+func _warn_missing_game_server_secret_once() -> void:
+	if _warned_missing_game_server_secret:
+		return
+	_warned_missing_game_server_secret = true
+	print("XP awards will fail until GAME_SERVER_SECRET is configured for the Godot dedicated server.")
 
 
 func _start_server() -> void:
@@ -384,7 +398,8 @@ func _on_join_validation_completed(
 	var character_id: int = int(response_data.get("character_id", 0))
 	var character_name: String = str(response_data.get("character_name", ""))
 	var level: int = int(response_data.get("level", 1))
-	var xp: int = int(response_data.get("xp", 0))
+	var xp: int = int(response_data.get("current_xp", response_data.get("xp", 0)))
+	var xp_to_next: int = int(response_data.get("xp_to_next_level", response_data.get("xp_to_next", 0)))
 	var gold: int = int(response_data.get("gold", 0))
 	var region_id: String = str(response_data.get("region_id", ""))
 	var position_x: float = float(response_data.get("position_x", 0.0))
@@ -406,7 +421,7 @@ func _on_join_validation_completed(
 		"access_token": access_token,
 		"level": level,
 		"xp": xp,
-		"xp_to_next": level * 100,
+		"xp_to_next": xp_to_next,
 		"gold": gold,
 		"region_id": region_id,
 		"position_x": position_x,
@@ -523,7 +538,7 @@ func _complete_validated_join(peer_id: int, session: Dictionary, loadout_data: D
 	world_spawner.call("apply_confirmed_character_progression", peer_id, {
 		"level": int(session.get("level", 1)),
 		"xp": int(session.get("xp", 0)),
-		"xp_to_next": int(session.get("xp_to_next", int(session.get("level", 1)) * 100)),
+		"xp_to_next": int(session.get("xp_to_next", 0)),
 	})
 	world_spawner.call("apply_confirmed_character_gold", peer_id, int(session.get("gold", 0)))
 	world_spawner.call("apply_confirmed_character_inventory", peer_id, session.get("inventory_items", []) as Array)
@@ -1148,10 +1163,12 @@ func _on_ability_loadout_update_completed(
 
 func _on_enemy_killed(attacker_peer_id: int, enemy_id: int) -> void:
 	if not connected_peers.has(attacker_peer_id):
+		print("Cannot award XP for enemy %s: credited peer %s is not connected." % [enemy_id, attacker_peer_id])
 		return
 
 	var session: Dictionary = peer_sessions.get(attacker_peer_id, {}) as Dictionary
 	if not bool(session.get("joined", false)):
+		print("Cannot award XP for enemy %s: credited peer %s has no validated session." % [enemy_id, attacker_peer_id])
 		return
 
 	var enemy_level: int = int(enemy_spawner.call("get_enemy_level", enemy_id))
@@ -1515,32 +1532,40 @@ func _award_kill_xp(peer_id: int, enemy_id: int) -> void:
 	if not bool(session.get("joined", false)):
 		return
 
-	var access_token: String = str(session.get("access_token", ""))
 	var character_id: int = int(session.get("character_id", 0))
-	if access_token.strip_edges() == "" or character_id <= 0:
+	if character_id <= 0:
 		print("Cannot award XP for peer %s enemy %s: missing validated session data." % [peer_id, enemy_id])
 		return
 
-	var xp_reward: int = int(enemy_spawner.call("get_enemy_xp_reward", enemy_id))
-	if xp_reward <= 0:
-		print("Cannot award XP for peer %s enemy %s: missing enemy definition XP reward." % [peer_id, enemy_id])
+	var enemy_key: String = str(enemy_spawner.call("get_enemy_key", enemy_id)).strip_edges()
+	var region_key: String = _hosted_region_key_for_backend()
+	if enemy_key == "" or region_key == "":
+		print("Cannot award XP for peer %s enemy %s: missing enemy_key='%s' or region_key='%s'." % [peer_id, enemy_id, enemy_key, region_key])
+		return
+
+	var secret: String = _configured_game_server_secret()
+	if secret == "":
+		_warn_missing_game_server_secret_once()
+		print("XP award skipped: missing game server secret character_id=%s enemy_key=%s region_key=%s xp_awarded=0" % [character_id, enemy_key, region_key])
 		return
 
 	var request: HTTPRequest = HTTPRequest.new()
 	add_child(request)
-	request.request_completed.connect(_on_award_xp_completed.bind(peer_id, enemy_id, request))
+	request.request_completed.connect(_on_award_xp_completed.bind(peer_id, enemy_id, enemy_key, character_id, region_key, request))
 
 	var headers: PackedStringArray = PackedStringArray([
 		"Content-Type: application/json",
-		"Authorization: Bearer %s" % access_token,
+		"X-Game-Server-Secret: %s" % secret,
 	])
-	# Enemy XP comes from cached durable backend definitions; Godot only owns the
-	# live kill credit flow and asks the backend to persist character XP.
-	var body: String = JSON.stringify({"xp_amount": xp_reward})
-	var url: String = "%s/characters/%s/xp" % [_normalized_backend_base_url(), character_id]
+	var body: String = JSON.stringify({
+		"character_id": character_id,
+		"enemy_key": enemy_key,
+		"region_key": region_key,
+	})
+	var url: String = "%s/game/server/award-enemy-xp" % _normalized_backend_base_url()
 	var error: Error = request.request(url, headers, HTTPClient.METHOD_POST, body)
 	if error != OK:
-		print("Failed to start XP award for peer %s enemy %s: %s" % [peer_id, enemy_id, error])
+		print("Failed to start XP award for peer %s enemy %s enemy_key=%s character_id=%s region_key=%s: %s" % [peer_id, enemy_id, enemy_key, character_id, region_key, error])
 		request.queue_free()
 
 
@@ -1551,6 +1576,9 @@ func _on_award_xp_completed(
 	body: PackedByteArray,
 	peer_id: int,
 	enemy_id: int,
+	enemy_key: String,
+	character_id: int,
+	region_key: String,
 	request: HTTPRequest
 ) -> void:
 	request.queue_free()
@@ -1559,54 +1587,52 @@ func _on_award_xp_completed(
 
 	var response_text: String = body.get_string_from_utf8()
 	if result != HTTPRequest.RESULT_SUCCESS:
-		print("XP award failed for peer %s enemy %s: HTTPRequest result %s." % [peer_id, enemy_id, result])
+		print("XP award failed for peer %s enemy %s enemy_key=%s character_id=%s region_key=%s: HTTPRequest result %s." % [peer_id, enemy_id, enemy_key, character_id, region_key, result])
 		return
 
 	var json: JSON = JSON.new()
 	var parse_error: Error = json.parse(response_text)
 	if parse_error != OK or not (json.data is Dictionary):
-		print("XP award returned invalid JSON for peer %s enemy %s. status=%s response=%s" % [peer_id, enemy_id, response_code, response_text])
+		print("XP award returned invalid JSON for peer %s enemy %s enemy_key=%s character_id=%s region_key=%s. status=%s response=%s" % [peer_id, enemy_id, enemy_key, character_id, region_key, response_code, response_text])
 		return
 
 	var response_data: Dictionary = json.data as Dictionary
 	if response_code < 200 or response_code >= 300:
-		print("XP award rejected peer %s enemy %s: status=%s response=%s" % [peer_id, enemy_id, response_code, response_data])
+		var secret_rejected: bool = response_code == 401 or response_code == 403 or response_code == 503
+		var rejected_reason: String = " missing or invalid game_server_secret." if secret_rejected else "."
+		print("XP award rejected peer %s enemy %s enemy_key=%s character_id=%s region_key=%s: status=%s response=%s%s" % [peer_id, enemy_id, enemy_key, character_id, region_key, response_code, response_data, rejected_reason])
 		return
 
 	var progression: Dictionary = {
 		"level": int(response_data.get("level", 1)),
-		"xp": int(response_data.get("xp", 0)),
-		"xp_to_next": int(response_data.get("xp_to_next", int(response_data.get("level", 1)) * 100)),
+		"xp": int(response_data.get("current_xp", 0)),
+		"xp_to_next": int(response_data.get("xp_to_next_level", 1)),
+		"xp_awarded": int(response_data.get("xp_awarded", 0)),
+		"leveled_up": bool(response_data.get("leveled_up", false)),
+		"levels_gained": int(response_data.get("levels_gained", 0)),
 	}
 	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
 	session["level"] = int(progression.get("level", 1))
 	session["xp"] = int(progression.get("xp", 0))
-	session["xp_to_next"] = int(progression.get("xp_to_next", int(session["level"]) * 100))
+	session["xp_to_next"] = int(progression.get("xp_to_next", 0))
 	peer_sessions[peer_id] = session
 	world_spawner.call("apply_confirmed_character_progression", peer_id, progression)
-	_request_level_unlocks(peer_id, int(session["level"]))
-
-
-func _request_level_unlocks(peer_id: int, confirmed_level: int) -> void:
-	if confirmed_level <= 0:
-		return
-
-	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
-	var unlocked_keys: Array = session.get("unlocked_ability_keys", []) as Array
-	# Prototype-only rules. Future unlock rules may come from backend quest,
-	# achievement, or level progression data instead of hardcoded Godot data.
-	for reward_variant in LEVEL_UNLOCK_REWARDS:
-		var reward: Dictionary = reward_variant as Dictionary
-		var required_level: int = int(reward.get("level", 0))
-		var ability_key: String = str(reward.get("ability_key", "")).strip_edges()
-		if required_level <= 0 or required_level > confirmed_level or ability_key == "":
-			continue
-		if unlocked_keys.has(ability_key):
-			continue
-		_request_session_unlock(peer_id, ability_key)
+	print("XP awarded: enemy_id=%s enemy_key=%s credited_peer_id=%s character_id=%s region_key=%s xp_awarded=%s level=%s current_xp=%s xp_to_next_level=%s levels_gained=%s" % [
+		enemy_id,
+		str(response_data.get("enemy_key", enemy_key)),
+		peer_id,
+		int(response_data.get("character_id", character_id)),
+		str(response_data.get("region_key", region_key)),
+		int(response_data.get("xp_awarded", 0)),
+		int(response_data.get("level", 1)),
+		int(response_data.get("current_xp", 0)),
+		int(response_data.get("xp_to_next_level", 1)),
+		int(response_data.get("levels_gained", 0)),
+	])
 
 
 func _request_session_unlock(peer_id: int, ability_key: String) -> void:
+	# Future level rewards should flow through data-driven unlock/reward data, not hardcoded level checks.
 	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
 	if not bool(session.get("joined", false)):
 		return
@@ -1832,6 +1858,13 @@ func _normalized_backend_base_url() -> String:
 	while normalized.ends_with("/"):
 		normalized = normalized.substr(0, normalized.length() - 1)
 	return normalized
+
+
+func _hosted_region_key_for_backend() -> String:
+	var safe_region_key: String = hosted_region_key.strip_edges()
+	if safe_region_key == "":
+		safe_region_key = server_region_id.strip_edges()
+	return safe_region_key
 
 
 func _disconnect_peer(peer_id: int) -> void:

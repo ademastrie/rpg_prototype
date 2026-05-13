@@ -340,7 +340,7 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_ability_enabled_by_peer[peer_id] = _ability_enabled_state_for_loadout(effective_loadout, ability_enabled)
 	_last_ability_time_by_peer[peer_id] = {}
 	_recalculate_player_combat_stats(peer_id, true)
-	_character_progression_by_peer[peer_id] = {"level": 1, "xp": 0, "xp_to_next": 100}
+	_character_progression_by_peer[peer_id] = {"level": 1, "xp": 0, "xp_to_next": 0}
 	_character_gold_by_peer[peer_id] = 0
 	var max_hp: int = int(_player_max_hp_by_peer.get(peer_id, player_max_hp))
 	rpc("apply_player_health_update", peer_id, max_hp, max_hp)
@@ -360,7 +360,10 @@ func apply_confirmed_character_progression(peer_id: int, progression: Dictionary
 	var confirmed_progression: Dictionary = {
 		"level": int(progression.get("level", 1)),
 		"xp": int(progression.get("xp", 0)),
-		"xp_to_next": int(progression.get("xp_to_next", int(progression.get("level", 1)) * 100)),
+		"xp_to_next": int(progression.get("xp_to_next", 0)),
+		"xp_awarded": int(progression.get("xp_awarded", 0)),
+		"leveled_up": bool(progression.get("leveled_up", false)),
+		"levels_gained": int(progression.get("levels_gained", 0)),
 	}
 	_character_progression_by_peer[peer_id] = confirmed_progression
 	rpc_id(peer_id, "apply_character_progression_update", peer_id, confirmed_progression)

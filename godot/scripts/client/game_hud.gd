@@ -84,7 +84,7 @@ var _is_loadout_draft_dirty: bool = false
 var _is_loadout_save_pending: bool = false
 var _current_level: int = 1
 var _current_xp: int = 0
-var _current_xp_to_next: int = 100
+var _current_xp_to_next: int = 0
 var _current_gold: int = 0
 var _confirmed_inventory_items: Array = []
 var _confirmed_equipment: Dictionary = {}
@@ -136,11 +136,17 @@ func update_health(current_hp: int, max_hp: int) -> void:
 	_refresh_character_panel()
 
 
-func update_progression(level: int, xp: int, xp_to_next: int) -> void:
+func update_progression(level: int, xp: int, xp_to_next: int, xp_awarded: int = 0, leveled_up: bool = false, _levels_gained: int = 0) -> void:
 	_current_level = max(level, 1)
 	_current_xp = max(xp, 0)
-	_current_xp_to_next = max(xp_to_next, 1)
-	_progression_label.text = "Level: %s | XP: %s/%s" % [_current_level, _current_xp, _current_xp_to_next]
+	_current_xp_to_next = max(xp_to_next, 0)
+	var xp_to_next_text: String = str(_current_xp_to_next) if _current_xp_to_next > 0 else "--"
+	var progression_text: String = "Level: %s | XP: %s/%s" % [_current_level, _current_xp, xp_to_next_text]
+	if xp_awarded > 0:
+		progression_text = "%s | +%s XP" % [progression_text, xp_awarded]
+	if leveled_up:
+		progression_text = "%s | Level Up! %s" % [progression_text, _current_level]
+	_progression_label.text = progression_text
 	_refresh_character_panel()
 
 
@@ -742,7 +748,8 @@ func _refresh_character_panel() -> void:
 		return
 
 	_character_level_label.text = "Level: %s" % _current_level
-	_character_xp_label.text = "XP: %s/%s" % [_current_xp, _current_xp_to_next]
+	var xp_to_next_text: String = str(_current_xp_to_next) if _current_xp_to_next > 0 else "--"
+	_character_xp_label.text = "XP: %s/%s" % [_current_xp, xp_to_next_text]
 	_character_gold_label.text = "Gold: %s" % _current_gold
 	if not _has_confirmed_combat_stats:
 		_character_max_hp_label.text = "Max HP: --"

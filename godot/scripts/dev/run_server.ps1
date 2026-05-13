@@ -19,6 +19,8 @@ $ScriptDir = $PSScriptRoot
 $GodotDir = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
 $ScenePath = "res://scenes/server/server_game.tscn"
 
+# The Godot server reads GAME_SERVER_SECRET from this process environment
+# unless the exported server scene value is set.
 Push-Location $GodotDir
 try {
     & $GodotExe --path $GodotDir $ScenePath

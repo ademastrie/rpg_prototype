@@ -33,6 +33,7 @@ var _forced_aggro_peer_by_enemy: Dictionary = {}
 var _forced_aggro_until_by_enemy: Dictionary = {}
 var _proximity_aggro_peer_by_enemy: Dictionary = {}
 var _proximity_aggro_until_by_enemy: Dictionary = {}
+var _last_damaging_peer_by_enemy: Dictionary = {}
 var _returning_enemy_ids: Dictionary = {}
 var _enemy_return_regen_progress: Dictionary = {}
 var _enemy_return_log_last_seconds: Dictionary = {}
@@ -364,6 +365,11 @@ func get_enemy_level(enemy_id: int) -> int:
 	return _enemy_definition_int(enemy_id, "level", 1)
 
 
+func get_enemy_key(enemy_id: int) -> String:
+	var definition: Dictionary = _enemy_definition_for_enemy(enemy_id)
+	return str(definition.get("enemy_key", definition.get("enemy_type", ""))).strip_edges()
+
+
 func get_enemy_loot_table(enemy_id: int) -> Array:
 	var definition: Dictionary = _enemy_definition_for_enemy(enemy_id)
 	var loot_table: Array = definition.get("loot_table_entries", []) as Array
@@ -505,6 +511,9 @@ func _apply_damage_to_enemy(enemy_id: int, attacker_peer_id: int, damage: int) -
 	if not enemies.has(enemy_id) or damage <= 0:
 		return
 
+	if attacker_peer_id > 0 and _is_peer_alive(attacker_peer_id):
+		_last_damaging_peer_by_enemy[enemy_id] = attacker_peer_id
+
 	var current_hp: int = int(_enemy_current_hp_by_id.get(enemy_id, _max_hp_for_enemy(enemy_id)))
 	var max_hp: int = int(_enemy_max_hp_by_id.get(enemy_id, _max_hp_for_enemy(enemy_id)))
 	current_hp = max(current_hp - damage, 0)
@@ -512,7 +521,7 @@ func _apply_damage_to_enemy(enemy_id: int, attacker_peer_id: int, damage: int) -
 	rpc("show_enemy_hit", enemy_id, current_hp, max_hp)
 
 	if current_hp <= 0:
-		enemy_killed.emit(attacker_peer_id, enemy_id)
+		enemy_killed.emit(int(_last_damaging_peer_by_enemy.get(enemy_id, 0)), enemy_id)
 		_despawn_enemy(enemy_id)
 		return
 
@@ -527,6 +536,7 @@ func _despawn_enemy(enemy_id: int) -> void:
 	_forced_aggro_until_by_enemy.erase(enemy_id)
 	_proximity_aggro_peer_by_enemy.erase(enemy_id)
 	_proximity_aggro_until_by_enemy.erase(enemy_id)
+	_last_damaging_peer_by_enemy.erase(enemy_id)
 	_clear_enemy_attacks(enemy_id)
 	_returning_enemy_ids.erase(enemy_id)
 	_enemy_return_regen_progress.erase(enemy_id)
@@ -575,6 +585,7 @@ func _respawn_enemy(enemy_id: int, spawn_position: Vector3) -> void:
 	_forced_aggro_until_by_enemy.erase(enemy_id)
 	_proximity_aggro_peer_by_enemy.erase(enemy_id)
 	_proximity_aggro_until_by_enemy.erase(enemy_id)
+	_last_damaging_peer_by_enemy.erase(enemy_id)
 	_clear_enemy_attacks(enemy_id)
 	_returning_enemy_ids.erase(enemy_id)
 	_enemy_return_regen_progress.erase(enemy_id)
@@ -1099,6 +1110,7 @@ func _begin_return_to_spawn(enemy_id: int, reason: String, enemy_position: Vecto
 	_forced_aggro_until_by_enemy.erase(enemy_id)
 	_proximity_aggro_peer_by_enemy.erase(enemy_id)
 	_proximity_aggro_until_by_enemy.erase(enemy_id)
+	_last_damaging_peer_by_enemy.erase(enemy_id)
 	var distance_from_spawn: float = _distance_xz(enemy_position, spawn_position)
 	var distance_to_target: float = -1.0
 	if has_target:
@@ -1136,6 +1148,7 @@ func _finish_leash_reset(enemy_id: int, enemy_position: Vector3) -> Vector3:
 	_forced_aggro_until_by_enemy.erase(enemy_id)
 	_proximity_aggro_peer_by_enemy.erase(enemy_id)
 	_proximity_aggro_until_by_enemy.erase(enemy_id)
+	_last_damaging_peer_by_enemy.erase(enemy_id)
 	_enemy_return_regen_progress.erase(enemy_id)
 	_enemy_return_log_last_seconds.erase(enemy_id)
 	_enemy_origin_positions[enemy_id] = enemy_position
@@ -1153,6 +1166,7 @@ func _emergency_leash_snap(enemy_id: int, spawn_position: Vector3) -> Vector3:
 	_forced_aggro_until_by_enemy.erase(enemy_id)
 	_proximity_aggro_peer_by_enemy.erase(enemy_id)
 	_proximity_aggro_until_by_enemy.erase(enemy_id)
+	_last_damaging_peer_by_enemy.erase(enemy_id)
 	_enemy_return_regen_progress.erase(enemy_id)
 	_enemy_return_log_last_seconds.erase(enemy_id)
 	var max_hp: int = int(_enemy_max_hp_by_id.get(enemy_id, _max_hp_for_enemy(enemy_id)))
