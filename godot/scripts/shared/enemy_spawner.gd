@@ -10,6 +10,9 @@ signal initial_enemy_batch_received(count: int)
 @export var snapshot_rate: float = 6.0
 @export var interpolation_speed: float = 8.0
 @export var respawn_delay_seconds: float = 5.0
+@export var enemy_player_min_separation: float = 1.1
+@export var melee_preferred_engagement_distance: float = 1.55
+@export var enemy_projectile_hurt_radius: float = 1.15
 @export var debug_enemy_lifecycle_logs: bool = false
 @export var debug_enemy_join_sync_logs: bool = false
 @export var debug_enemy_return_logs: bool = false
@@ -346,6 +349,13 @@ func get_active_enemy_positions() -> Dictionary:
 	return enemies.duplicate()
 
 
+func get_projectile_enemy_hurt_radius(enemy_id: int) -> float:
+	if not enemies.has(enemy_id):
+		return 0.0
+
+	return max(_enemy_definition_float(enemy_id, "projectile_hurt_radius", enemy_projectile_hurt_radius), 0.01)
+
+
 func get_enemy_xp_reward(enemy_id: int) -> int:
 	return _enemy_definition_int(enemy_id, "xp_reward", 0)
 
@@ -606,6 +616,12 @@ func _update_enemy_positions(delta: float) -> void:
 				var target_return_position: Vector3 = _return_position(enemy_id_int, enemy_position, spawn_position, delta)
 				enemies[enemy_id] = target_return_position
 				_log_server_enemy_snap(enemy_id_int, enemy_position, target_return_position, delta, "entering_return", target_peer_id)
+				continue
+
+			if _should_separate_from_player(enemy_id_int, enemy_position, target_position):
+				var separation_position: Vector3 = _separation_position(enemy_id_int, enemy_position, target_position, delta)
+				enemies[enemy_id] = separation_position
+				_log_server_enemy_snap(enemy_id_int, enemy_position, separation_position, delta, "player_separation", target_peer_id)
 				continue
 
 			if _can_start_enemy_ranged_attack(enemy_id_int, enemy_position, target_position):
@@ -1263,12 +1279,63 @@ func _chase_position(enemy_id: int, enemy_position: Vector3, target_position: Ve
 	var chase_speed: float = _enemy_definition_float(enemy_id, "move_speed", 2.2)
 	var max_step: float = chase_speed * delta
 	var distance: float = offset.length()
+	var preferred_distance: float = _preferred_engagement_distance(enemy_id)
+	if preferred_distance > 0.0 and distance <= preferred_distance:
+		return enemy_position
 	if max_step > SUSPICIOUS_MOVEMENT_STEP:
 		_log_suspicious_movement_step(enemy_id, chase_speed, delta, max_step, distance)
-	if distance <= max_step:
-		return Vector3(target_position.x, enemy_position.y, target_position.z)
 
-	return enemy_position + offset.normalized() * max_step
+	var direction_to_target: Vector3 = offset / distance
+	var desired_position: Vector3 = target_position - direction_to_target * preferred_distance
+	desired_position.y = enemy_position.y
+	var distance_to_desired: float = _distance_xz(enemy_position, desired_position)
+	if distance_to_desired <= max_step:
+		return desired_position
+
+	return enemy_position + direction_to_target * max_step
+
+
+func _should_separate_from_player(enemy_id: int, enemy_position: Vector3, target_position: Vector3) -> bool:
+	var minimum_separation: float = _enemy_player_min_separation(enemy_id)
+	if minimum_separation <= 0.0:
+		return false
+
+	return _distance_xz(enemy_position, target_position) < minimum_separation
+
+
+func _separation_position(enemy_id: int, enemy_position: Vector3, target_position: Vector3, delta: float) -> Vector3:
+	var minimum_separation: float = _enemy_player_min_separation(enemy_id)
+	var away_from_target: Vector3 = enemy_position - target_position
+	away_from_target.y = 0.0
+	if away_from_target.length_squared() <= 0.0001:
+		var fallback_angle: float = float(enemy_id) * 2.399963
+		away_from_target = Vector3(cos(fallback_angle), 0.0, sin(fallback_angle))
+
+	var desired_position: Vector3 = target_position + away_from_target.normalized() * minimum_separation
+	desired_position.y = enemy_position.y
+	return _move_toward_position(enemy_position, desired_position, _enemy_definition_float(enemy_id, "move_speed", 2.2), delta)
+
+
+func _enemy_player_min_separation(enemy_id: int) -> float:
+	return max(_enemy_definition_float(enemy_id, "enemy_player_min_separation", enemy_player_min_separation), 0.0)
+
+
+func _preferred_engagement_distance(enemy_id: int) -> float:
+	if _enemy_can_use_ranged_attack(enemy_id):
+		var ranged_attack_range: float = _enemy_definition_float(enemy_id, "ranged_attack_range", 8.0)
+		var ranged_preferred_distance: float = _enemy_definition_float(enemy_id, "ranged_attack_preferred_distance", 6.0)
+		if ranged_preferred_distance <= 0.0:
+			return min(ranged_attack_range, max(_enemy_player_min_separation(enemy_id), 0.0))
+		return min(ranged_preferred_distance, ranged_attack_range)
+
+	if _enemy_attack_type(enemy_id) == "melee":
+		var melee_attack_range: float = _enemy_definition_float(enemy_id, "melee_attack_range", 2.0)
+		var preferred_distance: float = _enemy_definition_float(enemy_id, "melee_preferred_engagement_distance", melee_preferred_engagement_distance)
+		if melee_attack_range <= 0.0:
+			return max(preferred_distance, _enemy_player_min_separation(enemy_id))
+		return min(max(preferred_distance, _enemy_player_min_separation(enemy_id)), melee_attack_range)
+
+	return _enemy_player_min_separation(enemy_id)
 
 
 func _profile_idle_position(enemy_id: int, enemy_position: Vector3, spawn_position: Vector3, delta: float) -> Vector3:

@@ -1711,12 +1711,15 @@ func _first_projectile_collision(previous_position: Vector3, next_position: Vect
 		var enemy_id_int: int = int(enemy_id)
 		var enemy_position: Vector3 = enemy_positions[enemy_id] as Vector3
 		var enemy_xz: Vector2 = Vector2(enemy_position.x, enemy_position.z)
+		var enemy_hurt_radius: float = safe_collision_radius
+		if enemy_spawner.has_method("get_projectile_enemy_hurt_radius"):
+			enemy_hurt_radius = max(enemy_hurt_radius, float(enemy_spawner.call("get_projectile_enemy_hurt_radius", enemy_id_int)))
 		var t: float = 0.0
 		if segment_length_squared > 0.0001:
 			t = clamp((enemy_xz - start_xz).dot(segment) / segment_length_squared, 0.0, 1.0)
 
 		var closest_xz: Vector2 = start_xz + segment * t
-		if closest_xz.distance_to(enemy_xz) > safe_collision_radius:
+		if closest_xz.distance_to(enemy_xz) > enemy_hurt_radius:
 			continue
 		if has_collision and t >= best_t:
 			continue
