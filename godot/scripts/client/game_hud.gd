@@ -19,6 +19,19 @@ const EQUIPMENT_SLOT_LABELS: Dictionary = {
 	"legs": "Legs",
 	"feet": "Feet",
 }
+const ITEM_STAT_LABELS: Dictionary = {
+	"max_hp": "Max HP",
+	"move_speed": "Move Speed",
+	"physical_power": "Physical Power",
+	"spell_power": "Spell Power",
+	"armor": "Armor",
+	"avoidance": "Avoidance",
+}
+const ITEM_STAT_ALIASES: Dictionary = {
+	"attack_power": "physical_power",
+	"damage_reduction": "armor",
+}
+const ITEM_STAT_DISPLAY_ORDER: Array[String] = ["max_hp", "move_speed", "physical_power", "spell_power", "armor", "avoidance"]
 
 var _root: Control = null
 var _hud_panel: PanelContainer = null
@@ -39,6 +52,7 @@ var _ability_panel: PanelContainer = null
 var _inventory_panel: PanelContainer = null
 var _ability_list: VBoxContainer = null
 var _inventory_list: VBoxContainer = null
+var _inventory_comparison_label: Label = null
 var _ability_panel_status: Label = null
 var _character_level_label: Label = null
 var _character_xp_label: Label = null
@@ -74,6 +88,7 @@ var _current_xp_to_next: int = 100
 var _current_gold: int = 0
 var _confirmed_inventory_items: Array = []
 var _confirmed_equipment: Dictionary = {}
+var _selected_inventory_item: Dictionary = {}
 var _is_equipment_change_pending: bool = false
 var _is_refreshing_equipment_ui: bool = false
 var _current_max_hp: int = 100
@@ -137,8 +152,10 @@ func update_gold(gold: int) -> void:
 
 func update_inventory_items(inventory_items: Array) -> void:
 	_confirmed_inventory_items = inventory_items.duplicate(true)
+	_refresh_selected_inventory_item()
 	_refresh_inventory_panel()
 	_refresh_equipment_slot_options()
+	_refresh_inventory_comparison()
 
 
 func update_equipment(equipment: Dictionary) -> void:
@@ -149,6 +166,7 @@ func update_equipment(equipment: Dictionary) -> void:
 	_refresh_character_panel()
 	_refresh_inventory_panel()
 	_refresh_equipment_slot_options()
+	_refresh_inventory_comparison()
 
 
 func update_down_state(is_down: bool) -> void:
@@ -568,11 +586,11 @@ func _build_inventory_panel() -> void:
 	_inventory_panel.visible = false
 	_inventory_panel.anchor_left = 1.0
 	_inventory_panel.anchor_right = 1.0
-	_inventory_panel.offset_left = -336.0
+	_inventory_panel.offset_left = -696.0
 	_inventory_panel.offset_top = 556.0
 	_inventory_panel.offset_right = -16.0
 	_inventory_panel.offset_bottom = 760.0
-	_inventory_panel.custom_minimum_size = Vector2(320.0, 204.0)
+	_inventory_panel.custom_minimum_size = Vector2(680.0, 204.0)
 	_apply_panel_style(_inventory_panel)
 	_root.add_child(_inventory_panel)
 
@@ -584,17 +602,39 @@ func _build_inventory_panel() -> void:
 	var title_label: Label = _add_title_label(panel_vbox, "Inventory")
 	title_label.gui_input.connect(_on_panel_drag_handle_input.bind(_inventory_panel))
 
+	var content_row: HBoxContainer = HBoxContainer.new()
+	content_row.add_theme_constant_override("separation", 10)
+	content_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel_vbox.add_child(content_row)
+
 	var inventory_scroll: ScrollContainer = ScrollContainer.new()
 	inventory_scroll.name = "InventoryScroll"
+	inventory_scroll.custom_minimum_size = Vector2(310.0, 0.0)
+	inventory_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	inventory_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inventory_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	panel_vbox.add_child(inventory_scroll)
+	content_row.add_child(inventory_scroll)
 
 	_inventory_list = VBoxContainer.new()
 	_inventory_list.add_theme_constant_override("separation", 4)
 	_inventory_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	inventory_scroll.add_child(_inventory_list)
+
+	var comparison_panel: PanelContainer = PanelContainer.new()
+	comparison_panel.custom_minimum_size = Vector2(330.0, 0.0)
+	comparison_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_apply_section_panel_style(comparison_panel)
+	content_row.add_child(comparison_panel)
+
+	var comparison_vbox: VBoxContainer = VBoxContainer.new()
+	comparison_vbox.add_theme_constant_override("separation", 4)
+	comparison_panel.add_child(comparison_vbox)
+
+	_add_label(comparison_vbox, "Comparison")
+	_inventory_comparison_label = _add_label(comparison_vbox, "")
+	_inventory_comparison_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_refresh_inventory_panel()
+	_refresh_inventory_comparison()
 
 
 func _add_label(parent: Control, text: String) -> Label:
@@ -957,20 +997,25 @@ func _refresh_inventory_panel() -> void:
 		if inventory_entry_id != "" and equipped_inventory_entry_ids.has(inventory_entry_id):
 			continue
 
-		_add_inventory_row(_inventory_list, _inventory_item_display_text(item, item_key))
+		_add_inventory_row(_inventory_list, item, _inventory_item_display_text(item, item_key))
 		visible_item_count += 1
 
 	if visible_item_count == 0:
 		_add_label(_inventory_list, "No unequipped items.")
 
 
-func _add_inventory_row(parent: Control, text: String) -> void:
+func _add_inventory_row(parent: Control, item: Dictionary, text: String) -> void:
 	var row_panel: PanelContainer = PanelContainer.new()
 	row_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 
 	var row_style: StyleBoxFlat = StyleBoxFlat.new()
-	row_style.bg_color = Color(0.11, 0.12, 0.14, 0.88)
-	row_style.border_color = Color(0.28, 0.30, 0.34, 0.9)
+	if _inventory_item_matches_selection(item):
+		row_style.bg_color = Color(0.16, 0.18, 0.22, 0.94)
+		row_style.border_color = Color(0.60, 0.66, 0.74, 0.95)
+	else:
+		row_style.bg_color = Color(0.11, 0.12, 0.14, 0.88)
+		row_style.border_color = Color(0.28, 0.30, 0.34, 0.9)
 	row_style.set_border_width_all(1)
 	row_style.set_corner_radius_all(4)
 	row_style.set_content_margin(SIDE_LEFT, 8.0)
@@ -978,6 +1023,7 @@ func _add_inventory_row(parent: Control, text: String) -> void:
 	row_style.set_content_margin(SIDE_RIGHT, 8.0)
 	row_style.set_content_margin(SIDE_BOTTOM, 5.0)
 	row_panel.add_theme_stylebox_override("panel", row_style)
+	row_panel.gui_input.connect(_on_inventory_row_input.bind(item.duplicate(true)))
 	parent.add_child(row_panel)
 
 	var label: Label = _add_label(row_panel, text)
@@ -1039,6 +1085,228 @@ func _inventory_item_stackable_flag(item: Dictionary) -> Variant:
 					return nested_definition[key]
 
 	return null
+
+
+func _refresh_selected_inventory_item() -> void:
+	if _selected_inventory_item.is_empty():
+		return
+
+	var selected_inventory_entry_id: String = _inventory_entry_id(_selected_inventory_item)
+	var selected_item_key: String = str(_selected_inventory_item.get("item_key", "")).strip_edges()
+	for item_variant in _confirmed_inventory_items:
+		if not (item_variant is Dictionary):
+			continue
+
+		var item: Dictionary = item_variant as Dictionary
+		if selected_inventory_entry_id != "" and _inventory_entry_id(item) == selected_inventory_entry_id:
+			_selected_inventory_item = item.duplicate(true)
+			return
+		if selected_inventory_entry_id == "" and selected_item_key != "" and str(item.get("item_key", "")).strip_edges() == selected_item_key:
+			_selected_inventory_item = item.duplicate(true)
+			return
+
+	_selected_inventory_item.clear()
+
+
+func _inventory_item_matches_selection(item: Dictionary) -> bool:
+	if _selected_inventory_item.is_empty():
+		return false
+
+	var inventory_entry_id: String = _inventory_entry_id(item)
+	var selected_inventory_entry_id: String = _inventory_entry_id(_selected_inventory_item)
+	if inventory_entry_id != "" or selected_inventory_entry_id != "":
+		return inventory_entry_id != "" and inventory_entry_id == selected_inventory_entry_id
+
+	return str(item.get("item_key", "")).strip_edges() == str(_selected_inventory_item.get("item_key", "")).strip_edges()
+
+
+func _refresh_inventory_comparison() -> void:
+	if _inventory_comparison_label == null:
+		return
+
+	if _selected_inventory_item.is_empty():
+		_inventory_comparison_label.text = "Select an item to compare."
+		return
+
+	var selected_item: Dictionary = _selected_inventory_item
+	var selected_name: String = _item_player_name(selected_item)
+	var selected_slot: String = _inventory_item_equip_slot(selected_item)
+	var comparison_lines: Array[String] = [
+		"Selected Item:",
+		selected_name,
+	]
+
+	if selected_slot == "":
+		if _inventory_item_shows_quantity(selected_item):
+			comparison_lines.append("Quantity: %s" % max(int(selected_item.get("quantity", 0)), 0))
+		comparison_lines.append("")
+		comparison_lines.append("Not equippable.")
+		_inventory_comparison_label.text = "\n".join(comparison_lines)
+		return
+
+	var selected_stats: Dictionary = _item_stat_values(selected_item)
+	comparison_lines.append("Slot: %s" % str(EQUIPMENT_SLOT_LABELS.get(selected_slot, selected_slot.capitalize())))
+	comparison_lines.append_array(_formatted_item_stat_lines(selected_stats))
+	comparison_lines.append("")
+	comparison_lines.append("Currently Equipped:")
+
+	var equipped_item: Dictionary = _confirmed_equipment_item_for_slot(selected_slot)
+	var equipped_stats: Dictionary = {}
+	if equipped_item.is_empty():
+		comparison_lines.append("Empty")
+	else:
+		comparison_lines.append(_item_player_name(equipped_item))
+		equipped_stats = _item_stat_values(equipped_item)
+		comparison_lines.append_array(_formatted_item_stat_lines(equipped_stats))
+
+	var delta_lines: Array[String] = _formatted_item_delta_lines(selected_stats, equipped_stats)
+	if not delta_lines.is_empty():
+		comparison_lines.append("")
+		comparison_lines.append("Difference:")
+		comparison_lines.append_array(delta_lines)
+
+	_inventory_comparison_label.text = "\n".join(comparison_lines)
+
+
+func _item_player_name(item: Dictionary) -> String:
+	var display_name: String = str(item.get("display_name", "")).strip_edges()
+	if display_name != "":
+		return display_name
+
+	if item.get("definition", null) is Dictionary:
+		display_name = str((item.get("definition", {}) as Dictionary).get("display_name", "")).strip_edges()
+		if display_name != "":
+			return display_name
+
+	if item.get("item", null) is Dictionary:
+		var nested_item: Dictionary = item.get("item", {}) as Dictionary
+		display_name = str(nested_item.get("display_name", "")).strip_edges()
+		if display_name != "":
+			return display_name
+		if nested_item.get("definition", null) is Dictionary:
+			display_name = str((nested_item.get("definition", {}) as Dictionary).get("display_name", "")).strip_edges()
+			if display_name != "":
+				return display_name
+
+	return "Unnamed Item"
+
+
+func _item_stat_values(item: Dictionary) -> Dictionary:
+	var stat_values: Dictionary = {}
+	for modifier_variant in _item_stat_modifiers(item):
+		if not (modifier_variant is Dictionary):
+			continue
+
+		var modifier: Dictionary = modifier_variant as Dictionary
+		var stat_key: String = str(modifier.get("stat_key", modifier.get("key", modifier.get("stat", modifier.get("attribute", ""))))).strip_edges().to_lower()
+		stat_key = str(ITEM_STAT_ALIASES.get(stat_key, stat_key))
+		if not ITEM_STAT_LABELS.has(stat_key):
+			continue
+
+		var value: float = float(modifier.get("value", modifier.get("amount", 0.0)))
+		if is_zero_approx(value):
+			continue
+
+		stat_values[stat_key] = float(stat_values.get(stat_key, 0.0)) + value
+
+	return stat_values
+
+
+func _item_stat_modifiers(item: Dictionary) -> Array:
+	var modifiers: Array = []
+	for container_variant in _item_stat_modifier_containers(item):
+		if not (container_variant is Dictionary):
+			continue
+
+		var container: Dictionary = container_variant as Dictionary
+		var raw_modifiers: Variant = container.get("stat_modifiers", container.get("modifiers", container.get("stats", [])))
+		if raw_modifiers is Array:
+			modifiers.append_array(raw_modifiers as Array)
+		elif raw_modifiers is Dictionary:
+			var raw_modifier_dictionary: Dictionary = raw_modifiers as Dictionary
+			for stat_key in raw_modifier_dictionary.keys():
+				modifiers.append({
+					"stat_key": str(stat_key),
+					"value": raw_modifier_dictionary[stat_key],
+				})
+
+	return modifiers
+
+
+func _item_stat_modifier_containers(item: Dictionary) -> Array:
+	var containers: Array = [item]
+	if item.get("definition", null) is Dictionary:
+		containers.append(item.get("definition", {}) as Dictionary)
+	if item.get("item_definition", null) is Dictionary:
+		containers.append(item.get("item_definition", {}) as Dictionary)
+	if item.get("item", null) is Dictionary:
+		var nested_item: Dictionary = item.get("item", {}) as Dictionary
+		containers.append(nested_item)
+		if nested_item.get("definition", null) is Dictionary:
+			containers.append(nested_item.get("definition", {}) as Dictionary)
+		if nested_item.get("item_definition", null) is Dictionary:
+			containers.append(nested_item.get("item_definition", {}) as Dictionary)
+
+	return containers
+
+
+func _formatted_item_stat_lines(stat_values: Dictionary) -> Array[String]:
+	var lines: Array[String] = []
+	for stat_key in ITEM_STAT_DISPLAY_ORDER:
+		if not stat_values.has(stat_key):
+			continue
+
+		lines.append(_format_item_stat_line(stat_key, float(stat_values[stat_key])))
+
+	if lines.is_empty():
+		lines.append("No stat modifiers.")
+
+	return lines
+
+
+func _formatted_item_delta_lines(selected_stats: Dictionary, equipped_stats: Dictionary) -> Array[String]:
+	var lines: Array[String] = []
+	for stat_key in _item_delta_stat_keys(selected_stats, equipped_stats):
+		var selected_value: float = float(selected_stats.get(stat_key, 0.0))
+		var equipped_value: float = float(equipped_stats.get(stat_key, 0.0))
+		var delta: float = selected_value - equipped_value
+		if is_zero_approx(delta):
+			continue
+
+		lines.append("%s: %s" % [
+			str(ITEM_STAT_LABELS.get(stat_key, stat_key.capitalize())),
+			_format_item_stat_value(stat_key, delta),
+		])
+
+	return lines
+
+
+func _item_delta_stat_keys(selected_stats: Dictionary, equipped_stats: Dictionary) -> Array[String]:
+	var stat_keys: Array[String] = []
+	for stat_key in ITEM_STAT_DISPLAY_ORDER:
+		if selected_stats.has(stat_key) or equipped_stats.has(stat_key):
+			stat_keys.append(stat_key)
+	for selected_stat_key_variant in selected_stats.keys():
+		var selected_stat_key: String = str(selected_stat_key_variant)
+		if not stat_keys.has(selected_stat_key):
+			stat_keys.append(selected_stat_key)
+	for equipped_stat_key_variant in equipped_stats.keys():
+		var equipped_stat_key: String = str(equipped_stat_key_variant)
+		if not stat_keys.has(equipped_stat_key):
+			stat_keys.append(equipped_stat_key)
+	return stat_keys
+
+
+func _format_item_stat_line(stat_key: String, value: float) -> String:
+	return "%s %s" % [_format_item_stat_value(stat_key, value), str(ITEM_STAT_LABELS.get(stat_key, stat_key.capitalize()))]
+
+
+func _format_item_stat_value(stat_key: String, value: float) -> String:
+	var sign: String = "+" if value > 0.0 else ""
+	if stat_key == "avoidance":
+		return "%s%s%%" % [sign, _format_stat_number(value * 100.0)]
+
+	return "%s%s" % [sign, _format_stat_number(value)]
 
 
 func _confirmed_equipped_inventory_entry_ids() -> Array[String]:
@@ -1386,6 +1654,19 @@ func _on_loadout_enabled_toggled(enabled: bool, slot_index: int) -> void:
 func _on_cancel_loadout_pressed() -> void:
 	_cancel_loadout_draft()
 	_ability_panel.visible = false
+
+
+func _on_inventory_row_input(event: InputEvent, item: Dictionary) -> void:
+	if not (event is InputEventMouseButton):
+		return
+
+	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
+	if mouse_event.button_index != MOUSE_BUTTON_LEFT or not mouse_event.pressed:
+		return
+
+	_selected_inventory_item = item.duplicate(true)
+	_refresh_inventory_panel()
+	_refresh_inventory_comparison()
 
 
 func _on_panel_drag_handle_input(event: InputEvent, panel: Control) -> void:

@@ -1414,6 +1414,9 @@ func _merge_confirmed_inventory_item(existing_inventory: Array, confirmed_item: 
 	var display_name: String = str(confirmed_item.get("display_name", _display_name_for_item_payload(item_key, fallback_display_name))).strip_edges()
 	var equip_slot: String = str(confirmed_item.get("equip_slot", "")).strip_edges().to_lower()
 	var item_type: String = str(confirmed_item.get("item_type", "")).strip_edges().to_lower()
+	var stat_modifiers: Array = []
+	if confirmed_item.get("stat_modifiers", null) is Array:
+		stat_modifiers = (confirmed_item.get("stat_modifiers", []) as Array).duplicate(true)
 	if equip_slot == "":
 		equip_slot = _fallback_equip_slot_for_item_key(item_key)
 	var merge_key: String = "item:%s" % item_key
@@ -1426,6 +1429,7 @@ func _merge_confirmed_inventory_item(existing_inventory: Array, confirmed_item: 
 		"quantity": max(quantity, 0),
 		"equip_slot": equip_slot,
 		"item_type": item_type,
+		"stat_modifiers": stat_modifiers,
 	}
 	return merged_items.values()
 
@@ -1477,6 +1481,7 @@ func _normalize_inventory_item(item_data: Dictionary) -> Dictionary:
 		"quantity": quantity,
 		"equip_slot": equip_slot,
 		"item_type": item_type,
+		"stat_modifiers": _extract_stat_modifiers_from_item(item_data),
 	}
 
 

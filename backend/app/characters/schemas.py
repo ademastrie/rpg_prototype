@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CharacterCreate(BaseModel):
@@ -49,6 +49,14 @@ class CharacterCurrencyResponse(BaseModel):
     gold: int
 
 
+class ItemStatModifierResponse(BaseModel):
+    stat_key: str
+    value: float
+    modifier_type: str
+
+    model_config = {"from_attributes": True}
+
+
 class ItemDefinitionResponse(BaseModel):
     item_key: str
     display_name: str
@@ -59,14 +67,7 @@ class ItemDefinitionResponse(BaseModel):
     max_stack: int
     icon_key: str | None
     is_active: bool
-
-    model_config = {"from_attributes": True}
-
-
-class ItemStatModifierResponse(BaseModel):
-    stat_key: str
-    value: float
-    modifier_type: str
+    stat_modifiers: list[ItemStatModifierResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

@@ -84,7 +84,11 @@ def _character_inventory_response(character_id: int, db: Session) -> CharacterIn
     inventory_entries = list(
         db.scalars(
             select(CharacterInventory)
-            .options(selectinload(CharacterInventory.item_definition))
+            .options(
+                selectinload(CharacterInventory.item_definition).selectinload(
+                    ItemDefinition.stat_modifiers
+                )
+            )
             .join(CharacterInventory.item_definition)
             .where(CharacterInventory.character_id == character_id)
             .order_by(ItemDefinition.display_name, CharacterInventory.id)
