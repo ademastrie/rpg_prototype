@@ -374,10 +374,10 @@ func _build_character_panel() -> void:
 	_character_panel.visible = false
 	_character_panel.anchor_left = 1.0
 	_character_panel.anchor_right = 1.0
-	_character_panel.offset_left = -336.0
+	_character_panel.offset_left = -696.0
 	_character_panel.offset_top = 16.0
 	_character_panel.offset_right = -16.0
-	_character_panel.offset_bottom = 408.0
+	_character_panel.offset_bottom = 548.0
 	_apply_panel_style(_character_panel)
 	_root.add_child(_character_panel)
 
@@ -387,37 +387,103 @@ func _build_character_panel() -> void:
 
 	var title_label: Label = _add_title_label(panel_vbox, "Character")
 	title_label.gui_input.connect(_on_panel_drag_handle_input.bind(_character_panel))
-	_character_level_label = _add_label(panel_vbox, "")
-	_character_xp_label = _add_label(panel_vbox, "")
-	_character_gold_label = _add_label(panel_vbox, "")
-	_character_max_hp_label = _add_label(panel_vbox, "")
-	_character_move_speed_label = _add_label(panel_vbox, "")
-	_character_physical_power_label = _add_label(panel_vbox, "")
-	_character_spell_power_label = _add_label(panel_vbox, "")
-	_character_armor_label = _add_label(panel_vbox, "")
-	_character_avoidance_label = _add_label(panel_vbox, "")
-	_add_label(panel_vbox, "Equipment")
-	for slot_name in EQUIPMENT_SLOTS:
-		var slot_label: Label = _add_label(panel_vbox, "")
-		slot_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		_equipment_slot_labels[slot_name] = slot_label
 
-		var slot_row: HBoxContainer = HBoxContainer.new()
-		slot_row.add_theme_constant_override("separation", 6)
-		panel_vbox.add_child(slot_row)
+	var main_row: HBoxContainer = HBoxContainer.new()
+	main_row.add_theme_constant_override("separation", 10)
+	panel_vbox.add_child(main_row)
 
-		var option: OptionButton = OptionButton.new()
-		option.custom_minimum_size = Vector2(210.0, 0.0)
-		option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_apply_button_text_colors(option)
-		option.item_selected.connect(_on_equipment_option_selected.bind(slot_name))
-		slot_row.add_child(option)
-		_equipment_slot_options[slot_name] = option
+	var equipment_panel: PanelContainer = PanelContainer.new()
+	equipment_panel.custom_minimum_size = Vector2(420.0, 0.0)
+	equipment_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_apply_section_panel_style(equipment_panel)
+	main_row.add_child(equipment_panel)
 
-	# Future equipment UI should become a paper-doll/drag-drop character screen.
+	var equipment_vbox: VBoxContainer = VBoxContainer.new()
+	equipment_vbox.add_theme_constant_override("separation", 6)
+	equipment_panel.add_child(equipment_vbox)
+
+	_add_label(equipment_vbox, "Equipment")
+	_add_equipment_paper_doll_row(equipment_vbox, ["", "head", ""])
+	_add_equipment_paper_doll_row(equipment_vbox, ["arms", "chest", "hands"])
+	_add_equipment_paper_doll_row(equipment_vbox, ["", "legs", ""])
+	_add_equipment_paper_doll_row(equipment_vbox, ["", "feet", ""])
+	_add_equipment_paper_doll_row(equipment_vbox, ["", "weapon", ""])
+
+	var stats_panel: PanelContainer = PanelContainer.new()
+	stats_panel.custom_minimum_size = Vector2(224.0, 0.0)
+	stats_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_apply_section_panel_style(stats_panel)
+	main_row.add_child(stats_panel)
+
+	var stats_vbox: VBoxContainer = VBoxContainer.new()
+	stats_vbox.add_theme_constant_override("separation", 4)
+	stats_panel.add_child(stats_vbox)
+
+	_add_label(stats_vbox, "Progress")
+	_character_level_label = _add_label(stats_vbox, "")
+	_character_xp_label = _add_label(stats_vbox, "")
+	_character_gold_label = _add_label(stats_vbox, "")
+	_add_label(stats_vbox, "Stats")
+	_character_max_hp_label = _add_label(stats_vbox, "")
+	_character_move_speed_label = _add_label(stats_vbox, "")
+	_character_physical_power_label = _add_label(stats_vbox, "")
+	_character_spell_power_label = _add_label(stats_vbox, "")
+	_character_armor_label = _add_label(stats_vbox, "")
+	_character_avoidance_label = _add_label(stats_vbox, "")
+
 	_equipment_panel_status = _add_label(panel_vbox, "")
 	_refresh_equipment_slot_options()
 	_refresh_character_panel()
+
+
+func _add_equipment_paper_doll_row(parent: Control, slot_names: Array) -> void:
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	parent.add_child(row)
+
+	for slot_name_variant in slot_names:
+		var slot_name: String = str(slot_name_variant)
+		if slot_name == "":
+			_add_equipment_slot_spacer(row)
+			continue
+
+		_add_equipment_slot_card(row, slot_name)
+
+
+func _add_equipment_slot_spacer(parent: Control) -> void:
+	var spacer: Control = Control.new()
+	spacer.custom_minimum_size = Vector2(128.0, 76.0)
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(spacer)
+
+
+func _add_equipment_slot_card(parent: Control, slot_name: String) -> void:
+	var slot_panel: PanelContainer = PanelContainer.new()
+	slot_panel.custom_minimum_size = Vector2(128.0, 76.0)
+	slot_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_apply_slot_panel_style(slot_panel)
+	parent.add_child(slot_panel)
+
+	var slot_vbox: VBoxContainer = VBoxContainer.new()
+	slot_vbox.add_theme_constant_override("separation", 2)
+	slot_panel.add_child(slot_vbox)
+
+	var slot_name_label: Label = _add_label(slot_vbox, str(EQUIPMENT_SLOT_LABELS.get(slot_name, slot_name.capitalize())))
+	slot_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	var item_label: Label = _add_label(slot_vbox, "Empty")
+	item_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	item_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_equipment_slot_labels[slot_name] = item_label
+
+	var option: OptionButton = OptionButton.new()
+	option.custom_minimum_size = Vector2(116.0, 0.0)
+	option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	option.focus_mode = Control.FOCUS_NONE
+	_apply_button_text_colors(option)
+	option.item_selected.connect(_on_equipment_option_selected.bind(slot_name))
+	slot_vbox.add_child(option)
+	_equipment_slot_options[slot_name] = option
 
 
 func _build_ability_panel() -> void:
@@ -568,6 +634,32 @@ func _apply_panel_style(panel: PanelContainer) -> void:
 	panel.add_theme_stylebox_override("panel", style_box)
 
 
+func _apply_section_panel_style(panel: PanelContainer) -> void:
+	var style_box: StyleBoxFlat = StyleBoxFlat.new()
+	style_box.bg_color = Color(0.08, 0.09, 0.10, 0.86)
+	style_box.border_color = Color(0.26, 0.28, 0.31, 0.9)
+	style_box.set_border_width_all(1)
+	style_box.set_corner_radius_all(4)
+	style_box.set_content_margin(SIDE_LEFT, 8.0)
+	style_box.set_content_margin(SIDE_TOP, 8.0)
+	style_box.set_content_margin(SIDE_RIGHT, 8.0)
+	style_box.set_content_margin(SIDE_BOTTOM, 8.0)
+	panel.add_theme_stylebox_override("panel", style_box)
+
+
+func _apply_slot_panel_style(panel: PanelContainer) -> void:
+	var style_box: StyleBoxFlat = StyleBoxFlat.new()
+	style_box.bg_color = Color(0.12, 0.13, 0.15, 0.9)
+	style_box.border_color = Color(0.36, 0.38, 0.42, 0.95)
+	style_box.set_border_width_all(1)
+	style_box.set_corner_radius_all(4)
+	style_box.set_content_margin(SIDE_LEFT, 5.0)
+	style_box.set_content_margin(SIDE_TOP, 4.0)
+	style_box.set_content_margin(SIDE_RIGHT, 5.0)
+	style_box.set_content_margin(SIDE_BOTTOM, 4.0)
+	panel.add_theme_stylebox_override("panel", style_box)
+
+
 func _apply_button_text_colors(button: BaseButton) -> void:
 	button.add_theme_color_override("font_color", PANEL_TEXT_COLOR)
 	button.add_theme_color_override("font_pressed_color", PANEL_TEXT_COLOR)
@@ -631,10 +723,7 @@ func _refresh_character_panel() -> void:
 			continue
 
 		var slot_label: Label = _equipment_slot_labels[slot_name] as Label
-		slot_label.text = "%s: %s" % [
-			str(EQUIPMENT_SLOT_LABELS.get(slot_name, slot_name.capitalize())),
-			_equipment_display_text(slot_name),
-		]
+		slot_label.text = _equipment_display_text(slot_name)
 
 
 func _equipment_display_text(slot_name: String) -> String:
