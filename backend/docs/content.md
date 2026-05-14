@@ -21,6 +21,21 @@ Current grant types are `weapon_primary` and `granted_active`. Stable keys are t
 
 Future permanent unlock sources can include level reward, quest reward, achievement, ability mastery, and item grant promotion rules. Those systems are not implemented yet.
 
+Level rewards are data-driven content rows in `level_rewards`. When backend XP awards move a character through one or more configured levels, the XP flow asks the level reward system for active rewards for those newly reached levels and applies the supported reward types. XP award logic should not hardcode specific level unlocks.
+
+Current supported level reward type:
+
+- `ability_unlock`: `reward_key` is an `ability_key`, and the reward grants that ability as a permanent character unlock in `character_abilities`.
+
+Initial prototype level rewards:
+
+- Level 2 unlocks `hp_regen`.
+- Level 3 unlocks `damage_aura`.
+
+Item-granted abilities are separate from permanent level unlocks. Item grants live in `item_ability_grants` and are available only while the granting item is equipped; level rewards grant durable character abilities independent of gear. Starter weapon primary abilities such as `slash`, `shoot`, and `firebolt` should stay weapon-primary grants, not level rewards.
+
+Future level reward types can include item grants, currency, quest unlocks, titles, and stat bonuses if those systems are needed later. Quest rewards, achievement rewards, ability mastery, and level cap logic are not implemented yet.
+
 Enemy content is split into archetypes, definitions, and spawns:
 
 - Enemy archetypes describe shared creature identity and future behavior/visual defaults. They are where content teaches what kind of enemy something is.
@@ -41,7 +56,7 @@ Loot is still resolved through the existing enemy-key-specific `enemy_loot_entri
 
 Future loot can come from multiple layers, but this content pass only adds hooks and preserves current enemy-specific loot behavior.
 
-Character XP has no level cap yet. Level-up ability unlocks, party XP, and global event multipliers are not implemented yet.
+Character XP has no level cap yet. Party XP and global event multipliers are not implemented yet.
 
 When content JSON uses newly added columns, apply migrations before syncing:
 
@@ -78,7 +93,7 @@ Run from `backend/` after tuning durable game-content rows directly in PostgreSQ
 python .\scripts\export_content.py
 ```
 
-The export script reads the current database content and overwrites the matching source-controlled JSON files under `backend/content/`. Use this to capture pgAdmin tuning for enemies, abilities, attacks, spawns, patrols, loot, regions, and items into git. It writes deterministic, pretty-formatted JSON, sorts rows by stable keys so diffs stay readable, and does not modify the database.
+The export script reads the current database content and overwrites the matching source-controlled JSON files under `backend/content/`. Use this to capture pgAdmin tuning for enemies, abilities, level rewards, attacks, spawns, patrols, loot, regions, and items into git. It writes deterministic, pretty-formatted JSON, sorts rows by stable keys so diffs stay readable, and does not modify the database.
 
 ## Sync JSON content into DB
 
@@ -97,6 +112,7 @@ The script upserts rows by stable keys:
 - `item_definitions`: `item_key`
 - `item_stat_modifiers`: `item_key`, `stat_key`, `modifier_type`
 - `item_ability_grants`: `item_key`, `ability_key`, `grant_type`
+- `level_rewards`: `level_required`, `reward_type`, `reward_key`
 - `enemy_archetypes`: `archetype_key`
 - `enemy_definitions`: `enemy_key`
 - `enemy_attacks`: `enemy_key`, `attack_key`

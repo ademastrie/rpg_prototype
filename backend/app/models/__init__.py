@@ -9,6 +9,7 @@ from app.models.item import (
     ItemDefinition,
     ItemStatModifier,
 )
+from app.models.progression import LevelReward
 from app.models.region import (
     RegionDefinition,
     RegionEnemySpawn,
@@ -34,6 +35,7 @@ __all__ = [
     "ItemDefinition",
     "ItemAbilityGrant",
     "ItemStatModifier",
+    "LevelReward",
     "RegionDefinition",
     "RegionEnemySpawn",
     "RegionPatrolPath",

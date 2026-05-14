@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,7 @@ from app.progression import (
     level_delta_xp_multiplier,
     xp_to_next_level,
 )
+from app.rewards import RewardApplicationResult, apply_level_rewards
 from app.server_auth import require_game_server_secret
 
 
@@ -59,6 +60,14 @@ class AwardEnemyXpRequest(BaseModel):
     region_key: str
 
 
+class RewardApplicationResponse(BaseModel):
+    level_required: int
+    reward_type: str
+    reward_key: str
+    already_owned: bool
+    granted: bool
+
+
 class AwardEnemyXpResponse(BaseModel):
     character_id: int
     level: int
@@ -72,6 +81,19 @@ class AwardEnemyXpResponse(BaseModel):
     region_key: str
     region_xp_multiplier: float
     level_delta_multiplier: float
+    rewards_granted: list[RewardApplicationResponse] = Field(default_factory=list)
+
+
+def _reward_application_response(
+    result: RewardApplicationResult,
+) -> RewardApplicationResponse:
+    return RewardApplicationResponse(
+        level_required=result.level_required,
+        reward_type=result.reward_type,
+        reward_key=result.reward_key,
+        already_owned=result.already_owned,
+        granted=result.granted,
+    )
 
 
 def _resolve_enemy_definition(
@@ -207,6 +229,7 @@ def award_enemy_xp(
         region_xp_multiplier=region_definition.xp_multiplier,
     )
     result = apply_character_xp(character, xp_awarded)
+    reward_results = apply_level_rewards(db, character, result.gained_levels)
 
     db.commit()
     db.refresh(character)
@@ -224,4 +247,8 @@ def award_enemy_xp(
         region_key=region_definition.region_key,
         region_xp_multiplier=region_definition.xp_multiplier,
         level_delta_multiplier=delta_multiplier,
+        rewards_granted=[
+            _reward_application_response(reward_result)
+            for reward_result in reward_results
+        ],
     )

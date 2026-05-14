@@ -24,6 +24,7 @@ from app.models import (  # noqa: E402
     ItemAbilityGrant,
     ItemDefinition,
     ItemStatModifier,
+    LevelReward,
     RegionDefinition,
     RegionEnemySpawn,
     RegionPatrolPath,
@@ -57,6 +58,10 @@ CONTENT_ROW_DEFAULTS: dict[str, JsonRow] = {
     },
     "item_ability_grants": {
         "is_active": True,
+    },
+    "level_rewards": {
+        "is_active": True,
+        "description": None,
     },
 }
 
@@ -132,6 +137,7 @@ CONTENT_TABLES: tuple[ContentTable, ...] = (
         ItemAbilityGrant,
         ("item_key", "ability_key", "grant_type"),
     ),
+    ("level_rewards", LevelReward, ("level_required", "reward_type", "reward_key")),
     ("enemy_archetypes", EnemyArchetype, ("archetype_key",)),
     ("enemy_definitions", EnemyDefinition, ("enemy_key",)),
     ("enemy_attacks", EnemyAttack, ("enemy_key", "attack_key")),

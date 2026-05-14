@@ -33,6 +33,7 @@ from app.models.item import (
 )
 from app.models.user import User
 from app.progression import apply_character_xp, xp_to_next_level
+from app.rewards import apply_level_rewards
 from app.server_auth import require_game_server_secret
 
 
@@ -643,7 +644,8 @@ def award_character_xp(
         )
 
     character = _get_owned_character(character_id, current_user.id, db)
-    apply_character_xp(character, payload.xp_amount)
+    result = apply_character_xp(character, payload.xp_amount)
+    apply_level_rewards(db, character, result.gained_levels)
 
     db.commit()
     db.refresh(character)

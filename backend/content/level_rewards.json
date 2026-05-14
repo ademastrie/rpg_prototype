@@ -1,0 +1,16 @@
+[
+  {
+    "level_required": 2,
+    "reward_type": "ability_unlock",
+    "reward_key": "hp_regen",
+    "is_active": true,
+    "description": "Unlocks HP Regen as a permanent character ability."
+  },
+  {
+    "level_required": 3,
+    "reward_type": "ability_unlock",
+    "reward_key": "damage_aura",
+    "is_active": true,
+    "description": "Unlocks Damage Aura as a permanent character ability."
+  }
+]

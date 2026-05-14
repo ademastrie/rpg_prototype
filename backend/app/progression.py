@@ -11,6 +11,7 @@ class XpAwardResult:
     xp_to_next_level: int
     xp_awarded: int
     levels_gained: int
+    gained_levels: tuple[int, ...] = ()
 
     @property
     def leveled_up(self) -> bool:
@@ -61,6 +62,7 @@ def apply_character_xp(character: Character, xp_awarded: int) -> XpAwardResult:
     awarded = max(int(xp_awarded), 0)
     character.level = max(character.level, 1)
     character.xp = max(character.xp, 0)
+    starting_level = character.level
 
     if awarded == 0:
         return XpAwardResult(
@@ -70,6 +72,7 @@ def apply_character_xp(character: Character, xp_awarded: int) -> XpAwardResult:
             xp_to_next_level=xp_to_next_level(character.level),
             xp_awarded=0,
             levels_gained=0,
+            gained_levels=(),
         )
 
     character.xp += awarded
@@ -88,4 +91,5 @@ def apply_character_xp(character: Character, xp_awarded: int) -> XpAwardResult:
         xp_to_next_level=xp_to_next_level(character.level),
         xp_awarded=awarded,
         levels_gained=levels_gained,
+        gained_levels=tuple(range(starting_level + 1, character.level + 1)),
     )
