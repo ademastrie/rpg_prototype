@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class CharacterCreate(BaseModel):
     name: str
     starter_ability_key: str = "slash"
+    starter_weapon_key: str | None = None
 
 
 class CharacterResponse(BaseModel):
@@ -57,6 +58,14 @@ class ItemStatModifierResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ItemAbilityGrantResponse(BaseModel):
+    ability_key: str
+    grant_type: str
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
 class ItemDefinitionResponse(BaseModel):
     item_key: str
     display_name: str
@@ -68,6 +77,7 @@ class ItemDefinitionResponse(BaseModel):
     icon_key: str | None
     is_active: bool
     stat_modifiers: list[ItemStatModifierResponse] = Field(default_factory=list)
+    ability_grants: list[ItemAbilityGrantResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

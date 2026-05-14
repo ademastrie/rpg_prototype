@@ -21,6 +21,7 @@ from app.models import (  # noqa: E402
     EnemyAttack,
     EnemyDefinition,
     EnemyLootEntry,
+    ItemAbilityGrant,
     ItemDefinition,
     ItemStatModifier,
     RegionDefinition,
@@ -54,6 +55,9 @@ CONTENT_ROW_DEFAULTS: dict[str, JsonRow] = {
         "loot_table_key": None,
         "tier": "normal",
     },
+    "item_ability_grants": {
+        "is_active": True,
+    },
 }
 
 
@@ -64,6 +68,12 @@ OFFICIAL_EQUIPMENT_STAT_KEYS = {
     "spell_power",
     "armor",
     "avoidance",
+}
+
+
+OFFICIAL_ITEM_ABILITY_GRANT_TYPES = {
+    "weapon_primary",
+    "granted_active",
 }
 
 
@@ -116,6 +126,11 @@ CONTENT_TABLES: tuple[ContentTable, ...] = (
         "item_stat_modifiers",
         ItemStatModifier,
         ("item_key", "stat_key", "modifier_type"),
+    ),
+    (
+        "item_ability_grants",
+        ItemAbilityGrant,
+        ("item_key", "ability_key", "grant_type"),
     ),
     ("enemy_archetypes", EnemyArchetype, ("archetype_key",)),
     ("enemy_definitions", EnemyDefinition, ("enemy_key",)),
@@ -225,21 +240,32 @@ def apply_legacy_stat_key_renames(
 
 def validate_content_rows(table_name: str, rows: Iterable[JsonRow]) -> list[JsonRow]:
     prepared_rows = list(rows)
-    if table_name != "item_stat_modifiers":
+    if table_name == "item_stat_modifiers":
+        for row in prepared_rows:
+            stat_key = row.get("stat_key")
+            if stat_key not in OFFICIAL_EQUIPMENT_STAT_KEYS:
+                raise ValueError(
+                    "item_stat_modifiers contains unsupported stat_key "
+                    f"{stat_key!r} for item_key {row.get('item_key')!r}."
+                )
+
+        return prepared_rows
+
+    if table_name != "item_ability_grants":
         return prepared_rows
 
     for row in prepared_rows:
-        stat_key = row.get("stat_key")
-        if stat_key not in OFFICIAL_EQUIPMENT_STAT_KEYS:
+        grant_type = row.get("grant_type")
+        if grant_type not in OFFICIAL_ITEM_ABILITY_GRANT_TYPES:
             raise ValueError(
-                "item_stat_modifiers contains unsupported stat_key "
-                f"{stat_key!r} for item_key {row.get('item_key')!r}."
+                "item_ability_grants contains unsupported grant_type "
+                f"{grant_type!r} for item_key {row.get('item_key')!r}."
             )
 
     return prepared_rows
 
 
-def prune_missing_item_stat_modifiers(
+def prune_missing_item_content_rows(
     session: Session,
     model: type,
     rows: Iterable[JsonRow],
@@ -300,8 +326,8 @@ def sync_content(session: Session) -> dict[str, tuple[int, int]]:
                 apply_row_defaults(table_name, load_rows(f"{table_name}.json")),
             ),
         )
-        if table_name == "item_stat_modifiers":
-            prune_missing_item_stat_modifiers(
+        if table_name in {"item_stat_modifiers", "item_ability_grants"}:
+            prune_missing_item_content_rows(
                 session,
                 model,
                 rows,

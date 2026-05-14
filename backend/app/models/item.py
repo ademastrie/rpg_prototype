@@ -1,11 +1,20 @@
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from app.models.ability import AbilityDefinition
     from app.models.character import Character
 
 
@@ -28,6 +37,10 @@ class ItemDefinition(Base):
         back_populates="item_definition",
         cascade="all, delete-orphan",
     )
+    ability_grants: Mapped[list["ItemAbilityGrant"]] = relationship(
+        back_populates="item_definition",
+        cascade="all, delete-orphan",
+    )
     equipment_entries: Mapped[list["CharacterEquipment"]] = relationship(back_populates="item_definition")
 
 
@@ -41,6 +54,42 @@ class ItemStatModifier(Base):
     modifier_type: Mapped[str] = mapped_column(String(32), default="flat", server_default="flat", nullable=False)
 
     item_definition: Mapped["ItemDefinition"] = relationship(back_populates="stat_modifiers")
+
+
+class ItemAbilityGrant(Base):
+    __tablename__ = "item_ability_grants"
+    __table_args__ = (
+        UniqueConstraint(
+            "item_key",
+            "ability_key",
+            "grant_type",
+            name="uq_item_ability_grants_item_ability_type",
+        ),
+        CheckConstraint(
+            "grant_type IN ('weapon_primary', 'granted_active')",
+            name="ck_item_ability_grants_grant_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_key: Mapped[str] = mapped_column(
+        ForeignKey("item_definitions.item_key"),
+        nullable=False,
+    )
+    ability_key: Mapped[str] = mapped_column(
+        ForeignKey("ability_definitions.ability_key"),
+        nullable=False,
+    )
+    grant_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
+        nullable=False,
+    )
+
+    item_definition: Mapped["ItemDefinition"] = relationship(back_populates="ability_grants")
+    ability_definition: Mapped["AbilityDefinition"] = relationship()
 
 
 class CharacterInventory(Base):

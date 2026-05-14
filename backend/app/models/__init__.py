@@ -2,7 +2,13 @@ from app.models.base import Base
 from app.models.ability import AbilityDefinition, AbilityEffect, CharacterAbility, CharacterAbilityLoadout
 from app.models.character import Character
 from app.models.enemy import EnemyArchetype, EnemyAttack, EnemyDefinition, EnemyLootEntry
-from app.models.item import CharacterEquipment, CharacterInventory, ItemDefinition, ItemStatModifier
+from app.models.item import (
+    CharacterEquipment,
+    CharacterInventory,
+    ItemAbilityGrant,
+    ItemDefinition,
+    ItemStatModifier,
+)
 from app.models.region import (
     RegionDefinition,
     RegionEnemySpawn,
@@ -26,6 +32,7 @@ __all__ = [
     "EnemyDefinition",
     "EnemyLootEntry",
     "ItemDefinition",
+    "ItemAbilityGrant",
     "ItemStatModifier",
     "RegionDefinition",
     "RegionEnemySpawn",

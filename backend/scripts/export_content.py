@@ -23,6 +23,7 @@ from app.models import (  # noqa: E402
     EnemyAttack,
     EnemyDefinition,
     EnemyLootEntry,
+    ItemAbilityGrant,
     ItemDefinition,
     ItemStatModifier,
     RegionDefinition,
@@ -100,6 +101,12 @@ CONTENT_TABLES: tuple[ContentTable, ...] = (
         ItemStatModifier,
         ("item_key", "stat_key", "modifier_type"),
         ("item_key", "stat_key", "value", "modifier_type"),
+    ),
+    (
+        "item_ability_grants",
+        ItemAbilityGrant,
+        ("item_key", "ability_key", "grant_type"),
+        ("item_key", "ability_key", "grant_type", "is_active"),
     ),
     (
         "enemy_archetypes",

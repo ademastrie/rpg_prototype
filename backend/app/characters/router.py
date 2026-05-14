@@ -25,7 +25,12 @@ from app.characters.schemas import (
 from app.db import get_db
 from app.models.ability import AbilityDefinition, CharacterAbility, CharacterAbilityLoadout
 from app.models.character import Character
-from app.models.item import CharacterEquipment, CharacterInventory, ItemDefinition
+from app.models.item import (
+    CharacterEquipment,
+    CharacterInventory,
+    ItemAbilityGrant,
+    ItemDefinition,
+)
 from app.models.user import User
 from app.progression import apply_character_xp, xp_to_next_level
 from app.server_auth import require_game_server_secret
@@ -35,6 +40,7 @@ router = APIRouter(prefix="/characters", tags=["characters"])
 MAX_LOADOUT_ENTRIES = 5
 DEFAULT_STARTER_ABILITY_KEY = "slash"
 STARTER_ABILITY_KEYS = {"slash", "firebolt", "shoot"}
+STARTER_WEAPON_KEYS = {"training_sword", "training_bow", "training_staff"}
 VALID_EQUIPMENT_SLOTS = {"weapon", "head", "chest", "arms", "hands", "legs", "feet"}
 
 
@@ -85,7 +91,10 @@ def _character_inventory_response(character_id: int, db: Session) -> CharacterIn
             .options(
                 selectinload(CharacterInventory.item_definition).selectinload(
                     ItemDefinition.stat_modifiers
-                )
+                ),
+                selectinload(CharacterInventory.item_definition).selectinload(
+                    ItemDefinition.ability_grants
+                ),
             )
             .join(CharacterInventory.item_definition)
             .where(CharacterInventory.character_id == character_id)
@@ -119,7 +128,10 @@ def _character_equipment_response(character_id: int, db: Session) -> CharacterEq
             .options(
                 selectinload(CharacterEquipment.item_definition).selectinload(
                     ItemDefinition.stat_modifiers
-                )
+                ),
+                selectinload(CharacterEquipment.item_definition).selectinload(
+                    ItemDefinition.ability_grants
+                ),
             )
             .join(CharacterEquipment.item_definition)
             .where(CharacterEquipment.character_id == character_id)
@@ -175,6 +187,57 @@ def _get_starter_ability_definition(ability_key: str, db: Session) -> AbilityDef
     return ability_definition
 
 
+def _get_starter_weapon_definition(
+    item_key: str,
+    db: Session,
+) -> tuple[ItemDefinition, AbilityDefinition]:
+    starter_weapon_key = item_key.strip()
+    if starter_weapon_key not in STARTER_WEAPON_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Selected starter weapon is not allowed.",
+        )
+
+    item_definition = db.scalar(
+        select(ItemDefinition)
+        .options(
+            selectinload(ItemDefinition.ability_grants).selectinload(
+                ItemAbilityGrant.ability_definition
+            )
+        )
+        .where(
+            ItemDefinition.item_key == starter_weapon_key,
+            ItemDefinition.item_type == "equipment",
+            ItemDefinition.equip_slot == "weapon",
+            ItemDefinition.is_active.is_(True),
+        )
+    )
+    if item_definition is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Selected starter weapon is not available.",
+        )
+
+    primary_grant = next(
+        (
+            grant
+            for grant in item_definition.ability_grants
+            if grant.grant_type == "weapon_primary"
+            and grant.is_active
+            and grant.ability_definition is not None
+            and grant.ability_definition.is_active
+        ),
+        None,
+    )
+    if primary_grant is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Selected starter weapon does not grant an active primary ability.",
+        )
+
+    return item_definition, primary_grant.ability_definition
+
+
 def _get_ability_definition(ability_key: str, db: Session) -> AbilityDefinition:
     ability_key_text = ability_key.strip()
     ability_definition = db.scalar(
@@ -208,6 +271,28 @@ def _grant_starter_ability(
             slot_index=0,
             ability_key=ability_definition.ability_key,
             enabled=True,
+        )
+    )
+
+
+def _grant_starter_weapon(
+    character_id: int,
+    item_definition: ItemDefinition,
+    db: Session,
+) -> None:
+    inventory_entry = CharacterInventory(
+        character_id=character_id,
+        item_key=item_definition.item_key,
+        quantity=1,
+    )
+    db.add(inventory_entry)
+    db.flush()
+    db.add(
+        CharacterEquipment(
+            character_id=character_id,
+            equip_slot="weapon",
+            item_key=item_definition.item_key,
+            inventory_entry_id=inventory_entry.id,
         )
     )
 
@@ -452,10 +537,29 @@ def create_character(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Character:
-    starter_ability = _get_starter_ability_definition(payload.starter_ability_key, db)
+    starter_weapon: ItemDefinition | None = None
+    explicit_starter_ability = "starter_ability_key" in payload.model_fields_set
+    if payload.starter_weapon_key is None:
+        starter_ability = _get_starter_ability_definition(payload.starter_ability_key, db)
+    else:
+        starter_weapon, starter_ability = _get_starter_weapon_definition(
+            payload.starter_weapon_key,
+            db,
+        )
+        if (
+            explicit_starter_ability
+            and payload.starter_ability_key.strip() != starter_ability.ability_key
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="starter_ability_key must match the starter weapon primary ability.",
+            )
+
     character = Character(name=payload.name, user_id=current_user.id)
     db.add(character)
     db.flush()
+    if starter_weapon is not None:
+        _grant_starter_weapon(character.id, starter_weapon, db)
     _grant_starter_ability(character.id, starter_ability, db)
     db.commit()
     db.refresh(character)

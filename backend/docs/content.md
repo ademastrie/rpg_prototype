@@ -11,6 +11,16 @@ Equipment stat modifiers should use only the official derived combat stat keys: 
 
 Future equipment stats may include `ability_haste` or `healing_power`; they are not implemented yet. Hands/gloves are a natural future source for ability haste or cooldown reduction when that system exists.
 
+Ability availability is split between permanent character unlocks and temporary item grants:
+
+- Permanent character abilities live in `character_abilities`. These are known by the character independent of gear and must not be removed when content sync runs.
+- Item-granted abilities live in `item_ability_grants`. These are content rows keyed by `item_key`, `ability_key`, and `grant_type`, and are available only while the granting item is equipped.
+- Starter weapons grant the first weapon-primary ability: `training_sword` grants `slash`, `training_bow` grants `shoot`, and `training_staff` grants `firebolt`.
+
+Current grant types are `weapon_primary` and `granted_active`. Stable keys are the runtime identity; display names are presentation only.
+
+Future permanent unlock sources can include level reward, quest reward, achievement, ability mastery, and item grant promotion rules. Those systems are not implemented yet.
+
 Enemy content is split into archetypes, definitions, and spawns:
 
 - Enemy archetypes describe shared creature identity and future behavior/visual defaults. They are where content teaches what kind of enemy something is.
@@ -86,6 +96,7 @@ The script upserts rows by stable keys:
 - `ability_effects`: `ability_key`, `effect_type`, `target_team`, `stat_key`
 - `item_definitions`: `item_key`
 - `item_stat_modifiers`: `item_key`, `stat_key`, `modifier_type`
+- `item_ability_grants`: `item_key`, `ability_key`, `grant_type`
 - `enemy_archetypes`: `archetype_key`
 - `enemy_definitions`: `enemy_key`
 - `enemy_attacks`: `enemy_key`, `attack_key`

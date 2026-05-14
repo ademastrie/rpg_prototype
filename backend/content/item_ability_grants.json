@@ -1,0 +1,20 @@
+[
+  {
+    "item_key": "training_bow",
+    "ability_key": "shoot",
+    "grant_type": "weapon_primary",
+    "is_active": true
+  },
+  {
+    "item_key": "training_staff",
+    "ability_key": "firebolt",
+    "grant_type": "weapon_primary",
+    "is_active": true
+  },
+  {
+    "item_key": "training_sword",
+    "ability_key": "slash",
+    "grant_type": "weapon_primary",
+    "is_active": true
+  }
+]
