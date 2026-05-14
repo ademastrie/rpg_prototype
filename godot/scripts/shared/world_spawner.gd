@@ -13,6 +13,7 @@ signal combat_mode_updated(peer_id: int, combat_enabled: bool, loadout_entries: 
 signal ability_enabled_updated(peer_id: int, ability_name: String, enabled: bool)
 signal ability_state_updated(peer_id: int, ability_name: String, enabled: bool, active: bool, cooldown_remaining: float)
 signal ability_catalog_updated(peer_id: int, unlocked_abilities: Array)
+signal weapon_primary_ability_updated(peer_id: int, weapon_primary_ability: Dictionary)
 signal ability_unlock_message_received(peer_id: int, display_name: String)
 signal status_message_received(peer_id: int, message: String)
 signal join_requested(peer_id: int, character_id: int, character_name: String, access_token: String)
@@ -63,6 +64,8 @@ var _ability_keys_by_peer: Dictionary = {}
 var _ability_slot_indexes_by_peer: Dictionary = {}
 var _ability_display_names_by_peer: Dictionary = {}
 var _unlocked_abilities_by_peer: Dictionary = {}
+var _permanent_abilities_by_peer: Dictionary = {}
+var _weapon_primary_ability_by_peer: Dictionary = {}
 var _ability_enabled_by_peer: Dictionary = {}
 var _last_ability_time_by_peer: Dictionary = {}
 var _server_ability_configs: Dictionary = {}
@@ -122,6 +125,13 @@ const ABILITY_KEY_BY_DISPLAY_NAME: Dictionary = {
 	"Damage Aura": "damage_aura",
 	"Firebolt": "firebolt",
 	"Shoot": "shoot",
+}
+const ABILITY_DISPLAY_NAME_BY_KEY: Dictionary = {
+	"slash": "Slash",
+	"hp_regen": "HP Regen",
+	"damage_aura": "Damage Aura",
+	"firebolt": "Firebolt",
+	"shoot": "Shoot",
 }
 
 # Safe fallback prototype ability config. Backend runtime values can override
@@ -283,6 +293,8 @@ func unregister_peer(peer_id: int) -> void:
 	_ability_slot_indexes_by_peer.erase(peer_id)
 	_ability_display_names_by_peer.erase(peer_id)
 	_unlocked_abilities_by_peer.erase(peer_id)
+	_permanent_abilities_by_peer.erase(peer_id)
+	_weapon_primary_ability_by_peer.erase(peer_id)
 	_ability_enabled_by_peer.erase(peer_id)
 	_last_ability_time_by_peer.erase(peer_id)
 	_character_names_by_peer.erase(peer_id)
@@ -335,13 +347,13 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	_combat_enabled_by_peer[peer_id] = false
 	_character_equipment_by_peer[peer_id] = {}
 	var effective_loadout: Array = loadout.duplicate()
-	if effective_loadout.is_empty():
-		effective_loadout = DEFAULT_LOADOUT.duplicate()
 	_loadout_by_peer[peer_id] = effective_loadout
 	_ability_keys_by_peer[peer_id] = _ability_keys_for_loadout(effective_loadout, ability_keys)
 	_ability_slot_indexes_by_peer[peer_id] = _ability_slot_indexes_for_loadout(effective_loadout, ability_slot_indexes)
 	_ability_display_names_by_peer[peer_id] = _ability_display_names_for_loadout(effective_loadout, ability_display_names)
-	_unlocked_abilities_by_peer[peer_id] = unlocked_abilities.duplicate()
+	_permanent_abilities_by_peer[peer_id] = _deduplicated_ability_entries(unlocked_abilities)
+	_unlocked_abilities_by_peer[peer_id] = _regular_available_abilities_for_peer(peer_id)
+	_weapon_primary_ability_by_peer[peer_id] = _weapon_primary_ability_for_peer(peer_id)
 	_ability_enabled_by_peer[peer_id] = _ability_enabled_state_for_loadout(effective_loadout, ability_enabled)
 	_last_ability_time_by_peer[peer_id] = {}
 	_recalculate_player_combat_stats(peer_id, true)
@@ -351,6 +363,7 @@ func _register_player(peer_id: int, use_custom_spawn: bool = false, custom_spawn
 	rpc("apply_player_health_update", peer_id, max_hp, max_hp)
 	rpc("apply_player_down_state", peer_id, false)
 	rpc_id(peer_id, "apply_ability_catalog_update", peer_id, _unlocked_abilities_by_peer[peer_id] as Array)
+	rpc_id(peer_id, "apply_weapon_primary_ability_update", peer_id, _weapon_primary_ability_by_peer[peer_id] as Dictionary)
 	rpc("apply_combat_mode_update", peer_id, false, _loadout_entries(peer_id))
 	_send_ability_enabled_states(peer_id)
 	_send_ability_states(peer_id)
@@ -406,6 +419,8 @@ func apply_confirmed_character_equipment(peer_id: int, equipment: Dictionary) ->
 
 	var confirmed_equipment: Dictionary = equipment.duplicate(true)
 	_character_equipment_by_peer[peer_id] = confirmed_equipment
+	_recompute_ability_availability(peer_id, true)
+	_log_resolved_ability_availability(peer_id)
 	_recalculate_player_combat_stats(peer_id)
 	rpc_id(peer_id, "apply_character_equipment_update", peer_id, confirmed_equipment)
 
@@ -809,6 +824,249 @@ func _apply_equipped_item_stat_modifiers(peer_id: int, combat_stats: Dictionary)
 			_apply_stat_modifier_to_combat_stats(combat_stats, modifier_variant as Dictionary)
 
 
+func _recompute_ability_availability(peer_id: int, resend_confirmed_state: bool = false) -> void:
+	if not multiplayer.is_server() or not players.has(peer_id):
+		return
+
+	var permanent_abilities: Array = _permanent_abilities_by_peer.get(peer_id, []) as Array
+	var item_regular_abilities: Array = _item_granted_regular_abilities_for_peer(peer_id)
+	var final_regular_abilities: Array = _deduplicated_ability_entries(permanent_abilities + item_regular_abilities)
+	var weapon_primary_ability: Dictionary = _weapon_primary_ability_for_peer(peer_id)
+	_unlocked_abilities_by_peer[peer_id] = final_regular_abilities
+	_weapon_primary_ability_by_peer[peer_id] = weapon_primary_ability
+	_prune_unavailable_loadout_entries(peer_id)
+
+	print("Ability availability recomputed: peer_id=%s character_id=%s weapon_primary=%s permanent=%s item_granted_regular=%s final_regular=%s" % [
+		peer_id,
+		int(_character_ids_by_peer.get(peer_id, 0)),
+		str(weapon_primary_ability.get("ability_key", "")),
+		_ability_keys_from_entries(permanent_abilities),
+		_ability_keys_from_entries(item_regular_abilities),
+		_ability_keys_from_entries(final_regular_abilities),
+	])
+
+	if resend_confirmed_state:
+		rpc_id(peer_id, "apply_ability_catalog_update", peer_id, final_regular_abilities)
+		rpc_id(peer_id, "apply_weapon_primary_ability_update", peer_id, weapon_primary_ability)
+		rpc("apply_combat_mode_update", peer_id, bool(_combat_enabled_by_peer.get(peer_id, false)), _loadout_entries(peer_id))
+		_send_ability_enabled_states(peer_id)
+		_send_ability_states(peer_id)
+		_broadcast_hp_regen_active_state(peer_id)
+
+
+func _log_resolved_ability_availability(peer_id: int) -> void:
+	var weapon_primary_ability: Dictionary = _weapon_primary_ability_by_peer.get(peer_id, {}) as Dictionary
+	var weapon_primary_key: String = str(weapon_primary_ability.get("ability_key", "")).strip_edges().to_lower()
+	var regular_ability_keys: Array[String] = _regular_available_ability_keys(peer_id)
+	var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
+	if weapon_primary_key != "":
+		print("Weapon-primary ability resolved: peer_id=%s character_id=%s ability_key=%s ability_name=%s item_key=%s." % [
+			peer_id,
+			int(_character_ids_by_peer.get(peer_id, 0)),
+			weapon_primary_key,
+			str(weapon_primary_ability.get("ability_name", "")),
+			str(weapon_primary_ability.get("item_key", "")),
+		])
+	if loadout.is_empty():
+		print("Regular ability loadout empty but allowed: peer_id=%s character_id=%s regular_available=%s." % [
+			peer_id,
+			int(_character_ids_by_peer.get(peer_id, 0)),
+			regular_ability_keys,
+		])
+	if weapon_primary_key == "" and regular_ability_keys.is_empty():
+		print("Warning: no usable abilities found after equipment grants resolved: peer_id=%s character_id=%s." % [
+			peer_id,
+			int(_character_ids_by_peer.get(peer_id, 0)),
+		])
+
+
+func _prune_unavailable_loadout_entries(peer_id: int) -> void:
+	var available_keys: Array[String] = _regular_available_ability_keys(peer_id)
+	var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
+	var ability_keys: Dictionary = _ability_keys_by_peer.get(peer_id, {}) as Dictionary
+	var ability_slot_indexes: Dictionary = _ability_slot_indexes_by_peer.get(peer_id, {}) as Dictionary
+	var display_names: Dictionary = _ability_display_names_by_peer.get(peer_id, {}) as Dictionary
+	var enabled_state: Dictionary = _ability_enabled_by_peer.get(peer_id, {}) as Dictionary
+	var last_used_state: Dictionary = _last_ability_time_by_peer.get(peer_id, {}) as Dictionary
+	var pruned_loadout: Array = []
+
+	for ability_name_variant in loadout:
+		var ability_name: String = str(ability_name_variant)
+		var ability_key: String = str(ability_keys.get(ability_name, _server_ability_key(ability_name))).strip_edges().to_lower()
+		if available_keys.has(ability_key):
+			pruned_loadout.append(ability_name)
+			continue
+
+		print("Removed unavailable ability from loadout: peer_id=%s character_id=%s ability_key=%s ability_name=%s" % [
+			peer_id,
+			int(_character_ids_by_peer.get(peer_id, 0)),
+			ability_key,
+			ability_name,
+		])
+		ability_keys.erase(ability_name)
+		ability_slot_indexes.erase(ability_name)
+		display_names.erase(ability_name)
+		enabled_state.erase(ability_name)
+		last_used_state.erase(ability_name)
+
+	_loadout_by_peer[peer_id] = pruned_loadout
+	_ability_keys_by_peer[peer_id] = ability_keys
+	_ability_slot_indexes_by_peer[peer_id] = ability_slot_indexes
+	_ability_display_names_by_peer[peer_id] = display_names
+	_ability_enabled_by_peer[peer_id] = enabled_state
+	_last_ability_time_by_peer[peer_id] = last_used_state
+
+
+func _regular_available_abilities_for_peer(peer_id: int) -> Array:
+	var permanent_abilities: Array = _permanent_abilities_by_peer.get(peer_id, []) as Array
+	var item_regular_abilities: Array = _item_granted_regular_abilities_for_peer(peer_id)
+	return _deduplicated_ability_entries(permanent_abilities + item_regular_abilities)
+
+
+func _item_granted_regular_abilities_for_peer(peer_id: int) -> Array:
+	var granted_abilities: Array = []
+	for grant in _equipped_item_ability_grants(peer_id, "granted_active"):
+		var ability_key: String = str(grant.get("ability_key", "")).strip_edges().to_lower()
+		var ability_entry: Dictionary = _ability_entry_for_key(ability_key, "gear")
+		if not ability_entry.is_empty():
+			granted_abilities.append(ability_entry)
+	return _deduplicated_ability_entries(granted_abilities)
+
+
+func _weapon_primary_ability_for_peer(peer_id: int) -> Dictionary:
+	var weapon_grants: Array = _equipped_item_ability_grants(peer_id, "weapon_primary")
+	weapon_grants.sort_custom(func(left: Variant, right: Variant) -> bool:
+		var left_grant: Dictionary = left as Dictionary
+		var right_grant: Dictionary = right as Dictionary
+		var left_key: String = "%s:%s" % [str(left_grant.get("equip_slot", "")), str(left_grant.get("ability_key", ""))]
+		var right_key: String = "%s:%s" % [str(right_grant.get("equip_slot", "")), str(right_grant.get("ability_key", ""))]
+		return left_key < right_key
+	)
+	if weapon_grants.is_empty():
+		return {}
+	if weapon_grants.size() > 1:
+		print("Multiple weapon_primary ability grants found: peer_id=%s character_id=%s grants=%s. Using first deterministic grant." % [
+			peer_id,
+			int(_character_ids_by_peer.get(peer_id, 0)),
+			weapon_grants,
+		])
+
+	var chosen_grant: Dictionary = weapon_grants[0] as Dictionary
+	var ability_key: String = str(chosen_grant.get("ability_key", "")).strip_edges().to_lower()
+	var ability_entry: Dictionary = _ability_entry_for_key(ability_key, "weapon")
+	if ability_entry.is_empty():
+		return {}
+	ability_entry["equip_slot"] = str(chosen_grant.get("equip_slot", ""))
+	ability_entry["item_key"] = str(chosen_grant.get("item_key", ""))
+	return ability_entry
+
+
+func _equipped_item_ability_grants(peer_id: int, grant_type: String) -> Array:
+	var grants: Array = []
+	var equipment: Dictionary = _character_equipment_by_peer.get(peer_id, {}) as Dictionary
+	for slot_name_variant in equipment.keys():
+		var slot_name: String = str(slot_name_variant)
+		var slot_data: Variant = equipment[slot_name_variant]
+		if not (slot_data is Dictionary):
+			continue
+
+		var equipment_item: Dictionary = slot_data as Dictionary
+		for grant_variant in _equipment_item_ability_grants(equipment_item):
+			if not (grant_variant is Dictionary):
+				continue
+
+			var grant: Dictionary = grant_variant as Dictionary
+			var ability_key: String = str(grant.get("ability_key", "")).strip_edges().to_lower()
+			if ability_key == "":
+				continue
+			if str(grant.get("grant_type", "")).strip_edges().to_lower() != grant_type:
+				continue
+			if not bool(grant.get("is_active", true)):
+				continue
+
+			var normalized_grant: Dictionary = grant.duplicate(true)
+			normalized_grant["ability_key"] = ability_key
+			normalized_grant["grant_type"] = grant_type
+			normalized_grant["equip_slot"] = slot_name
+			normalized_grant["item_key"] = str(equipment_item.get("item_key", ""))
+			grants.append(normalized_grant)
+	return grants
+
+
+func _equipment_item_ability_grants(equipment_item: Dictionary) -> Array:
+	var raw_grants: Variant = equipment_item.get("ability_grants", [])
+	if raw_grants is Array:
+		return (raw_grants as Array).duplicate(true)
+	if raw_grants is Dictionary:
+		var grants: Array = []
+		var raw_grant_dictionary: Dictionary = raw_grants as Dictionary
+		for ability_key in raw_grant_dictionary.keys():
+			grants.append({
+				"ability_key": str(ability_key),
+				"grant_type": str(raw_grant_dictionary[ability_key]),
+				"is_active": true,
+			})
+		return grants
+	return []
+
+
+func _deduplicated_ability_entries(ability_entries: Array) -> Array:
+	var by_key: Dictionary = {}
+	var ordered_keys: Array[String] = []
+	for ability_variant in ability_entries:
+		if not (ability_variant is Dictionary):
+			continue
+
+		var ability: Dictionary = ability_variant as Dictionary
+		var ability_key: String = str(ability.get("ability_key", "")).strip_edges().to_lower()
+		if ability_key == "":
+			continue
+		if not by_key.has(ability_key):
+			ordered_keys.append(ability_key)
+		var normalized: Dictionary = ability.duplicate(true)
+		normalized["ability_key"] = ability_key
+		by_key[ability_key] = normalized
+
+	var deduplicated: Array = []
+	for ability_key in ordered_keys:
+		deduplicated.append(by_key[ability_key])
+	return deduplicated
+
+
+func _ability_entry_for_key(ability_key: String, source: String = "") -> Dictionary:
+	var normalized_key: String = ability_key.strip_edges().to_lower()
+	if normalized_key == "":
+		return {}
+	var ability_name: String = str(ABILITY_DISPLAY_NAME_BY_KEY.get(normalized_key, ""))
+	if ability_name == "":
+		return {}
+
+	var entry: Dictionary = {
+		"ability_key": normalized_key,
+		"ability_name": ability_name,
+		"display_name": ability_name,
+	}
+	if source != "":
+		entry["source"] = source
+	return entry
+
+
+func _regular_available_ability_keys(peer_id: int) -> Array[String]:
+	return _ability_keys_from_entries(_unlocked_abilities_by_peer.get(peer_id, []) as Array)
+
+
+func _ability_keys_from_entries(ability_entries: Array) -> Array[String]:
+	var ability_keys: Array[String] = []
+	for ability_variant in ability_entries:
+		if not (ability_variant is Dictionary):
+			continue
+
+		var ability_key: String = str((ability_variant as Dictionary).get("ability_key", "")).strip_edges().to_lower()
+		if ability_key != "" and not ability_keys.has(ability_key):
+			ability_keys.append(ability_key)
+	return ability_keys
+
+
 func _equipment_item_stat_modifiers(equipment_item: Dictionary) -> Array:
 	var raw_modifiers: Variant = equipment_item.get("stat_modifiers", [])
 	if raw_modifiers is Array:
@@ -1017,7 +1275,15 @@ func _process_combat_abilities() -> void:
 			continue
 
 		var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
-		if loadout.has("Slash") and _is_ability_enabled(peer_id_int, "Slash") and _is_ability_ready(peer_id_int, "Slash", now_seconds):
+		var weapon_primary: Dictionary = _weapon_primary_ability_by_peer.get(peer_id, {}) as Dictionary
+		var weapon_primary_name: String = str(weapon_primary.get("ability_name", "")).strip_edges()
+		var weapon_primary_key: String = str(weapon_primary.get("ability_key", "")).strip_edges().to_lower()
+		if weapon_primary_name != "" and _is_ability_ready(peer_id_int, weapon_primary_name, now_seconds):
+			_set_ability_used(peer_id_int, weapon_primary_name, now_seconds)
+			_send_weapon_primary_ability_state(peer_id_int)
+			_perform_confirmed_ability(peer_id_int, weapon_primary_name)
+
+		if loadout.has("Slash") and weapon_primary_key != "slash" and _is_ability_enabled(peer_id_int, "Slash") and _is_ability_ready(peer_id_int, "Slash", now_seconds):
 			_set_ability_used(peer_id_int, "Slash", now_seconds)
 			_send_ability_state(peer_id_int, "Slash")
 			_perform_slash(peer_id_int)
@@ -1029,11 +1295,11 @@ func _process_combat_abilities() -> void:
 			_set_ability_used(peer_id_int, "Damage Aura", now_seconds)
 			_send_ability_state(peer_id_int, "Damage Aura")
 			_perform_damage_aura(peer_id_int)
-		if loadout.has("Firebolt") and _is_ability_enabled(peer_id_int, "Firebolt") and _is_ability_ready(peer_id_int, "Firebolt", now_seconds):
+		if loadout.has("Firebolt") and weapon_primary_key != "firebolt" and _is_ability_enabled(peer_id_int, "Firebolt") and _is_ability_ready(peer_id_int, "Firebolt", now_seconds):
 			_set_ability_used(peer_id_int, "Firebolt", now_seconds)
 			_send_ability_state(peer_id_int, "Firebolt")
 			_perform_firebolt(peer_id_int)
-		if loadout.has("Shoot") and _is_ability_enabled(peer_id_int, "Shoot") and _is_ability_ready(peer_id_int, "Shoot", now_seconds):
+		if loadout.has("Shoot") and weapon_primary_key != "shoot" and _is_ability_enabled(peer_id_int, "Shoot") and _is_ability_ready(peer_id_int, "Shoot", now_seconds):
 			_set_ability_used(peer_id_int, "Shoot", now_seconds)
 			_send_ability_state(peer_id_int, "Shoot")
 			_perform_shoot(peer_id_int)
@@ -1294,6 +1560,7 @@ func _send_ability_states(peer_id: int) -> void:
 	var loadout: Array = _loadout_by_peer.get(peer_id, DEFAULT_LOADOUT) as Array
 	for ability_name in loadout:
 		_send_ability_state(peer_id, str(ability_name))
+	_send_weapon_primary_ability_state(peer_id)
 
 
 func apply_confirmed_ability_data(peer_id: int, loadout: Array, ability_enabled: Dictionary, ability_display_names: Dictionary, ability_keys: Dictionary, unlocked_abilities: Array, ability_slot_indexes: Dictionary) -> void:
@@ -1304,11 +1571,69 @@ func apply_confirmed_ability_data(peer_id: int, loadout: Array, ability_enabled:
 	_ability_keys_by_peer[peer_id] = _ability_keys_for_loadout(loadout, ability_keys)
 	_ability_slot_indexes_by_peer[peer_id] = _ability_slot_indexes_for_loadout(loadout, ability_slot_indexes)
 	_ability_display_names_by_peer[peer_id] = _ability_display_names_for_loadout(loadout, ability_display_names)
-	_unlocked_abilities_by_peer[peer_id] = unlocked_abilities.duplicate()
+	_permanent_abilities_by_peer[peer_id] = _deduplicated_ability_entries(unlocked_abilities)
 	_ability_enabled_by_peer[peer_id] = _ability_enabled_state_for_loadout(loadout, ability_enabled)
 	_last_ability_time_by_peer[peer_id] = {}
+	_recompute_ability_availability(peer_id, true)
 	_recalculate_player_combat_stats(peer_id)
-	rpc_id(peer_id, "apply_ability_catalog_update", peer_id, _unlocked_abilities_by_peer[peer_id] as Array)
+	rpc("apply_combat_mode_update", peer_id, bool(_combat_enabled_by_peer.get(peer_id, false)), _loadout_entries(peer_id))
+	_send_ability_enabled_states(peer_id)
+	_send_ability_states(peer_id)
+	_broadcast_hp_regen_active_state(peer_id)
+
+
+func apply_confirmed_regular_loadout(peer_id: int, loadout_entries: Array) -> void:
+	if not multiplayer.is_server() or not players.has(peer_id):
+		return
+
+	var available_by_key: Dictionary = {}
+	for ability_variant in (_unlocked_abilities_by_peer.get(peer_id, []) as Array):
+		if not (ability_variant is Dictionary):
+			continue
+
+		var ability: Dictionary = ability_variant as Dictionary
+		var ability_key: String = str(ability.get("ability_key", "")).strip_edges().to_lower()
+		if ability_key != "":
+			available_by_key[ability_key] = ability
+
+	var sorted_entries: Array = loadout_entries.duplicate(true)
+	sorted_entries.sort_custom(func(left: Variant, right: Variant) -> bool:
+		return int((left as Dictionary).get("slot_index", 0)) < int((right as Dictionary).get("slot_index", 0))
+	)
+
+	var loadout: Array = []
+	var ability_enabled: Dictionary = {}
+	var ability_display_names: Dictionary = {}
+	var ability_keys: Dictionary = {}
+	var ability_slot_indexes: Dictionary = {}
+	for entry_variant in sorted_entries:
+		if not (entry_variant is Dictionary):
+			continue
+
+		var entry: Dictionary = entry_variant as Dictionary
+		var ability_key: String = str(entry.get("ability_key", "")).strip_edges().to_lower()
+		if ability_key == "" or not available_by_key.has(ability_key):
+			continue
+
+		var ability: Dictionary = available_by_key[ability_key] as Dictionary
+		var ability_name: String = str(ability.get("ability_name", "")).strip_edges()
+		if ability_name == "":
+			continue
+
+		loadout.append(ability_name)
+		ability_enabled[ability_name] = bool(entry.get("enabled", true))
+		ability_display_names[ability_name] = str(ability.get("display_name", ability_name))
+		ability_keys[ability_name] = ability_key
+		ability_slot_indexes[ability_name] = int(entry.get("slot_index", loadout.size() - 1))
+
+	_loadout_by_peer[peer_id] = loadout
+	_ability_keys_by_peer[peer_id] = _ability_keys_for_loadout(loadout, ability_keys)
+	_ability_slot_indexes_by_peer[peer_id] = _ability_slot_indexes_for_loadout(loadout, ability_slot_indexes)
+	_ability_display_names_by_peer[peer_id] = _ability_display_names_for_loadout(loadout, ability_display_names)
+	_ability_enabled_by_peer[peer_id] = _ability_enabled_state_for_loadout(loadout, ability_enabled)
+	_last_ability_time_by_peer[peer_id] = {}
+	_recompute_ability_availability(peer_id, true)
+	_recalculate_player_combat_stats(peer_id)
 	rpc("apply_combat_mode_update", peer_id, bool(_combat_enabled_by_peer.get(peer_id, false)), _loadout_entries(peer_id))
 	_send_ability_enabled_states(peer_id)
 	_send_ability_states(peer_id)
@@ -1323,6 +1648,20 @@ func _send_ability_state(peer_id: int, ability_name: String) -> void:
 	var active: bool = bool(_combat_enabled_by_peer.get(peer_id, false)) and enabled and not bool(_player_is_down_by_peer.get(peer_id, false))
 	var cooldown_remaining: float = _ability_cooldown_remaining(peer_id, ability_name)
 	rpc_id(peer_id, "apply_ability_state_update", peer_id, ability_name, enabled, active, cooldown_remaining)
+
+
+func _send_weapon_primary_ability_state(peer_id: int) -> void:
+	if not players.has(peer_id):
+		return
+
+	var weapon_primary: Dictionary = _weapon_primary_ability_by_peer.get(peer_id, {}) as Dictionary
+	var ability_name: String = str(weapon_primary.get("ability_name", "")).strip_edges()
+	if ability_name == "":
+		return
+
+	var active: bool = bool(_combat_enabled_by_peer.get(peer_id, false)) and not bool(_player_is_down_by_peer.get(peer_id, false))
+	var cooldown_remaining: float = _ability_cooldown_remaining(peer_id, ability_name)
+	rpc_id(peer_id, "apply_ability_state_update", peer_id, ability_name, true, active, cooldown_remaining)
 
 
 func _is_ability_ready(peer_id: int, ability_name: String, now_seconds: float) -> bool:
@@ -1603,6 +1942,20 @@ func _apply_hp_regen(peer_id: int) -> void:
 	current_hp = int(min(current_hp + _ability_heal_amount("HP Regen"), max_hp))
 	_player_current_hp_by_peer[peer_id] = current_hp
 	rpc("apply_player_health_update", peer_id, current_hp, max_hp)
+
+
+func _perform_confirmed_ability(peer_id: int, ability_name: String) -> void:
+	match ability_name:
+		"Slash":
+			_perform_slash(peer_id)
+		"Firebolt":
+			_perform_firebolt(peer_id)
+		"Shoot":
+			_perform_shoot(peer_id)
+		"HP Regen":
+			_apply_hp_regen(peer_id)
+		"Damage Aura":
+			_perform_damage_aura(peer_id)
 
 
 func _perform_damage_aura(peer_id: int) -> void:
@@ -2159,6 +2512,12 @@ func apply_ability_catalog_update(peer_id: int, unlocked_abilities: Array) -> vo
 
 
 @rpc("authority", "call_remote", "reliable")
+func apply_weapon_primary_ability_update(peer_id: int, weapon_primary_ability: Dictionary) -> void:
+	_weapon_primary_ability_by_peer[peer_id] = weapon_primary_ability.duplicate()
+	weapon_primary_ability_updated.emit(peer_id, weapon_primary_ability)
+
+
+@rpc("authority", "call_remote", "reliable")
 func apply_ability_unlock_message(peer_id: int, display_name: String) -> void:
 	ability_unlock_message_received.emit(peer_id, display_name)
 
@@ -2260,6 +2619,13 @@ func request_set_ability_enabled(ability_name: String, enabled: bool) -> void:
 
 	var loadout: Array = _loadout_by_peer.get(peer_id, []) as Array
 	if not loadout.has(ability_name):
+		print("Rejected ability toggle: peer_id=%s reason=not_in_confirmed_loadout ability_name=%s" % [peer_id, ability_name])
+		return
+	var ability_keys: Dictionary = _ability_keys_by_peer.get(peer_id, {}) as Dictionary
+	var ability_key: String = str(ability_keys.get(ability_name, _server_ability_key(ability_name))).strip_edges().to_lower()
+	if not _regular_available_ability_keys(peer_id).has(ability_key):
+		print("Rejected ability toggle: peer_id=%s reason=unavailable_ability ability_key=%s ability_name=%s" % [peer_id, ability_key, ability_name])
+		_recompute_ability_availability(peer_id, true)
 		return
 
 	var ability_state: Dictionary = _ability_enabled_by_peer.get(peer_id, {}) as Dictionary
@@ -2324,19 +2690,11 @@ func _is_valid_equipment_request(equipment_entries: Array) -> bool:
 
 
 func _is_valid_loadout_request(peer_id: int, loadout_entries: Array) -> bool:
-	if loadout_entries.is_empty() or loadout_entries.size() > 5:
+	if loadout_entries.size() > 5:
+		print("Rejected loadout update: peer_id=%s reason=invalid_size size=%s" % [peer_id, loadout_entries.size()])
 		return false
 
-	var unlocked_keys: Array[String] = []
-	var unlocked_abilities: Array = _unlocked_abilities_by_peer.get(peer_id, []) as Array
-	for ability_variant in unlocked_abilities:
-		if not (ability_variant is Dictionary):
-			continue
-
-		var ability: Dictionary = ability_variant as Dictionary
-		var ability_key: String = str(ability.get("ability_key", "")).strip_edges()
-		if ability_key != "":
-			unlocked_keys.append(ability_key)
+	var unlocked_keys: Array[String] = _regular_available_ability_keys(peer_id)
 
 	var seen_slots: Array[int] = []
 	var seen_keys: Array[String] = []
@@ -2346,12 +2704,15 @@ func _is_valid_loadout_request(peer_id: int, loadout_entries: Array) -> bool:
 
 		var entry: Dictionary = entry_variant as Dictionary
 		var slot_index: int = int(entry.get("slot_index", -1))
-		var ability_key: String = str(entry.get("ability_key", "")).strip_edges()
+		var ability_key: String = str(entry.get("ability_key", "")).strip_edges().to_lower()
 		if slot_index < 0 or slot_index >= 5:
+			print("Rejected loadout update: peer_id=%s reason=invalid_slot slot_index=%s" % [peer_id, slot_index])
 			return false
 		if ability_key == "" or not unlocked_keys.has(ability_key):
+			print("Rejected loadout update: peer_id=%s reason=unavailable_ability ability_key=%s available=%s" % [peer_id, ability_key, unlocked_keys])
 			return false
 		if seen_slots.has(slot_index) or seen_keys.has(ability_key):
+			print("Rejected loadout update: peer_id=%s reason=duplicate_entry ability_key=%s slot_index=%s" % [peer_id, ability_key, slot_index])
 			return false
 
 		seen_slots.append(slot_index)
@@ -2370,15 +2731,24 @@ func submit_basic_attack() -> void:
 		return
 	if bool(_player_is_down_by_peer.get(peer_id, false)):
 		return
+	if not bool(_combat_enabled_by_peer.get(peer_id, false)):
+		print("Rejected weapon-primary use: peer_id=%s reason=combat_disabled" % peer_id)
+		return
+
+	var weapon_primary: Dictionary = _weapon_primary_ability_by_peer.get(peer_id, {}) as Dictionary
+	var weapon_primary_name: String = str(weapon_primary.get("ability_name", "")).strip_edges()
+	if weapon_primary_name == "":
+		print("Rejected weapon-primary use: peer_id=%s reason=no_weapon_primary" % peer_id)
+		return
 
 	var now_seconds: float = float(Time.get_ticks_msec()) / 1000.0
-	var slash_cooldown_seconds: float = _ability_cooldown("Slash")
-	var last_attack_time: float = float(_last_attack_time_by_peer.get(peer_id, -slash_cooldown_seconds))
-	if now_seconds - last_attack_time < slash_cooldown_seconds:
+	if not _is_ability_ready(peer_id, weapon_primary_name, now_seconds):
 		return
 
 	_last_attack_time_by_peer[peer_id] = now_seconds
-	_perform_slash(peer_id)
+	_set_ability_used(peer_id, weapon_primary_name, now_seconds)
+	_send_weapon_primary_ability_state(peer_id)
+	_perform_confirmed_ability(peer_id, weapon_primary_name)
 
 
 func _perform_slash(peer_id: int) -> void:
@@ -2622,6 +2992,8 @@ func despawn_player(peer_id: int) -> void:
 	_ability_slot_indexes_by_peer.erase(peer_id)
 	_ability_display_names_by_peer.erase(peer_id)
 	_unlocked_abilities_by_peer.erase(peer_id)
+	_permanent_abilities_by_peer.erase(peer_id)
+	_weapon_primary_ability_by_peer.erase(peer_id)
 	_ability_enabled_by_peer.erase(peer_id)
 	_character_progression_by_peer.erase(peer_id)
 	_character_ids_by_peer.erase(peer_id)

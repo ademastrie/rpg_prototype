@@ -2,6 +2,7 @@ extends CanvasLayer
 
 signal combat_toggle_requested
 signal ability_toggle_requested(ability_name: String, enabled: bool)
+signal weapon_primary_requested
 signal loadout_save_requested(loadout_entries: Array)
 signal equipment_change_requested(equipment_entries: Array)
 
@@ -46,6 +47,7 @@ var _combat_toggle_button: Button = null
 var _character_panel_button: Button = null
 var _ability_panel_button: Button = null
 var _inventory_panel_button: Button = null
+var _weapon_primary_button: Button = null
 var _hotbar: HBoxContainer = null
 var _character_panel: PanelContainer = null
 var _ability_panel: PanelContainer = null
@@ -73,6 +75,7 @@ var _ability_state_by_name: Dictionary = {}
 var _ability_display_name_by_name: Dictionary = {}
 var _ability_check_box_by_name: Dictionary = {}
 var _hotbar_button_by_slot: Dictionary = {}
+var _weapon_primary_ability: Dictionary = {}
 var _confirmed_loadout: Array[String] = []
 var _confirmed_loadout_entries: Array = []
 var _unlocked_abilities: Array = []
@@ -110,6 +113,7 @@ func _ready() -> void:
 	update_down_state(false)
 	update_combat_mode(false)
 	update_combat_stats({})
+	update_weapon_primary_ability({})
 	update_loadout([])
 
 
@@ -242,6 +246,20 @@ func update_loadout(loadout_entries: Array) -> void:
 	_refresh_ability_panel_rows()
 
 
+func update_weapon_primary_ability(weapon_primary_ability: Dictionary) -> void:
+	var previous_ability_name: String = _weapon_primary_ability_name()
+	_weapon_primary_ability = weapon_primary_ability.duplicate(true)
+	if previous_ability_name != "" and previous_ability_name != _weapon_primary_ability_name() and not _confirmed_loadout.has(previous_ability_name):
+		_ability_state_by_name.erase(previous_ability_name)
+		_ability_enabled_by_name.erase(previous_ability_name)
+	var ability_name: String = str(_weapon_primary_ability.get("ability_name", "")).strip_edges()
+	if ability_name != "":
+		var display_name: String = str(_weapon_primary_ability.get("display_name", ability_name)).strip_edges()
+		_ability_display_name_by_name[ability_name] = display_name if display_name != "" else ability_name
+
+	_refresh_weapon_primary_button()
+
+
 func update_unlocked_abilities(unlocked_abilities: Array) -> void:
 	_unlocked_abilities = unlocked_abilities.duplicate()
 	_refresh_ability_panel_options()
@@ -291,7 +309,7 @@ func update_ability_enabled(ability_name: String, enabled: bool) -> void:
 
 
 func update_ability_state(ability_name: String, enabled: bool, active: bool, cooldown_remaining: float) -> void:
-	if not _confirmed_loadout.has(ability_name):
+	if not _confirmed_loadout.has(ability_name) and ability_name != _weapon_primary_ability_name():
 		return
 
 	_ability_enabled_by_name[ability_name] = enabled
@@ -302,6 +320,8 @@ func update_ability_state(ability_name: String, enabled: bool, active: bool, coo
 		"cooldown_remaining": cooldown_remaining,
 	}
 	_update_ability_display(ability_name)
+	if ability_name == _weapon_primary_ability_name():
+		_refresh_weapon_primary_button()
 	if _is_loadout_draft_active and not _is_loadout_draft_dirty:
 		_initialize_loadout_draft_from_confirmed()
 	_refresh_ability_panel_rows()
@@ -369,9 +389,9 @@ func _build_hotbar() -> void:
 	hotbar_panel.anchor_top = 1.0
 	hotbar_panel.anchor_right = 0.5
 	hotbar_panel.anchor_bottom = 1.0
-	hotbar_panel.offset_left = -310.0
+	hotbar_panel.offset_left = -382.0
 	hotbar_panel.offset_top = -108.0
-	hotbar_panel.offset_right = 310.0
+	hotbar_panel.offset_right = 382.0
 	hotbar_panel.offset_bottom = -16.0
 	_apply_panel_style(hotbar_panel)
 	_root.add_child(hotbar_panel)
@@ -380,6 +400,15 @@ func _build_hotbar() -> void:
 	_hotbar.name = "Hotbar"
 	_hotbar.add_theme_constant_override("separation", 8)
 	hotbar_panel.add_child(_hotbar)
+
+	_weapon_primary_button = Button.new()
+	_weapon_primary_button.focus_mode = Control.FOCUS_NONE
+	_weapon_primary_button.custom_minimum_size = Vector2(128.0, 72.0)
+	_weapon_primary_button.text = "Weapon\nNone"
+	_weapon_primary_button.disabled = true
+	_apply_button_text_colors(_weapon_primary_button)
+	_weapon_primary_button.pressed.connect(_on_weapon_primary_button_pressed)
+	_hotbar.add_child(_weapon_primary_button)
 
 	for slot_index in range(HOTBAR_SLOT_COUNT):
 		var button: Button = Button.new()
@@ -730,6 +759,7 @@ func _rebuild_ability_controls() -> void:
 
 
 func _refresh_hotbar() -> void:
+	_refresh_weapon_primary_button()
 	for slot_index in range(HOTBAR_SLOT_COUNT):
 		var button: Button = _hotbar_button_by_slot[slot_index] as Button
 		var entry: Dictionary = _loadout_entry_for_slot(slot_index)
@@ -741,6 +771,38 @@ func _refresh_hotbar() -> void:
 		button.disabled = false
 		var ability_name: String = str(entry.get("ability_name", ""))
 		button.text = _ability_hotbar_text(slot_index, ability_name)
+
+
+func _refresh_weapon_primary_button() -> void:
+	if _weapon_primary_button == null:
+		return
+
+	var ability_name: String = _weapon_primary_ability_name()
+	if ability_name == "":
+		_weapon_primary_button.disabled = true
+		_weapon_primary_button.text = "Weapon\nNone"
+		return
+
+	_weapon_primary_button.disabled = false
+	_weapon_primary_button.text = "Weapon\n%s" % _weapon_primary_hotbar_text(ability_name)
+
+
+func _weapon_primary_ability_name() -> String:
+	return str(_weapon_primary_ability.get("ability_name", "")).strip_edges()
+
+
+func _weapon_primary_hotbar_text(ability_name: String) -> String:
+	var state: Dictionary = _ability_state_by_name.get(ability_name, {}) as Dictionary
+	var active: bool = bool(state.get("active", false))
+	var cooldown_remaining: float = float(state.get("cooldown_remaining", 0.0))
+	if cooldown_remaining > 0.05:
+		return "%s\nCD %.1fs" % [_weapon_primary_display_name(ability_name), cooldown_remaining]
+	return "%s\n%s" % [_weapon_primary_display_name(ability_name), "active" if active else "ready"]
+
+
+func _weapon_primary_display_name(ability_name: String) -> String:
+	var display_name: String = str(_weapon_primary_ability.get("display_name", _ability_display_name_by_name.get(ability_name, ability_name))).strip_edges()
+	return display_name if display_name != "" else ability_name
 
 
 func _refresh_character_panel() -> void:
@@ -1713,6 +1775,13 @@ func _on_hotbar_slot_pressed(slot_index: int) -> void:
 	ability_toggle_requested.emit(ability_name, not current_enabled)
 
 
+func _on_weapon_primary_button_pressed() -> void:
+	if _weapon_primary_ability_name() == "":
+		return
+
+	weapon_primary_requested.emit()
+
+
 func _on_ability_check_box_toggled(enabled: bool, ability_name: String) -> void:
 	if not _confirmed_loadout.has(ability_name):
 		return
@@ -1754,9 +1823,6 @@ func _on_save_loadout_pressed() -> void:
 
 	if loadout_entries.size() > HOTBAR_SLOT_COUNT:
 		_ability_panel_status.text = "Loadout can contain at most 5 abilities."
-		return
-	if loadout_entries.is_empty():
-		_ability_panel_status.text = "Choose at least one ability."
 		return
 
 	_ability_panel_status.text = "Saving..."

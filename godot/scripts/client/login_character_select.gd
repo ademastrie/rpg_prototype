@@ -10,7 +10,7 @@ extends Control
 @onready var selected_character_info_label: Label = %SelectedCharacterInfoLabel
 @onready var create_character_window: Window = %CreateCharacterWindow
 @onready var character_name_edit: LineEdit = %CharacterNameEdit
-@onready var starter_ability_option: OptionButton = %StarterAbilityOption
+@onready var starter_weapon_option: OptionButton = %StarterWeaponOption
 @onready var delete_character_button: Button = %DeleteCharacterButton
 @onready var delete_character_window: Window = %DeleteCharacterWindow
 @onready var delete_character_message_label: Label = %DeleteCharacterMessageLabel
@@ -43,7 +43,7 @@ func _ready() -> void:
 	create_character_window.close_requested.connect(_on_cancel_create_character_pressed)
 	delete_character_window.close_requested.connect(_on_cancel_delete_character_pressed)
 
-	_setup_starter_ability_options()
+	_setup_starter_weapon_options()
 	_load_saved_login_email()
 	_clear_selected_character_info()
 	_set_status("Enter an email and password, then register or log in.")
@@ -88,8 +88,8 @@ func _on_confirm_create_character_pressed() -> void:
 		_set_status("Character name is required.")
 		return
 
-	var starter_ability_key := _selected_starter_ability_key()
-	_track_request(api_client.create_character(_access_token, character_name, starter_ability_key), "create_character")
+	var starter_weapon_key := _selected_starter_weapon_key()
+	_track_request(api_client.create_character(_access_token, character_name, starter_weapon_key), "create_character")
 	_set_status("Creating character...")
 
 
@@ -250,26 +250,26 @@ func _show_characters(data: Variant) -> void:
 		character_list.add_item("No characters yet.")
 
 
-func _setup_starter_ability_options() -> void:
-	starter_ability_option.clear()
-	_add_starter_ability_option("slash", "Slash")
-	_add_starter_ability_option("firebolt", "Firebolt")
-	_add_starter_ability_option("shoot", "Shoot")
-	starter_ability_option.select(0)
+func _setup_starter_weapon_options() -> void:
+	starter_weapon_option.clear()
+	_add_starter_weapon_option("training_sword", "Sword")
+	_add_starter_weapon_option("training_bow", "Bow")
+	_add_starter_weapon_option("training_staff", "Staff")
+	starter_weapon_option.select(0)
 
 
-func _add_starter_ability_option(ability_key: String, display_name: String) -> void:
-	var option_index: int = starter_ability_option.get_item_count()
-	starter_ability_option.add_item(display_name)
-	starter_ability_option.set_item_metadata(option_index, ability_key)
+func _add_starter_weapon_option(weapon_key: String, display_name: String) -> void:
+	var option_index: int = starter_weapon_option.get_item_count()
+	starter_weapon_option.add_item(display_name)
+	starter_weapon_option.set_item_metadata(option_index, weapon_key)
 
 
-func _selected_starter_ability_key() -> String:
-	var selected_index := starter_ability_option.selected
+func _selected_starter_weapon_key() -> String:
+	var selected_index := starter_weapon_option.selected
 	if selected_index < 0:
-		return "slash"
+		return "training_sword"
 
-	return str(starter_ability_option.get_item_metadata(selected_index))
+	return str(starter_weapon_option.get_item_metadata(selected_index))
 
 
 func _show_selected_character_info(character: Dictionary) -> void:
@@ -286,7 +286,7 @@ func _clear_selected_character_info() -> void:
 
 func _clear_create_character_fields() -> void:
 	character_name_edit.text = ""
-	starter_ability_option.select(0)
+	starter_weapon_option.select(0)
 
 
 func _track_request(request_id: int, action: String, email: String = "") -> void:

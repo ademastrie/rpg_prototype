@@ -30,12 +30,16 @@ const BACKEND_ABILITY_NAME_BY_KEY: Dictionary = {
 const PROTOTYPE_ITEM_DISPLAY_NAMES: Dictionary = {
 	"slime_gel": "Slime Gel",
 	"training_sword": "Training Sword",
+	"training_bow": "Training Bow",
+	"training_staff": "Training Staff",
 	"padded_chest": "Padded Chest",
 	"cloth_hood": "Cloth Hood",
 	"worn_boots": "Worn Boots",
 }
 const PROTOTYPE_EQUIP_SLOT_BY_ITEM_KEY: Dictionary = {
 	"training_sword": "weapon",
+	"training_bow": "weapon",
+	"training_staff": "weapon",
 	"apprentice_staff": "weapon",
 	"simple_bow": "weapon",
 	"padded_chest": "chest",
@@ -819,6 +823,7 @@ func _extract_character_equipment(response_data: Dictionary) -> Dictionary:
 			"item_key": item_key,
 			"display_name": display_name if display_name != "" else item_key,
 			"stat_modifiers": _extract_stat_modifiers_from_item(entry),
+			"ability_grants": _extract_ability_grants_from_item(entry),
 		}
 
 	return equipment
@@ -864,6 +869,7 @@ func _normalize_equipment_entry(entry_data: Dictionary) -> Dictionary:
 	var item_key: String = str(entry_data.get("item_key", entry_data.get("key", ""))).strip_edges()
 	var display_name: String = str(entry_data.get("display_name", "")).strip_edges()
 	var stat_modifiers: Array = _extract_stat_modifiers_from_item(entry_data)
+	var ability_grants: Array = _extract_ability_grants_from_item(entry_data)
 
 	if entry_data.get("item", null) is Dictionary:
 		var item_data: Dictionary = entry_data.get("item", {}) as Dictionary
@@ -883,6 +889,7 @@ func _normalize_equipment_entry(entry_data: Dictionary) -> Dictionary:
 		"item_key": item_key,
 		"display_name": display_name,
 		"stat_modifiers": stat_modifiers,
+		"ability_grants": ability_grants,
 	}
 
 
@@ -928,6 +935,57 @@ func _extract_stat_modifiers_from_item(item_data: Dictionary) -> Array:
 		if not modifier.is_empty():
 			modifiers.append(modifier)
 	return modifiers
+
+
+func _extract_ability_grants_from_item(item_data: Dictionary) -> Array:
+	var grant_candidates: Array = []
+	for container in _stat_modifier_containers(item_data):
+		if not (container is Dictionary):
+			continue
+
+		var container_data: Dictionary = container as Dictionary
+		var raw_grants: Variant = container_data.get("ability_grants", container_data.get("item_ability_grants", []))
+		if raw_grants is Array:
+			grant_candidates.append_array(raw_grants as Array)
+		elif raw_grants is Dictionary:
+			var raw_grant_dictionary: Dictionary = raw_grants as Dictionary
+			for ability_key in raw_grant_dictionary.keys():
+				grant_candidates.append({
+					"ability_key": str(ability_key),
+					"grant_type": str(raw_grant_dictionary[ability_key]),
+					"is_active": true,
+				})
+
+	var grants: Array = []
+	var seen_grants: Array[String] = []
+	for grant_variant in grant_candidates:
+		if not (grant_variant is Dictionary):
+			continue
+
+		var grant: Dictionary = _normalize_ability_grant(grant_variant as Dictionary)
+		if grant.is_empty():
+			continue
+		var grant_key: String = "%s:%s" % [str(grant.get("ability_key", "")), str(grant.get("grant_type", ""))]
+		if seen_grants.has(grant_key):
+			continue
+		seen_grants.append(grant_key)
+		grants.append(grant)
+	return grants
+
+
+func _normalize_ability_grant(grant_data: Dictionary) -> Dictionary:
+	var ability_key: String = str(grant_data.get("ability_key", grant_data.get("key", ""))).strip_edges().to_lower()
+	var grant_type: String = str(grant_data.get("grant_type", grant_data.get("type", ""))).strip_edges().to_lower()
+	if ability_key == "" or grant_type == "":
+		return {}
+	if grant_type != "weapon_primary" and grant_type != "granted_active":
+		return {}
+
+	return {
+		"ability_key": ability_key,
+		"grant_type": grant_type,
+		"is_active": bool(grant_data.get("is_active", true)),
+	}
 
 
 func _stat_modifier_containers(item_data: Dictionary) -> Array:
@@ -1006,8 +1064,7 @@ func _parse_backend_ability_loadout(peer_id: int, character_id: int, response_da
 		ability_slot_indexes[ability_name] = int(entry.get("slot_index", loadout.size() - 1))
 
 	if loadout.is_empty():
-		print("Rejecting join for peer %s: backend ability loadout is empty." % peer_id)
-		return {}
+		print("Regular ability loadout empty but allowed: peer_id=%s character_id=%s." % [peer_id, character_id])
 
 	return {
 		"loadout": loadout,
@@ -1087,6 +1144,22 @@ func _on_ability_loadout_update_requested(peer_id: int, loadout_entries: Array) 
 	var character_id: int = int(session.get("character_id", 0))
 	if access_token.strip_edges() == "" or character_id <= 0:
 		print("Rejecting loadout update for peer %s: missing validated session data." % peer_id)
+		return
+
+	var permanent_keys: Array = session.get("unlocked_ability_keys", []) as Array
+	var has_temporary_grant_key: bool = false
+	for entry_variant in loadout_entries:
+		if not (entry_variant is Dictionary):
+			continue
+
+		var entry: Dictionary = entry_variant as Dictionary
+		var ability_key: String = str(entry.get("ability_key", "")).strip_edges().to_lower()
+		if ability_key != "" and not permanent_keys.has(ability_key):
+			has_temporary_grant_key = true
+			break
+
+	if has_temporary_grant_key:
+		world_spawner.call("apply_confirmed_regular_loadout", peer_id, loadout_entries)
 		return
 
 	var request: HTTPRequest = HTTPRequest.new()
@@ -1448,6 +1521,7 @@ func _merge_confirmed_inventory_item(existing_inventory: Array, confirmed_item: 
 		"equip_slot": equip_slot,
 		"item_type": item_type,
 		"stat_modifiers": stat_modifiers,
+		"ability_grants": _extract_ability_grants_from_item(confirmed_item),
 	}
 	return merged_items.values()
 
@@ -1500,6 +1574,7 @@ func _normalize_inventory_item(item_data: Dictionary) -> Dictionary:
 		"equip_slot": equip_slot,
 		"item_type": item_type,
 		"stat_modifiers": _extract_stat_modifiers_from_item(item_data),
+		"ability_grants": _extract_ability_grants_from_item(item_data),
 	}
 
 

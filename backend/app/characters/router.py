@@ -333,12 +333,18 @@ def _ensure_starter_abilities(character_id: int, db: Session) -> None:
         .limit(1)
     )
 
+    has_equipment = db.scalar(
+        select(CharacterEquipment.id)
+        .where(CharacterEquipment.character_id == character_id)
+        .limit(1)
+    )
+
     if has_abilities is not None and has_loadout is not None:
         return
 
     ability_definitions = _active_ability_definitions(db)
 
-    if has_abilities is None:
+    if has_abilities is None and has_equipment is None:
         starter_ability = next(
             (
                 ability_definition
@@ -560,7 +566,8 @@ def create_character(
     db.flush()
     if starter_weapon is not None:
         _grant_starter_weapon(character.id, starter_weapon, db)
-    _grant_starter_ability(character.id, starter_ability, db)
+    else:
+        _grant_starter_ability(character.id, starter_ability, db)
     db.commit()
     db.refresh(character)
     return character

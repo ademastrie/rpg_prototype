@@ -146,11 +146,11 @@ unique_name_in_owner = true
 layout_mode = 2
 placeholder_text = "Character name"
 
-[node name="StarterAbilityLabel" type="Label" parent="CreateCharacterWindow/CreateCharacterMargin/CreateCharacterLayout"]
+[node name="StarterWeaponLabel" type="Label" parent="CreateCharacterWindow/CreateCharacterMargin/CreateCharacterLayout"]
 layout_mode = 2
-text = "Starter Ability"
+text = "Starter Weapon"
 
-[node name="StarterAbilityOption" type="OptionButton" parent="CreateCharacterWindow/CreateCharacterMargin/CreateCharacterLayout"]
+[node name="StarterWeaponOption" type="OptionButton" parent="CreateCharacterWindow/CreateCharacterMargin/CreateCharacterLayout"]
 unique_name_in_owner = true
 layout_mode = 2
 

@@ -55,11 +55,13 @@ func _ready() -> void:
 	world_spawner.ability_enabled_updated.connect(_on_ability_enabled_updated)
 	world_spawner.ability_state_updated.connect(_on_ability_state_updated)
 	world_spawner.ability_catalog_updated.connect(_on_ability_catalog_updated)
+	world_spawner.weapon_primary_ability_updated.connect(_on_weapon_primary_ability_updated)
 	world_spawner.ability_unlock_message_received.connect(_on_ability_unlock_message_received)
 	world_spawner.status_message_received.connect(_on_status_message_received)
 	enemy_spawner.connect("initial_enemy_batch_received", Callable(self, "_on_initial_enemy_batch_received"))
 	game_hud.connect("combat_toggle_requested", Callable(self, "_send_combat_toggle_request"))
 	game_hud.connect("ability_toggle_requested", Callable(self, "_send_ability_toggle_request"))
+	game_hud.connect("weapon_primary_requested", Callable(self, "_send_weapon_primary_request"))
 	game_hud.connect("loadout_save_requested", Callable(self, "_send_loadout_save_request"))
 	game_hud.connect("equipment_change_requested", Callable(self, "_send_equipment_change_request"))
 	_camera_follow_offset = active_camera.global_position
@@ -314,6 +316,13 @@ func _on_ability_catalog_updated(peer_id: int, unlocked_abilities: Array) -> voi
 		_log_client_startup_timing("HUD unlocked ability update", {"ability_count": unlocked_abilities.size()})
 
 
+func _on_weapon_primary_ability_updated(peer_id: int, weapon_primary_ability: Dictionary) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+
+	game_hud.call("update_weapon_primary_ability", weapon_primary_ability)
+
+
 func _on_initial_enemy_batch_received(enemy_count: int) -> void:
 	_log_client_startup_timing("initial enemy batch received", {"enemy_count": enemy_count})
 
@@ -461,6 +470,10 @@ func _send_ability_toggle_request(ability_name: String, enabled: bool) -> void:
 
 	# Client requests ability state; the server confirms the final enabled value.
 	world_spawner.rpc_id(1, "request_set_ability_enabled", ability_name, enabled)
+
+
+func _send_weapon_primary_request() -> void:
+	world_spawner.rpc_id(1, "submit_basic_attack")
 
 
 func _send_loadout_save_request(loadout_entries: Array) -> void:

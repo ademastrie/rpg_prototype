@@ -92,7 +92,6 @@
 - None found
 
 ### Functions
-- `_xp_to_next_level(level: int) -> int:`
 - `_get_owned_character(character_id: int, user_id: int, db: Session) -> Character:`
 - `_character_progression_response(character: Character) -> CharacterProgressionResponse:`
 - `_character_currency_response(character: Character) -> CharacterCurrencyResponse:`
@@ -100,8 +99,10 @@
 - `_character_equipment_response(character_id: int, db: Session) -> CharacterEquipmentResponse:`
 - `_active_ability_definitions(db: Session) -> list[AbilityDefinition]:`
 - `_get_starter_ability_definition(ability_key: str, db: Session) -> AbilityDefinition:`
+- `_get_starter_weapon_definition(`
 - `_get_ability_definition(ability_key: str, db: Session) -> AbilityDefinition:`
 - `_grant_starter_ability(`
+- `_grant_starter_weapon(`
 - `_unlock_character_ability(`
 - `_ensure_starter_abilities(character_id: int, db: Session) -> None:`
 - `_character_abilities_response(character_id: int, db: Session) -> CharacterAbilitiesResponse:`
@@ -147,8 +148,9 @@
 - `CharacterCurrencyAward`
 - `CharacterProgressionResponse`
 - `CharacterCurrencyResponse`
-- `ItemDefinitionResponse`
 - `ItemStatModifierResponse`
+- `ItemAbilityGrantResponse`
+- `ItemDefinitionResponse`
 - `CharacterInventoryEntryResponse`
 - `CharacterInventoryResponse`
 - `CharacterInventoryItemAdd`
@@ -220,6 +222,7 @@
 ### Classes
 - `EnemyAttackResponse`
 - `EnemyLootEntryResponse`
+- `EnemyArchetypeSummaryResponse`
 - `EnemyDefinitionResponse`
 
 ### Functions
@@ -246,14 +249,20 @@
 - `ValidateJoinResponse`
 - `SavePositionRequest`
 - `SavePositionResponse`
+- `AwardEnemyXpRequest`
+- `AwardEnemyXpResponse`
 
 ### Functions
+- `_resolve_enemy_definition(`
+- `_resolve_region_definition(`
 - `validate_join(`
 - `save_position(`
+- `award_enemy_xp(`
 
 ### Routers
 - `POST "/validate-join", response_model=ValidateJoinResponse`
 - `POST "/save-position", response_model=SavePositionResponse`
+- `POST "/server/award-enemy-xp", response_model=AwardEnemyXpResponse`
 
 ## `backend/app/main.py`
 
@@ -316,6 +325,7 @@
 ## `backend/app/models/enemy.py`
 
 ### Classes
+- `EnemyArchetype`
 - `EnemyDefinition`
 - `EnemyAttack`
 - `EnemyLootEntry`
@@ -331,6 +341,7 @@
 ### Classes
 - `ItemDefinition`
 - `ItemStatModifier`
+- `ItemAbilityGrant`
 - `CharacterInventory`
 - `CharacterEquipment`
 
@@ -361,6 +372,21 @@
 
 ### Functions
 - None found
+
+### Routers
+- None found
+
+## `backend/app/progression.py`
+
+### Classes
+- `XpAwardResult`
+
+### Functions
+- `xp_to_next_level(level: int) -> int:`
+- `level_delta_xp_multiplier(enemy_level: int, player_level: int) -> float:`
+- `rounded_xp(value: float) -> int:`
+- `enemy_kill_xp_award(`
+- `apply_character_xp(character: Character, xp_awarded: int) -> XpAwardResult:`
 
 ### Routers
 - None found
@@ -408,6 +434,17 @@
 
 ### Functions
 - None found
+
+### Routers
+- None found
+
+## `backend/app/server_auth.py`
+
+### Classes
+- None found
+
+### Functions
+- `require_game_server_secret(x_game_server_secret: str = Header(default="")) -> None:`
 
 ### Routers
 - None found
