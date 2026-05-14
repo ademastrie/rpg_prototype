@@ -331,8 +331,8 @@ func _on_ability_unlock_message_received(peer_id: int, display_name: String) -> 
 	if peer_id != multiplayer.get_unique_id():
 		return
 
-	game_hud.call("show_status_message", "Unlocked ability: %s" % display_name)
-	print("Unlocked ability: %s" % display_name)
+	game_hud.call("show_status_message", "Unlocked: %s" % display_name)
+	print("Unlocked: %s" % display_name)
 
 
 func _on_status_message_received(peer_id: int, message: String) -> void:

@@ -1582,6 +1582,31 @@ func apply_confirmed_ability_data(peer_id: int, loadout: Array, ability_enabled:
 	_broadcast_hp_regen_active_state(peer_id)
 
 
+func apply_confirmed_permanent_ability_rewards(peer_id: int, granted_abilities: Array, level: int, rewards_granted: Array) -> void:
+	if not multiplayer.is_server() or not players.has(peer_id):
+		return
+
+	var current_permanent_abilities: Array = _permanent_abilities_by_peer.get(peer_id, []) as Array
+	_permanent_abilities_by_peer[peer_id] = _deduplicated_ability_entries(current_permanent_abilities + granted_abilities)
+	_recompute_ability_availability(peer_id, true)
+	_recalculate_player_combat_stats(peer_id)
+
+	print("Level reward abilities confirmed: character_id=%s level=%s rewards_granted=%s refreshed_permanent=%s final_regular=%s" % [
+		int(_character_ids_by_peer.get(peer_id, 0)),
+		level,
+		rewards_granted,
+		_ability_keys_from_entries(_permanent_abilities_by_peer.get(peer_id, []) as Array),
+		_regular_available_ability_keys(peer_id),
+	])
+
+
+func confirmed_regular_available_ability_keys(peer_id: int) -> Array[String]:
+	if not players.has(peer_id):
+		return []
+
+	return _regular_available_ability_keys(peer_id)
+
+
 func apply_confirmed_regular_loadout(peer_id: int, loadout_entries: Array) -> void:
 	if not multiplayer.is_server() or not players.has(peer_id):
 		return

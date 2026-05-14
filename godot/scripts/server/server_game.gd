@@ -1694,6 +1694,7 @@ func _on_award_xp_completed(
 	session["xp_to_next"] = int(progression.get("xp_to_next", 0))
 	peer_sessions[peer_id] = session
 	world_spawner.call("apply_confirmed_character_progression", peer_id, progression)
+	_refresh_level_reward_abilities_after_xp(peer_id, response_data, progression)
 	print("XP awarded: enemy_id=%s enemy_key=%s credited_peer_id=%s character_id=%s region_key=%s xp_awarded=%s level=%s current_xp=%s xp_to_next_level=%s levels_gained=%s" % [
 		enemy_id,
 		str(response_data.get("enemy_key", enemy_key)),
@@ -1706,6 +1707,103 @@ func _on_award_xp_completed(
 		int(response_data.get("xp_to_next_level", 1)),
 		int(response_data.get("levels_gained", 0)),
 	])
+
+
+func _refresh_level_reward_abilities_after_xp(peer_id: int, response_data: Dictionary, progression: Dictionary) -> void:
+	var leveled_up: bool = bool(progression.get("leveled_up", false))
+	if not leveled_up:
+		return
+
+	var rewards_granted: Array = []
+	var raw_rewards_granted: Variant = response_data.get("rewards_granted", null)
+	if raw_rewards_granted is Array:
+		rewards_granted = (raw_rewards_granted as Array).duplicate(true)
+	else:
+		print("Level-up XP response missing reward detail; refreshing character abilities: character_id=%s level=%s rewards_granted=<missing>" % [
+			int(progression.get("character_id", 0)),
+			int(progression.get("level", 1)),
+		])
+		_reload_character_abilities_after_level_rewards(peer_id, [])
+		return
+
+	var ability_keys: Array[String] = _newly_granted_ability_reward_keys(rewards_granted)
+	if ability_keys.is_empty():
+		print("Level-up rewards confirmed with no new ability unlocks: character_id=%s level=%s rewards_granted=%s" % [
+			int(progression.get("character_id", 0)),
+			int(progression.get("level", 1)),
+			rewards_granted,
+		])
+		return
+
+	var granted_abilities: Array = _ability_entries_for_reward_keys(ability_keys)
+	if granted_abilities.is_empty() or granted_abilities.size() != ability_keys.size():
+		print("Level-up XP response had ability reward keys without enough Godot ability detail; refreshing character abilities: character_id=%s level=%s rewards_granted=%s" % [
+			int(progression.get("character_id", 0)),
+			int(progression.get("level", 1)),
+			rewards_granted,
+		])
+		_reload_character_abilities_after_level_rewards(peer_id, ability_keys)
+		return
+
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	var unlocked_keys: Array = session.get("unlocked_ability_keys", []) as Array
+	for ability_key in ability_keys:
+		if not unlocked_keys.has(ability_key):
+			unlocked_keys.append(ability_key)
+	session["unlocked_ability_keys"] = unlocked_keys
+	peer_sessions[peer_id] = session
+
+	world_spawner.call(
+		"apply_confirmed_permanent_ability_rewards",
+		peer_id,
+		granted_abilities,
+		int(progression.get("level", 1)),
+		rewards_granted
+	)
+	for ability_key in ability_keys:
+		world_spawner.rpc_id(peer_id, "apply_ability_unlock_message", peer_id, _display_name_for_ability_key(ability_key))
+
+	_reload_character_abilities_after_level_rewards(peer_id, [])
+
+
+func _newly_granted_ability_reward_keys(rewards_granted: Array) -> Array[String]:
+	var ability_keys: Array[String] = []
+	for reward_variant in rewards_granted:
+		if not (reward_variant is Dictionary):
+			continue
+
+		var reward: Dictionary = reward_variant as Dictionary
+		if str(reward.get("reward_type", "")).strip_edges().to_lower() != "ability_unlock":
+			continue
+		if not bool(reward.get("granted", false)):
+			continue
+
+		var ability_key: String = str(reward.get("reward_key", "")).strip_edges().to_lower()
+		if ability_key != "" and not ability_keys.has(ability_key):
+			ability_keys.append(ability_key)
+
+	return ability_keys
+
+
+func _ability_entries_for_reward_keys(ability_keys: Array[String]) -> Array:
+	var abilities: Array = []
+	for ability_key in ability_keys:
+		var ability_name: String = str(BACKEND_ABILITY_NAME_BY_KEY.get(ability_key, "")).strip_edges()
+		if ability_name == "" or not _is_supported_godot_ability(ability_name):
+			continue
+
+		abilities.append({
+			"ability_key": ability_key,
+			"ability_name": ability_name,
+			"display_name": ability_name,
+			"source": "level_reward",
+		})
+
+	return abilities
+
+
+func _display_name_for_ability_key(ability_key: String) -> String:
+	return str(BACKEND_ABILITY_NAME_BY_KEY.get(ability_key, ability_key)).strip_edges()
 
 
 func _request_session_unlock(peer_id: int, ability_key: String) -> void:
@@ -1790,6 +1888,29 @@ func _reload_character_abilities_after_unlock(peer_id: int, ability_key: String,
 		request.queue_free()
 
 
+func _reload_character_abilities_after_level_rewards(peer_id: int, ability_keys: Array) -> void:
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	var access_token: String = str(session.get("access_token", ""))
+	var character_id: int = int(session.get("character_id", 0))
+	if access_token.strip_edges() == "" or character_id <= 0:
+		print("Cannot reload abilities after level rewards for peer %s: missing validated session data." % peer_id)
+		return
+
+	var request: HTTPRequest = HTTPRequest.new()
+	add_child(request)
+	request.request_completed.connect(_on_level_reward_ability_reload_completed.bind(peer_id, ability_keys, request))
+
+	var headers: PackedStringArray = PackedStringArray([
+		"Content-Type: application/json",
+		"Authorization: Bearer %s" % access_token,
+	])
+	var url: String = "%s/characters/%s/abilities" % [_normalized_backend_base_url(), character_id]
+	var error: Error = request.request(url, headers, HTTPClient.METHOD_GET)
+	if error != OK:
+		print("Failed to start ability reload after level rewards for peer %s ability_keys=%s: %s" % [peer_id, ability_keys, error])
+		request.queue_free()
+
+
 func _on_unlock_ability_reload_completed(
 	result: int,
 	response_code: int,
@@ -1843,6 +1964,71 @@ func _on_unlock_ability_reload_completed(
 	if not was_already_unlocked and _has_unlocked_ability(unlocked_abilities, ability_key):
 		var display_name: String = _display_name_for_unlocked_ability(unlocked_abilities, ability_key)
 		world_spawner.rpc_id(peer_id, "apply_ability_unlock_message", peer_id, display_name)
+
+
+func _on_level_reward_ability_reload_completed(
+	result: int,
+	response_code: int,
+	_headers: PackedStringArray,
+	body: PackedByteArray,
+	peer_id: int,
+	ability_keys: Array,
+	request: HTTPRequest
+) -> void:
+	request.queue_free()
+	if not connected_peers.has(peer_id):
+		return
+
+	var response_text: String = body.get_string_from_utf8()
+	if result != HTTPRequest.RESULT_SUCCESS:
+		print("Ability reload after level rewards failed for peer %s: HTTPRequest result %s." % [peer_id, result])
+		return
+
+	var json: JSON = JSON.new()
+	var parse_error: Error = json.parse(response_text)
+	if parse_error != OK or not (json.data is Dictionary):
+		print("Ability reload after level rewards returned invalid JSON for peer %s. status=%s response=%s" % [peer_id, response_code, response_text])
+		return
+
+	var response_data: Dictionary = json.data as Dictionary
+	if response_code < 200 or response_code >= 300:
+		print("Ability reload after level rewards rejected peer %s: status=%s response=%s" % [peer_id, response_code, response_data])
+		return
+
+	var session: Dictionary = peer_sessions.get(peer_id, {}) as Dictionary
+	var character_id: int = int(session.get("character_id", 0))
+	var loadout_data: Dictionary = _parse_backend_ability_loadout(peer_id, character_id, response_data)
+	if loadout_data.is_empty():
+		return
+
+	world_spawner.call("load_backend_ability_runtime_configs", response_data)
+	var unlocked_abilities: Array = loadout_data.get("unlocked_abilities", []) as Array
+	world_spawner.call(
+		"apply_confirmed_ability_data",
+		peer_id,
+		loadout_data.get("loadout", []),
+		loadout_data.get("ability_enabled", {}),
+		loadout_data.get("ability_display_names", {}),
+		loadout_data.get("ability_keys", {}),
+		unlocked_abilities,
+		loadout_data.get("ability_slot_indexes", {})
+	)
+	session["unlocked_ability_keys"] = _unlocked_ability_keys(unlocked_abilities)
+	peer_sessions[peer_id] = session
+	var final_regular_ability_keys: Array = world_spawner.call("confirmed_regular_available_ability_keys", peer_id) as Array
+
+	print("Level reward ability refresh confirmed: character_id=%s level=%s rewards_granted=%s refreshed_permanent=%s final_regular=%s" % [
+		character_id,
+		int(session.get("level", 1)),
+		ability_keys,
+		session["unlocked_ability_keys"],
+		final_regular_ability_keys,
+	])
+
+	for ability_key in ability_keys:
+		if _has_unlocked_ability(unlocked_abilities, ability_key):
+			var display_name: String = _display_name_for_unlocked_ability(unlocked_abilities, ability_key)
+			world_spawner.rpc_id(peer_id, "apply_ability_unlock_message", peer_id, display_name)
 
 
 func _unlocked_ability_keys(unlocked_abilities: Array) -> Array[String]:
