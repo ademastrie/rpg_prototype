@@ -536,6 +536,7 @@ func _complete_validated_join(peer_id: int, session: Dictionary, loadout_data: D
 	else:
 		world_spawner.register_peer(peer_id, character_name, loadout, ability_enabled, ability_display_names, ability_keys, unlocked_abilities, ability_slot_indexes)
 	world_spawner.call("apply_confirmed_character_progression", peer_id, {
+		"character_id": character_id,
 		"level": int(session.get("level", 1)),
 		"xp": int(session.get("xp", 0)),
 		"xp_to_next": int(session.get("xp_to_next", 0)),
@@ -1604,6 +1605,7 @@ func _on_award_xp_completed(
 		return
 
 	var progression: Dictionary = {
+		"character_id": int(response_data.get("character_id", character_id)),
 		"level": int(response_data.get("level", 1)),
 		"xp": int(response_data.get("current_xp", 0)),
 		"xp_to_next": int(response_data.get("xp_to_next_level", 1)),

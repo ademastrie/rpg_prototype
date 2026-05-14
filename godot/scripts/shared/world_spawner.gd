@@ -50,6 +50,7 @@ var _player_max_hp_by_peer: Dictionary = {}
 var _player_current_hp_by_peer: Dictionary = {}
 var _player_is_down_by_peer: Dictionary = {}
 var _player_combat_stats_by_peer: Dictionary = {}
+var _character_ids_by_peer: Dictionary = {}
 var _character_progression_by_peer: Dictionary = {}
 var _character_gold_by_peer: Dictionary = {}
 var _character_inventory_items_by_peer: Dictionary = {}
@@ -193,6 +194,9 @@ const PLAYER_COMPUTED_STAT_DEFINITIONS: Dictionary = {
 	"armor": {"base": 0.0, "min": 0.0, "max": 0.80},
 	"avoidance": {"base": 0.0, "min": 0.0, "max": 0.30},
 }
+const PLAYER_LEVEL_STAT_GAINS_PER_LEVEL: Dictionary = {
+	"max_hp": 10.0,
+}
 const PLAYER_STAT_ALIASES: Dictionary = {
 	"attack_power": "physical_power",
 	"damage_reduction": "armor",
@@ -266,6 +270,7 @@ func unregister_peer(peer_id: int) -> void:
 	_player_current_hp_by_peer.erase(peer_id)
 	_player_is_down_by_peer.erase(peer_id)
 	_player_combat_stats_by_peer.erase(peer_id)
+	_character_ids_by_peer.erase(peer_id)
 	_character_progression_by_peer.erase(peer_id)
 	_character_gold_by_peer.erase(peer_id)
 	_character_inventory_items_by_peer.erase(peer_id)
@@ -358,6 +363,7 @@ func apply_confirmed_character_progression(peer_id: int, progression: Dictionary
 		return
 
 	var confirmed_progression: Dictionary = {
+		"character_id": int(progression.get("character_id", _character_ids_by_peer.get(peer_id, 0))),
 		"level": int(progression.get("level", 1)),
 		"xp": int(progression.get("xp", 0)),
 		"xp_to_next": int(progression.get("xp_to_next", 0)),
@@ -365,7 +371,14 @@ func apply_confirmed_character_progression(peer_id: int, progression: Dictionary
 		"leveled_up": bool(progression.get("leveled_up", false)),
 		"levels_gained": int(progression.get("levels_gained", 0)),
 	}
+	var previous_progression: Dictionary = _character_progression_by_peer.get(peer_id, {}) as Dictionary
+	var previous_level: int = int(previous_progression.get("level", 1))
 	_character_progression_by_peer[peer_id] = confirmed_progression
+	_character_ids_by_peer[peer_id] = int(confirmed_progression.get("character_id", 0))
+	var confirmed_level: int = int(confirmed_progression.get("level", 1))
+	var leveled_up: bool = bool(confirmed_progression.get("leveled_up", false)) or confirmed_level > previous_level
+	var recompute_reason: String = "level_up" if leveled_up else "level_progression"
+	_recalculate_player_combat_stats(peer_id, false, leveled_up, recompute_reason)
 	rpc_id(peer_id, "apply_character_progression_update", peer_id, confirmed_progression)
 
 
@@ -675,26 +688,30 @@ func _default_player_combat_stats() -> Dictionary:
 	return _finalize_player_combat_stats(stats)
 
 
-func _recalculate_player_combat_stats(peer_id: int, restore_current_hp_to_max: bool = false) -> void:
+func _recalculate_player_combat_stats(peer_id: int, restore_current_hp_to_max: bool = false, grant_max_hp_increase: bool = false, recompute_reason: String = "") -> void:
 	if not multiplayer.is_server() or not players.has(peer_id):
 		return
 
 	var combat_stats: Dictionary = _default_player_combat_stats()
-	_apply_ability_stat_modifiers(peer_id, combat_stats)
+	var level_bonuses: Dictionary = _level_stat_bonuses_for_peer(peer_id)
+	_apply_level_stat_bonuses(peer_id, combat_stats, level_bonuses)
 	_apply_equipped_item_stat_modifiers(peer_id, combat_stats)
+	_apply_ability_stat_modifiers(peer_id, combat_stats)
+	# Future temporary modifiers should be applied here, after persistent sources.
 	combat_stats = _finalize_player_combat_stats(combat_stats)
 	_player_combat_stats_by_peer[peer_id] = combat_stats
-	_apply_computed_player_max_hp(peer_id, int(combat_stats.get("max_hp", player_max_hp)), restore_current_hp_to_max)
+	_apply_computed_player_max_hp(peer_id, int(combat_stats.get("max_hp", player_max_hp)), restore_current_hp_to_max, grant_max_hp_increase)
 	rpc_id(peer_id, "apply_player_combat_stats_update", peer_id, combat_stats)
-	print("Player stats recomputed: peer_id=%s max_hp=%s move_speed=%s physical_power=%s spell_power=%s armor=%s avoidance=%s" % [
-		peer_id,
-		int(combat_stats.get("max_hp", player_max_hp)),
-		float(combat_stats.get("move_speed", movement_speed)),
-		float(combat_stats.get("physical_power", 0.0)),
-		float(combat_stats.get("spell_power", 0.0)),
-		float(combat_stats.get("armor", 0.0)),
-		float(combat_stats.get("avoidance", 0.0)),
-	])
+	var max_hp_level_bonus: int = int(level_bonuses.get("max_hp", 0))
+	if max_hp_level_bonus > 0 or recompute_reason == "level_up":
+		print("Level stats applied: peer_id=%s character_id=%s level=%s max_hp_level_bonus=%s final_max_hp=%s reason=%s" % [
+			peer_id,
+			int(_character_ids_by_peer.get(peer_id, 0)),
+			_confirmed_player_level(peer_id),
+			max_hp_level_bonus,
+			int(combat_stats.get("max_hp", player_max_hp)),
+			recompute_reason,
+		])
 
 
 func _computed_player_move_speed(peer_id: int) -> float:
@@ -717,6 +734,44 @@ func _finalize_player_combat_stats(combat_stats: Dictionary) -> Dictionary:
 	combat_stats["attack_power"] = combat_stats["physical_power"]
 	combat_stats["damage_reduction"] = combat_stats["armor"]
 	return combat_stats
+
+
+func _confirmed_player_level(peer_id: int) -> int:
+	var progression: Dictionary = _character_progression_by_peer.get(peer_id, {}) as Dictionary
+	return max(int(progression.get("level", 1)), 1)
+
+
+func _level_stat_bonuses_for_peer(peer_id: int) -> Dictionary:
+	return _level_stat_bonuses_for_level(_confirmed_player_level(peer_id))
+
+
+func _level_stat_bonuses_for_level(level: int) -> Dictionary:
+	var levels_above_one: int = max(level - 1, 0)
+	var bonuses: Dictionary = {}
+	for stat_key in PLAYER_LEVEL_STAT_GAINS_PER_LEVEL.keys():
+		var per_level_value: float = float(PLAYER_LEVEL_STAT_GAINS_PER_LEVEL[stat_key])
+		if per_level_value == 0.0:
+			continue
+
+		bonuses[stat_key] = per_level_value * float(levels_above_one)
+	return bonuses
+
+
+func _apply_level_stat_bonuses(peer_id: int, combat_stats: Dictionary, level_bonuses: Dictionary) -> void:
+	for stat_key in level_bonuses.keys():
+		var canonical_stat_key: String = _canonical_player_stat_key(str(stat_key))
+		if not SUPPORTED_PLAYER_STAT_KEYS.has(canonical_stat_key):
+			continue
+
+		var bonus_value: float = float(level_bonuses[stat_key])
+		if bonus_value == 0.0:
+			continue
+
+		_apply_stat_modifier_to_combat_stats(combat_stats, {
+			"stat_key": canonical_stat_key,
+			"modifier_type": "flat",
+			"value": bonus_value,
+		})
 
 
 func _canonical_player_stat_key(raw_stat_key: String) -> String:
@@ -809,7 +864,7 @@ func _percent_modifier_value(value: float) -> float:
 	return value
 
 
-func _apply_computed_player_max_hp(peer_id: int, computed_max_hp: int, restore_current_hp_to_max: bool = false) -> void:
+func _apply_computed_player_max_hp(peer_id: int, computed_max_hp: int, restore_current_hp_to_max: bool = false, grant_max_hp_increase: bool = false) -> void:
 	if not players.has(peer_id):
 		return
 
@@ -819,6 +874,8 @@ func _apply_computed_player_max_hp(peer_id: int, computed_max_hp: int, restore_c
 	var old_current_hp: int = current_hp
 	if restore_current_hp_to_max:
 		current_hp = new_max_hp
+	elif grant_max_hp_increase and new_max_hp > old_max_hp:
+		current_hp = min(current_hp + (new_max_hp - old_max_hp), new_max_hp)
 	else:
 		current_hp = min(current_hp, new_max_hp)
 
@@ -2046,6 +2103,7 @@ func apply_player_combat_stats_update(peer_id: int, combat_stats: Dictionary) ->
 @rpc("authority", "call_remote", "reliable")
 func apply_character_progression_update(peer_id: int, progression: Dictionary) -> void:
 	_character_progression_by_peer[peer_id] = progression.duplicate()
+	_character_ids_by_peer[peer_id] = int(progression.get("character_id", _character_ids_by_peer.get(peer_id, 0)))
 	character_progression_updated.emit(peer_id, progression)
 
 
@@ -2566,6 +2624,7 @@ func despawn_player(peer_id: int) -> void:
 	_unlocked_abilities_by_peer.erase(peer_id)
 	_ability_enabled_by_peer.erase(peer_id)
 	_character_progression_by_peer.erase(peer_id)
+	_character_ids_by_peer.erase(peer_id)
 	_character_gold_by_peer.erase(peer_id)
 	_character_inventory_items_by_peer.erase(peer_id)
 	_character_equipment_by_peer.erase(peer_id)

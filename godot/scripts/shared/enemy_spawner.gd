@@ -26,6 +26,7 @@ var _enemy_spawn_points: Dictionary = {}
 var _target_positions: Dictionary = {}
 var _enemy_type_by_id: Dictionary = {}
 var _enemy_display_name_by_id: Dictionary = {}
+var _enemy_level_by_id: Dictionary = {}
 var _enemy_max_hp_by_id: Dictionary = {}
 var _enemy_current_hp_by_id: Dictionary = {}
 var _dead_enemy_ids: Dictionary = {}
@@ -336,6 +337,7 @@ func sync_peer(peer_id: int) -> void:
 			"max_hp": max_hp,
 			"enemy_type": _enemy_type_for_enemy(enemy_id_int),
 			"display_name": _enemy_display_name(enemy_id_int),
+			"level": get_enemy_level(enemy_id_int),
 			"visual_color": _enemy_visual_color(enemy_id_int),
 		})
 
@@ -426,7 +428,7 @@ func _spawn_enemy(spawn_position: Vector3, enemy_type: String = DEFAULT_ENEMY_TY
 		if not definition_overrides.is_empty():
 			_enemy_definition_overrides_by_id[enemy_id] = definition_overrides.duplicate(true)
 	_log_backend_enemy_spawn_tuning(enemy_id, spawn_position)
-	rpc("spawn_enemy", enemy_id, spawn_position, max_hp, max_hp, resolved_enemy_type, _enemy_display_name(enemy_id), _enemy_visual_color(enemy_id))
+	rpc("spawn_enemy", enemy_id, spawn_position, max_hp, max_hp, resolved_enemy_type, _enemy_display_name(enemy_id), get_enemy_level(enemy_id), _enemy_visual_color(enemy_id))
 	if debug_enemy_lifecycle_logs:
 		print("Spawned enemy %s type=%s at %s." % [enemy_id, resolved_enemy_type, spawn_position])
 
@@ -592,7 +594,7 @@ func _respawn_enemy(enemy_id: int, spawn_position: Vector3) -> void:
 	_enemy_return_log_last_seconds.erase(enemy_id)
 	_enemy_patrol_wait_until_by_id.erase(enemy_id)
 	_dead_enemy_ids.erase(enemy_id)
-	rpc("spawn_enemy", enemy_id, spawn_position, max_hp, max_hp, enemy_type, _enemy_display_name(enemy_id), _enemy_visual_color(enemy_id))
+	rpc("spawn_enemy", enemy_id, spawn_position, max_hp, max_hp, enemy_type, _enemy_display_name(enemy_id), get_enemy_level(enemy_id), _enemy_visual_color(enemy_id))
 	if debug_enemy_lifecycle_logs:
 		print("Respawned enemy %s type=%s at %s." % [enemy_id, enemy_type, spawn_position])
 
@@ -2158,11 +2160,11 @@ func _log_client_enemy_snap(enemy_id: int, previous_position: Vector3, new_posit
 
 
 @rpc("authority", "call_remote", "reliable")
-func spawn_enemy(enemy_id: int, spawn_position: Vector3, current_hp: int = 30, max_hp: int = 30, enemy_type: String = DEFAULT_ENEMY_TYPE, display_name: String = "", visual_color: Color = Color(1.0, 0.18, 0.08, 1.0)) -> void:
+func spawn_enemy(enemy_id: int, spawn_position: Vector3, current_hp: int = 30, max_hp: int = 30, enemy_type: String = DEFAULT_ENEMY_TYPE, display_name: String = "", enemy_level: int = 0, visual_color: Color = Color(1.0, 0.18, 0.08, 1.0)) -> void:
 	if multiplayer.is_server():
 		return
 
-	_spawn_enemy_visual(enemy_id, spawn_position, current_hp, max_hp, enemy_type, display_name, visual_color, true, "spawn_enemy")
+	_spawn_enemy_visual(enemy_id, spawn_position, current_hp, max_hp, enemy_type, display_name, enemy_level, visual_color, true, "spawn_enemy")
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -2179,20 +2181,22 @@ func spawn_enemies(enemy_snapshots: Array) -> void:
 		var current_hp: int = int(snapshot_data.get("current_hp", 30))
 		var max_hp: int = int(snapshot_data.get("max_hp", 30))
 		var display_name: String = str(snapshot_data.get("display_name", "Enemy"))
+		var enemy_level: int = int(snapshot_data.get("level", 0))
 		var visual_color: Color = snapshot_data.get("visual_color", Color(1.0, 0.18, 0.08, 1.0)) as Color
 		if enemy_id <= 0:
 			continue
 
-		_spawn_enemy_visual(enemy_id, spawn_position, current_hp, max_hp, enemy_type, display_name, visual_color, false, "spawn_enemies")
+		_spawn_enemy_visual(enemy_id, spawn_position, current_hp, max_hp, enemy_type, display_name, enemy_level, visual_color, false, "spawn_enemies")
 		received_count += 1
 	if debug_enemy_join_sync_logs:
 		print("Received targeted enemy sync: enemies=%s broadcast=false." % received_count)
 	initial_enemy_batch_received.emit(received_count)
 
 
-func _spawn_enemy_visual(enemy_id: int, spawn_position: Vector3, current_hp: int, max_hp: int, enemy_type: String, display_name: String, visual_color: Color, print_spawn: bool, source: String) -> void:
+func _spawn_enemy_visual(enemy_id: int, spawn_position: Vector3, current_hp: int, max_hp: int, enemy_type: String, display_name: String, enemy_level: int, visual_color: Color, print_spawn: bool, source: String) -> void:
 	_enemy_type_by_id[enemy_id] = _resolved_enemy_type(enemy_type)
 	_enemy_display_name_by_id[enemy_id] = display_name if not display_name.is_empty() else "Enemy"
+	_enemy_level_by_id[enemy_id] = max(enemy_level, 0)
 	if _spawned_enemy_nodes.has(enemy_id):
 		var existing_enemy: Node3D = _spawned_enemy_nodes[enemy_id] as Node3D
 		_log_client_enemy_snap(enemy_id, existing_enemy.position, spawn_position, source)
@@ -2335,6 +2339,7 @@ func despawn_enemy(enemy_id: int) -> void:
 	_target_positions.erase(enemy_id)
 	_enemy_type_by_id.erase(enemy_id)
 	_enemy_display_name_by_id.erase(enemy_id)
+	_enemy_level_by_id.erase(enemy_id)
 	if debug_enemy_lifecycle_logs:
 		print("Enemy %s defeated and removed." % enemy_id)
 
@@ -2343,7 +2348,13 @@ func _set_enemy_label(enemy: Node, enemy_id: int, current_hp: int, max_hp: int) 
 	var enemy_label: Label3D = enemy.get_node_or_null("EnemyLabel") as Label3D
 	if enemy_label != null:
 		var display_name: String = str(_enemy_display_name_by_id.get(enemy_id, "Enemy"))
-		enemy_label.text = "%s %s\nHP %s/%s" % [display_name, enemy_id, current_hp, max_hp]
+		var enemy_level: int = int(_enemy_level_by_id.get(enemy_id, 0))
+		var name_text: String = display_name
+		if enemy_level > 0:
+			name_text = "Lv. %s %s" % [enemy_level, display_name]
+		if debug_enemy_lifecycle_logs:
+			name_text = "%s [id=%s]" % [name_text, enemy_id]
+		enemy_label.text = "%s\nHP %s/%s" % [name_text, current_hp, max_hp]
 
 
 func _apply_enemy_visual_color(enemy: Node, visual_color: Color) -> void:
